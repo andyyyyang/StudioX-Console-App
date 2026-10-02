@@ -11,12 +11,14 @@ struct XenaVoiceView: View {
     var body: some View {
         let c = model.conversation
         let regular = sizeClass == .regular
-        let orb: CGFloat = regular ? 240 : 190
+        // 她丟出東西（問題、卡片、確認）時水珠縮小，讓位給畫面上的東西
+        let busy = !c.turnItems.isEmpty
+        let orb: CGFloat = busy ? (regular ? 150 : 104) : (regular ? 240 : 190)
         let light = orb * 2.4
         VStack(spacing: 0) {
             header
 
-            Spacer(minLength: 12)
+            Spacer(minLength: busy ? 4 : 12)
 
             Button { Task { await c.tap() } } label: {
                 XenaOrb(mood: c.mood, size: orb, pulse: model.xena.pulse, voice: c.activeVoice, light: light)
@@ -36,26 +38,24 @@ struct XenaVoiceView: View {
                 .padding(.top, 4)
                 .padding(.horizontal, 32)
 
-            Spacer(minLength: 12)
+            Spacer(minLength: busy ? 8 : 12)
 
-            subtitles
-                .frame(maxWidth: 560)
-                .padding(.horizontal, 24)
+            conversation
+                .frame(maxWidth: 600)
+                .padding(.horizontal, 20)
 
-            if let confirm = c.pendingConfirm {
-                confirmPrompt(confirm)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 14)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            if XenaMouth.usingCompactVoice && AppSettings.shared.speakReplies {
+                voiceTip
+                    .padding(.top, 8)
             }
 
             mainButton
-                .padding(.top, 20)
+                .padding(.top, 14)
                 .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { Theme.page.ignoresSafeArea() }
-        .animation(Motion.ease, value: c.pendingConfirm)
+        .animation(Motion.ease, value: busy)
         .task { await c.start() }
         .onDisappear { c.end() }
         .onChange(of: model.xena.revision) { c.sessionChanged() }
@@ -109,10 +109,10 @@ struct XenaVoiceView: View {
         .padding(.top, 8)
     }
 
-    @ViewBuilder
-    private var subtitles: some View {
+    /// 字幕（你說的、她說的）和她丟出來的東西（問題＋選項、資料卡片、確認卡片：和打字的對話同一個樣子，可以直接按）
+    private var conversation: some View {
         let c = model.conversation
-        ScrollView {
+        return ScrollView {
             VStack(spacing: 14) {
                 if !c.heard.isEmpty {
                     Text("「\(c.heard)」")
@@ -123,48 +123,38 @@ struct XenaVoiceView: View {
                 }
                 if !c.reply.isEmpty {
                     Text(markdown(c.reply))
-                        .textRole(.lead)
+                        .textRole(c.turnItems.isEmpty ? .lead : .body)
                         .foregroundStyle(Theme.ink)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(c.turnItems.isEmpty ? .center : .leading)
+                        .frame(maxWidth: .infinity, alignment: c.turnItems.isEmpty ? .center : .leading)
+                }
+                ForEach(c.turnItems) { item in
+                    ChatItemView(item: item)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
+            .padding(.bottom, 8)
             .animation(.smooth, value: c.heard)
             .animation(.smooth, value: c.reply)
+            .animation(.smooth, value: c.turnItems.map(\.id))
         }
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.hidden)
-        .frame(maxHeight: sizeClass == .regular ? 260 : 200)
+        .frame(maxHeight: c.turnItems.isEmpty ? (sizeClass == .regular ? 260 : 200) : .infinity)
     }
 
-    private func confirmPrompt(_ title: String) -> some View {
+    /// 用的是精簡版的聲音：提醒可以免費換成自然一點的
+    private var voiceTip: some View {
         Button {
             model.showVoice = false
             Task {
                 try? await Task.sleep(for: .milliseconds(400))
-                model.showXena = true
+                model.goToAccount()
             }
         } label: {
-            HStack(spacing: 10) {
-                HeroIcon("hand-raised", size: 18)
-                    .foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("要你確認")
-                        .font(.brand(12, .medium))
-                        .foregroundStyle(Theme.muted)
-                    Text(title)
-                        .font(.brand(15, .semibold))
-                        .foregroundStyle(Theme.ink)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
-                Text("去確認 →")
-                    .font(.brand(14, .semibold))
-                    .foregroundStyle(Theme.accent)
-            }
-            .padding(14)
-            .background(Theme.surface, in: .rect(cornerRadius: 16, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line) }
+            Text("聲音太機械？到設定換免費的「加強」聲音 →")
+                .font(.brand(13, .medium))
+                .foregroundStyle(Theme.accent)
         }
         .buttonStyle(.press)
     }
@@ -198,10 +188,13 @@ struct XenaVoiceView: View {
         let c = model.conversation
         switch c.state {
         case .off, .preparing: return "準備中…"
-        case .listening: return c.heard.isEmpty ? "我在聽，請說" : "說完停一下就好"
+        case .listening:
+            if c.pendingCard != nil && c.heard.isEmpty { return "說「確認」或「取消」" }
+            if c.pendingAsk != nil && c.heard.isEmpty { return "直接說你的答案，或按選項" }
+            return c.heard.isEmpty ? "我在聽，請說" : "說完停一下就好"
         case .thinking: return "想一下…"
         case .speaking: return "點一下水珠可以打斷"
-        case .paused: return c.pendingConfirm != nil ? "這件事要你在畫面上確認" : "點一下水珠，換你說"
+        case .paused: return c.pendingCard != nil ? "這件事要你在畫面上確認" : "點一下水珠，換你說"
         case .failed(let message): return message
         }
     }

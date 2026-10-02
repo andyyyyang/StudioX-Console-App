@@ -122,6 +122,9 @@ final class AppModel {
         }
         push.api = api
         conversation.attach(self)
+        conversation.mouth.fetchCloud = { [api] text in
+            try? await api.speech(text, voice: AppSettings.shared.cloudVoice.rawValue)
+        }
         // 還沒登入：歡迎頁不用鎖
         if !api.isSignedIn { lock.reset() }
         #if DEBUG

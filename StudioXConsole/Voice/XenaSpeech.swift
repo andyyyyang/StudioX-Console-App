@@ -256,8 +256,9 @@ nonisolated final class LegacyEngine: @unchecked Sendable {
 
 // MARK: - 嘴巴
 
-/// 字 → iPhone 的中文聲音（AVSpeechSynthesizer）。一句一句排隊說（Xena 回一句就說一句，不用等整段），
-/// 每說到一個字讓水珠鼓一下（voice）。說完全部的句子叫 onIdle
+/// 字 → 聲音。一句一句排隊說（Xena 回一句就說一句，不用等整段），說完全部叫 onIdle。
+///   - iPhone 內建（預設、免費）：AVSpeechSynthesizer，挑最好的中文聲音（下載過「加強／高品質」就用那個），每說到一個字水珠鼓一下
+///   - 雲端自然語音（設定裡選）：經 console 轉成聲音（AVAudioPlayer 播），水珠跟著聲音的大小動；拿不到就改用 iPhone 的聲音
 @Observable
 final class XenaMouth {
     private(set) var speaking = false
@@ -265,24 +266,49 @@ final class XenaMouth {
     private(set) var current = ""
     @ObservationIgnored let voice = XenaVoice()
     @ObservationIgnored var onIdle: (() -> Void)?
+    /// 雲端的聲音（AppModel 接到 ConsoleAPI.speech）
+    @ObservationIgnored var fetchCloud: ((String) async -> Data?)?
 
     @ObservationIgnored private let synthesizer = AVSpeechSynthesizer()
     @ObservationIgnored private let listener = MouthListener()
-    @ObservationIgnored private var queued = 0
+    @ObservationIgnored private let clipListener = ClipListener()
+    @ObservationIgnored private var lines: [Line] = []
+    @ObservationIgnored private var playing: Line?
+    @ObservationIgnored private var player: AVAudioPlayer?
+    @ObservationIgnored private var meter: Task<Void, Never>?
     @ObservationIgnored private var turn: Int?
+
+    private final class Line {
+        let text: String
+        var audio: Task<Data?, Never>?
+        init(text: String) { self.text = text }
+    }
 
     init() {
         synthesizer.delegate = listener
         listener.mouth = self
+        clipListener.mouth = self
     }
 
-    /// iPhone 上可以用的中文（台灣）聲音，好的在前面（高品質 → 加強 → 一般）
+    // MARK: 聲音的清單
+
+    /// iPhone 上可以用的中文（國語）聲音：台灣的加強／高品質最先，再來是中國的高品質、加強，最後才是精簡版
     static var voices: [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language == "zh-TW" }
+            .filter { $0.language == "zh-TW" || $0.language == "zh-CN" }
             .sorted { a, b in
-                a.quality.rawValue != b.quality.rawValue ? a.quality.rawValue > b.quality.rawValue : a.name < b.name
+                let (ra, rb) = (rank(a), rank(b))
+                return ra != rb ? ra > rb : a.name < b.name
             }
+    }
+
+    private static func rank(_ voice: AVSpeechSynthesisVoice) -> Int {
+        let taiwan = voice.language == "zh-TW"
+        switch voice.quality {
+        case .premium: return taiwan ? 6 : 5
+        case .enhanced: return taiwan ? 5 : 3
+        default: return taiwan ? 2 : 1
+        }
     }
 
     /// 設定裡選的聲音；沒選（或選的被刪了）就用最好的那個
@@ -292,28 +318,102 @@ final class XenaMouth {
         return voices.first ?? AVSpeechSynthesisVoice(language: "zh-TW")
     }
 
+    /// 現在用的是不是精簡版（聽起來比較機械；設定頁、語音畫面提醒可以免費換）
+    static var usingCompactVoice: Bool {
+        AppSettings.shared.voiceSource == .iphone && (chosenVoice()?.quality ?? .default) == .default
+    }
+
+    static func label(_ voice: AVSpeechSynthesisVoice) -> String {
+        let region = voice.language == "zh-TW" ? "台灣" : "中國"
+        let quality = switch voice.quality {
+        case .premium: "高品質"
+        case .enhanced: "加強"
+        default: "精簡"
+        }
+        return "\(voice.name)（\(region)・\(quality)）"
+    }
+
+    // MARK: 說
+
     /// 排一句話（Markdown、網址、NT$ 先整理成說得出口的樣子）
     func say(_ text: String) {
         let spoken = Self.speakable(text)
         guard !spoken.isEmpty else { return }
-        let utterance = AVSpeechUtterance(string: spoken)
-        utterance.voice = Self.chosenVoice()
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Float(AppSettings.shared.pace.speechRate)
-        utterance.pitchMultiplier = 1.04
-        utterance.postUtteranceDelay = 0.06
-        queued += 1
+        let line = Line(text: spoken)
+        if AppSettings.shared.voiceSource == .cloud, let fetch = fetchCloud {
+            // 先開始轉（前一句還在說的時候這一句就準備好）
+            line.audio = Task { await fetch(spoken) }
+        }
+        lines.append(line)
         if !speaking {
             speaking = true
             turn = voice.begin()
         }
-        synthesizer.speak(utterance)
+        if playing == nil { Task { await next() } }
     }
 
     /// 馬上停（你插話、關掉語音）
     func stop() {
-        queued = 0
+        lines.forEach { $0.audio?.cancel() }
+        lines = []
+        playing?.audio?.cancel()
+        playing = nil
+        meter?.cancel()
+        player?.stop()
+        player = nil
         synthesizer.stopSpeaking(at: .immediate)
         finish()
+    }
+
+    private func next() async {
+        guard playing == nil else { return }
+        guard !lines.isEmpty else {
+            finish()
+            return
+        }
+        let line = lines.removeFirst()
+        playing = line
+        current = line.text
+        if let task = line.audio {
+            let data = await task.value
+            guard playing === line else { return }
+            if let data, let clip = try? AVAudioPlayer(data: data) {
+                play(clip)
+                return
+            }
+        }
+        guard playing === line else { return }
+        speakOnPhone(line.text)
+    }
+
+    private func speakOnPhone(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = Self.chosenVoice()
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Float(AppSettings.shared.pace.speechRate)
+        utterance.pitchMultiplier = 1.04
+        utterance.postUtteranceDelay = 0.06
+        synthesizer.speak(utterance)
+    }
+
+    private func play(_ clip: AVAudioPlayer) {
+        clip.delegate = clipListener
+        clip.enableRate = true
+        clip.rate = Float(AppSettings.shared.pace.speechRate)
+        clip.isMeteringEnabled = true
+        clip.prepareToPlay()
+        player = clip
+        clip.play()
+        // 水珠跟著聲音的大小
+        meter?.cancel()
+        meter = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, let player = self.player, player.isPlaying else { return }
+                player.updateMeters()
+                let db = Double(player.averagePower(forChannel: 0))
+                self.voice.hear(max(0, min(1, (db + 42) / 36)))
+                try? await Task.sleep(for: .milliseconds(33))
+            }
+        }
     }
 
     fileprivate func started(_ text: String) {
@@ -324,9 +424,13 @@ final class XenaMouth {
         voice.say(character)
     }
 
-    fileprivate func finished() {
-        queued = max(0, queued - 1)
-        if queued == 0 { finish() }
+    /// 一句說完（iPhone 的聲音或雲端的聲音）
+    fileprivate func lineFinished() {
+        guard playing != nil else { return }
+        meter?.cancel()
+        player = nil
+        playing = nil
+        Task { await next() }
     }
 
     private func finish() {
@@ -371,6 +475,21 @@ nonisolated private final class MouthListener: NSObject, AVSpeechSynthesizerDele
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         let mouth = mouth
-        Task { @MainActor in mouth?.finished() }
+        Task { @MainActor in mouth?.lineFinished() }
+    }
+}
+
+/// 雲端聲音（AVAudioPlayer）播完
+nonisolated private final class ClipListener: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+    weak var mouth: XenaMouth?
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        let mouth = mouth
+        Task { @MainActor in mouth?.lineFinished() }
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: (any Error)?) {
+        let mouth = mouth
+        Task { @MainActor in mouth?.lineFinished() }
     }
 }

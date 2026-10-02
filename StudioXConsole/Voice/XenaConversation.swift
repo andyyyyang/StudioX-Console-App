@@ -6,7 +6,9 @@ import SwiftUI
 ///   「打開訂單」這類 App 裡的指令：手機上的 Apple Intelligence 聽懂就直接切過去（沒有它就看關鍵字）；
 ///   其他的交給 Xena（和打字同一個 Xena、同一份對話紀錄）→ 她回一句就用 iPhone 的聲音說一句（不等整段），
 ///   水珠跟著她說的每個字 → 說完換你說。
-/// 點一下水珠：她在說就停下來換你說；你在說就當作說完了。要動手改東西的事（確認卡片）不用說的確認，停下來讓你按。
+/// 點一下水珠：她在說就停下來換你說；你在說就當作說完了。
+/// 她丟出來的東西（問你的問題＋選項、資料卡片、要你確認的事）照樣出現在畫面上：可以按，也可以用說的回答
+/// （一般的確認說「確認／取消」就好；退款、刪除這類危險的一定要在畫面上按，會再驗證 Face ID）。
 @Observable
 final class XenaConversation {
     enum State: Equatable {
@@ -25,8 +27,12 @@ final class XenaConversation {
     private(set) var heard = ""
     /// Xena 這一次的回答（字幕）
     private(set) var reply = ""
-    /// 要你確認的事（確認卡片的標題）
-    private(set) var pendingConfirm: String?
+    /// 這一輪她丟出來、要放在畫面上的東西（問題＋選項、資料卡片、確認卡片）
+    private(set) var turnItems: [ChatItem] = []
+    /// 還沒回答的問題
+    private(set) var pendingAsk: AskItem?
+    /// 還沒決定的確認卡片
+    private(set) var pendingCard: ConfirmCard?
     /// 這次聽你說話用的是 iOS 26 的 SpeechAnalyzer（不然是舊的語音辨識）
     private(set) var usesAnalyzer = false
     /// 麥克風被拒絕：畫面上給「打開設定」
@@ -44,6 +50,14 @@ final class XenaConversation {
     /// 這一次的回答念到第幾個字（Xena 回一句念一句）
     @ObservationIgnored private var spokenUpTo = 0
     @ObservationIgnored private var awaitingReply = false
+    /// 最後一則「你說的」（按了選項也算）：變了就是新的一輪
+    @ObservationIgnored private var lastUserID: String?
+    /// 已經念過的問題、確認卡片（不重念）
+    @ObservationIgnored private var announced: Set<String> = []
+    /// 念過、等你決定的那張確認卡片：決定了要說結果
+    @ObservationIgnored private var watchedCard: String?
+    /// 用說的確認、正在送出的那張（沒送成功要說一聲，不要卡在「想一下」）
+    @ObservationIgnored private var votedCard: String?
     /// 指令：說完「好，打開訂單」就關掉語音、切過去
     @ObservationIgnored private var afterSpeaking: (() -> Void)?
 
@@ -84,6 +98,8 @@ final class XenaConversation {
         #endif
         state = .preparing
         needsSettings = false
+        // 之前的對話不算這一輪
+        lastUserID = model?.xena.items.last(where: { if case .user = $0 { true } else { false } })?.id
         XenaLocal.shared.prewarm()
         guard await XenaEar.requestMicrophone() else {
             needsSettings = true
@@ -113,7 +129,10 @@ final class XenaConversation {
         micTurn = nil
         heard = ""
         reply = ""
-        pendingConfirm = nil
+        turnItems = []
+        pendingAsk = nil
+        pendingCard = nil
+        watchedCard = nil
         let ear = ear
         Task {
             await ear.stop()
@@ -153,7 +172,6 @@ final class XenaConversation {
         state = .preparing
         mouth.stop()
         heard = ""
-        pendingConfirm = nil
         do {
             try await ear.start(locale: Locale(identifier: "zh-TW")) { [weak self] text, _ in
                 Task { @MainActor in self?.hear(text) }
@@ -218,49 +236,146 @@ final class XenaConversation {
             state = .paused
             return
         }
+        guard let model else { return }
+        // 等你決定的確認卡片：「確認」「取消」（危險的不行，要在畫面上按）
+        if let card = pendingCard, !card.danger, card.typed == nil, let approve = Self.decision(in: text) {
+            watchedCard = card.id
+            votedCard = card.id
+            model.xena.decide(card.id, approve: approve)
+            return
+        }
+        // 她問你的問題：這句就是答案
+        if let ask = pendingAsk {
+            send(text, answering: ask.id)
+            return
+        }
         if let command = await command(for: text) {
             go(command)
             return
         }
+        send(text, answering: nil)
+    }
+
+    private func send(_ text: String, answering: String?) {
         guard let model else { return }
+        if model.xena.isBusy { model.xena.stop() }
+        model.xena.send(text, answering: answering)
+        beginTurn()
+    }
+
+    /// 新的一輪（你說的、或你在畫面上按了選項）
+    private func beginTurn() {
+        guard let session = model?.xena else { return }
+        lastUserID = session.items.last(where: { if case .user = $0 { true } else { false } })?.id
         reply = ""
         spokenUpTo = 0
         awaitingReply = true
-        if model.xena.isBusy { model.xena.stop() }
-        model.xena.send(text)
+        turnItems = []
+        pendingAsk = nil
+        state = .thinking
+    }
+
+    /// 「確認」「好」→ true；「取消」「不要」→ false；聽不出來 nil（當成一般的話）
+    static func decision(in text: String) -> Bool? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard t.count <= 8 else { return nil }
+        let no = ["取消", "不要", "先不要", "不用", "算了", "不行", "等一下"]
+        if no.contains(where: t.contains) { return false }
+        let yes = ["確認", "確定", "好", "可以", "執行", "對", "沒問題", "同意", "OK", "ok", "要"]
+        if yes.contains(where: t.contains) { return true }
+        return nil
     }
 
     // MARK: Xena 的回答
 
-    /// 對話有變（AppModel.xena.revision）：把新的句子念出來
+    /// 對話有變（AppModel.xena.revision）：念新的句子、把她丟出來的東西放到畫面上、確認卡片決定了說結果
     func sessionChanged() {
-        guard awaitingReply, let session = model?.xena else { return }
+        guard state != .off, let session = model?.xena else { return }
         let items = session.items
-        guard let start = items.lastIndex(where: { if case .user = $0 { true } else { false } }) else { return }
+        let userIndex = items.lastIndex(where: { if case .user = $0 { true } else { false } })
+        // 你在畫面上按了選項（不是用說的）：也是新的一輪
+        if let userIndex, items[userIndex].id != lastUserID {
+            if state == .listening { Task { await stopListening() } }
+            mouth.stop()
+            beginTurn()
+        }
+        let start = userIndex.map { items.index(after: $0) } ?? items.startIndex
         var text = ""
-        var confirm: String?
-        for item in items[items.index(after: start)...] {
+        var shown: [ChatItem] = []
+        var ask: AskItem?
+        var card: ConfirmCard?
+        for item in items[start...] {
             switch item {
             case .assistant(_, let t), .notice(_, let t):
                 text += text.isEmpty ? t : "\n" + t
-            case .confirm(let card) where card.status == .pending:
-                confirm = card.title
+            case .ask(let a):
+                shown.append(item)
+                if a.answer == nil { ask = a }
+            case .confirm(let c):
+                shown.append(item)
+                if c.status == .pending, card == nil { card = c }
+            case .cards:
+                shown.append(item)
             default:
                 break
             }
         }
         reply = text
-        pendingConfirm = confirm
+        turnItems = shown
+        pendingAsk = ask
+        pendingCard = card
+
+        // 用說的確認送出去了、卡片還是沒決定（網路、伺服器的問題）：說一聲，換你再說一次
+        if let id = votedCard, !session.deciding.contains(id), card?.id == id {
+            votedCard = nil
+            say("沒有完成，再說一次確認，或按畫面上的按鈕。")
+            if !mouth.speaking { replyDone() }
+            return
+        }
+        if let id = votedCard, card?.id != id { votedCard = nil }
+
+        // 等你決定的那張卡片有結果了：說一聲
+        if let id = watchedCard, let decided = shown.compactMap({ item -> ConfirmCard? in
+            if case .confirm(let c) = item, c.id == id { return c }
+            return nil
+        }).first, decided.status != .pending {
+            watchedCard = nil
+            if state == .listening { Task { await stopListening() } }
+            switch decided.status {
+            case .done: say(decided.result.map { "好了。\($0)" } ?? "好了，處理完了。")
+            case .cancelled: say("好，先不做。")
+            case .failed: say("沒有成功。\(decided.result ?? "")")
+            case .expired: say("這個確認已經過期了，要的話再跟我說一次。")
+            case .pending: break
+            }
+            if !mouth.speaking { replyDone() }
+            return
+        }
+
+        guard awaitingReply else { return }
         let finished = !session.isBusy
         if text.count > spokenUpTo {
             let (sentences, used) = Self.sentences(in: String(text.dropFirst(spokenUpTo)), final: finished)
             spokenUpTo += used
             for sentence in sentences { say(sentence) }
         }
-        if finished {
-            awaitingReply = false
-            if !mouth.speaking { replyDone() }
+        guard finished else { return }
+        awaitingReply = false
+        // 她問你的問題、要你確認的事：念出來（畫面上也有）
+        if let ask, !announced.contains(ask.id) {
+            announced.insert(ask.id)
+            if !text.contains(ask.question) { say(ask.question) }
         }
+        if let card, !announced.contains(card.id) {
+            announced.insert(card.id)
+            watchedCard = card.id
+            if card.danger || card.typed != nil {
+                say("「\(card.title)」這件事比較重要，請在畫面上確認。")
+            } else {
+                say("要我「\(card.title)」嗎？說確認或取消，也可以按畫面上的按鈕。")
+            }
+        }
+        if !mouth.speaking { replyDone() }
     }
 
     private func say(_ sentence: String) {
@@ -285,9 +400,9 @@ final class XenaConversation {
         replyDone()
     }
 
-    /// 這一輪結束：有事要你確認就停下來（畫面上按），不然換你說
+    /// 這一輪結束：危險的確認停下來（一定要在畫面上按），其他都換你說（回答問題、說確認也是用聽的）
     private func replyDone() {
-        if pendingConfirm != nil {
+        if let card = pendingCard, card.danger || card.typed != nil {
             state = .paused
             return
         }
@@ -407,6 +522,7 @@ final class XenaConversation {
 
     private func refuse(_ line: String) {
         reply = line
+        state = .speaking
         if AppSettings.shared.speakReplies {
             say(line)
         } else {

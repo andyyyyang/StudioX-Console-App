@@ -96,6 +96,31 @@ final class AppSettings {
         }
     }
 
+    /// Xena 開口用的聲音
+    enum VoiceSource: String, CaseIterable, Identifiable {
+        case iphone, cloud
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .iphone: "iPhone 內建（免費）"
+            case .cloud: "雲端自然語音"
+            }
+        }
+    }
+
+    /// 雲端自然語音的三種（console 的 /api/app/tts）
+    enum CloudVoice: String, CaseIterable, Identifiable {
+        case warm, bright, calm
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .warm: "溫暖"
+            case .bright: "明亮"
+            case .calm: "沉穩"
+            }
+        }
+    }
+
     /// 打開 App 先看哪一頁
     enum StartTab: String, CaseIterable, Identifiable {
         case today, sites, orders, inbox
@@ -139,8 +164,11 @@ final class AppSettings {
     var greetedDay: String { didSet { save(greetedDay, "xena.greetedDay") } }
     /// 用說的時，Xena 用 iPhone 的聲音開口回答
     var speakReplies: Bool { didSet { save(speakReplies, "voice.speakReplies") } }
-    /// Xena 的聲音（AVSpeechSynthesisVoice 的 identifier；空的＝自動挑最好的中文（台灣）聲音）
+    /// Xena 的聲音（AVSpeechSynthesisVoice 的 identifier；空的＝自動挑最好的中文聲音）
     var voiceID: String { didSet { save(voiceID, "voice.id") } }
+    /// iPhone 內建（免費，預設）或雲端自然語音
+    var voiceSource: VoiceSource { didSet { save(voiceSource.rawValue, "voice.source") } }
+    var cloudVoice: CloudVoice { didSet { save(cloudVoice.rawValue, "voice.cloud") } }
     /// Apple Intelligence（手機上的模型）寫首頁的開場白
     var aiGreeting: Bool { didSet { save(aiGreeting, "ai.greeting") } }
     /// Apple Intelligence 聽懂「打開訂單」這類指令，馬上在手機上做，不用等雲端的 Xena
@@ -164,6 +192,8 @@ final class AppSettings {
         greetedDay = defaults.string(forKey: "settings.xena.greetedDay") ?? ""
         speakReplies = defaults.object(forKey: "settings.voice.speakReplies") as? Bool ?? true
         voiceID = defaults.string(forKey: "settings.voice.id") ?? ""
+        voiceSource = value("voice.source", VoiceSource.iphone)
+        cloudVoice = value("voice.cloud", CloudVoice.warm)
         aiGreeting = defaults.object(forKey: "settings.ai.greeting") as? Bool ?? true
         aiCommands = defaults.object(forKey: "settings.ai.commands") as? Bool ?? true
     }
@@ -211,6 +241,8 @@ final class AppSettings {
         hiddenSections = []
         speakReplies = true
         voiceID = ""
+        voiceSource = .iphone
+        cloudVoice = .warm
         aiGreeting = true
         aiCommands = true
     }
@@ -218,7 +250,7 @@ final class AppSettings {
     var isDefault: Bool {
         appearance == .system && textSize == .standard && greeting == .launch && pace == .normal
             && orbMotion && haptics && startTab == .today && hiddenSections.isEmpty
-            && speakReplies && voiceID.isEmpty && aiGreeting && aiCommands
+            && speakReplies && voiceID.isEmpty && voiceSource == .iphone && cloudVoice == .warm && aiGreeting && aiCommands
     }
 }
 

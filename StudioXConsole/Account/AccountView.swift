@@ -66,33 +66,43 @@ struct AccountView: View {
                             }
                         }
 
-                        // 聲音：用說的時 Xena 用哪個聲音回答
+                        // 聲音：用說的時 Xena 用哪個聲音回答（預設 iPhone 內建、免費）
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Voice*", aside: "用說的時，Xena 用 iPhone 上的中文（台灣）聲音回答；聽你說話也在 iPhone 上處理。", role: .h3)
+                            SectionHead("*Voice*", aside: "用說的時 Xena 開口回答的聲音；聽你說話在 iPhone 上處理。", role: .h3)
                             RuledList {
                                 ToggleRow(label: "用說的時，Xena 開口回答", help: "關掉就只顯示字幕。", isOn: $settings.speakReplies)
                                     .padding(.vertical, 10)
-                                HStack(spacing: 12) {
-                                    Text("聲音")
-                                        .textRole(.body)
-                                        .foregroundStyle(Theme.ink)
-                                    Spacer()
-                                    Picker("聲音", selection: $settings.voiceID) {
-                                        Text("自動（最好的）").tag("")
-                                        ForEach(XenaMouth.voices, id: \.identifier) { voice in
-                                            Text(voiceLabel(voice)).tag(voice.identifier)
+                                ChoiceRow(label: "聲音從哪裡來", help: settings.voiceSource == .iphone
+                                          ? "iPhone 內建的聲音，不用錢、沒網路也能用。"
+                                          : "回答的文字經 StudioX Console 送到 OpenAI（或 Google）轉成聲音，比較像真人；會用到 StudioX 的 AI 額度（大約每說一分鐘不到新台幣 1 元），不會保存。",
+                                          options: AppSettings.VoiceSource.allCases, selection: $settings.voiceSource) { $0.label }
+                                if settings.voiceSource == .iphone {
+                                    HStack(spacing: 12) {
+                                        Text("哪個聲音")
+                                            .textRole(.body)
+                                            .foregroundStyle(Theme.ink)
+                                        Spacer()
+                                        Picker("哪個聲音", selection: $settings.voiceID) {
+                                            Text("自動（最好的）").tag("")
+                                            ForEach(XenaMouth.voices, id: \.identifier) { voice in
+                                                Text(XenaMouth.label(voice)).tag(voice.identifier)
+                                            }
                                         }
+                                        .labelsHidden()
+                                        .tint(Theme.ink2)
                                     }
-                                    .labelsHidden()
-                                    .tint(Theme.ink2)
-                                }
-                                .padding(.vertical, 12)
-                                row("試聽") { preview() }
-                                Text("想要更自然的聲音：到 iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文（台灣）」下載「美佳（高品質）」，回來這裡選它。")
-                                    .textRole(.xs)
-                                    .foregroundStyle(Theme.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
                                     .padding(.vertical, 12)
+                                    Text(XenaMouth.usingCompactVoice
+                                         ? "現在用的是「精簡」版，聽起來比較機械。免費換自然一點的：iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文」，下載「美佳（加強）」或標「高品質」的聲音，回來這裡選它（自動也會挑到）。"
+                                         : "想換別的聲音：iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文」可以免費下載更多。")
+                                        .textRole(.xs)
+                                        .foregroundStyle(XenaMouth.usingCompactVoice ? Theme.ink2 : Theme.muted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.vertical, 12)
+                                } else {
+                                    ChoiceRow(label: "哪個聲音", options: AppSettings.CloudVoice.allCases, selection: $settings.cloudVoice) { $0.label }
+                                }
+                                row("試聽") { preview() }
                             }
                         }
 
@@ -212,14 +222,6 @@ struct AccountView: View {
             } message: {
                 Text("這台裝置的登入會撤銷、不再收到通知，其他裝置與 AI 連接器不受影響。")
             }
-        }
-    }
-
-    private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
-        switch voice.quality {
-        case .premium: "\(voice.name)（高品質）"
-        case .enhanced: "\(voice.name)（加強）"
-        default: voice.name
         }
     }
 

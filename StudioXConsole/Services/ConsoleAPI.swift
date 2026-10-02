@@ -123,6 +123,32 @@ final class ConsoleAPI {
         try JSONDecoder().decode(JSONValue.self, from: data)
     }
 
+    // MARK: Xena 的雲端聲音
+
+    /// 一句話 → 聲音（console 用金鑰庫的 OpenAI／Google 轉，mp3 或 wav）
+    func speech(_ text: String, voice: String) async throws -> Data {
+        let body = try JSONEncoder().encode(["text": text, "voice": voice])
+        let (data, http) = try await send {
+            var r = URLRequest(url: ConsoleConfig.baseURL.appending(path: "api/app/tts"))
+            r.httpMethod = "POST"
+            r.timeoutInterval = 25
+            r.setValue("application/json", forHTTPHeaderField: "content-type")
+            r.httpBody = body
+            return r
+        }
+        guard http.statusCode == 200, http.value(forHTTPHeaderField: "content-type")?.hasPrefix("audio") == true else {
+            throw APIError.http(http.statusCode)
+        }
+        return data
+    }
+
+    /// 雲端聲音能不能用（設定頁）
+    func speechAvailable() async -> Bool {
+        guard let (data, http) = try? await send({ URLRequest(url: ConsoleConfig.baseURL.appending(path: "api/app/tts")) }),
+              http.statusCode == 200 else { return false }
+        return (try? json(data))?["available"]?.bool == true
+    }
+
     // MARK: 我
 
     func me() async throws -> Me {
