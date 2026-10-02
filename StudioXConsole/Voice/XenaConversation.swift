@@ -24,10 +24,17 @@ final class XenaConversation {
     }
 
     private(set) var state: State = .off
-    /// 你說的話（字幕）
+    /// 你正在說的話（字幕；說完就變成這一輪的「你說的」）
     private(set) var heard = ""
-    /// Xena 這一次的回答（字幕）
+    /// 這一輪你說的（說完的那一句，或在畫面上按的選項）
+    private(set) var said = ""
+    /// Xena 這一輪的回答（字幕）
     private(set) var reply = ""
+    /// 之前的每一輪（往上滑可以找回來）
+    private(set) var history: [VoiceTurn] = []
+    /// 這一輪、下一輪（你正在說的那一塊）的 id：說完時那一塊直接接成這一輪，畫面上不會跳
+    private(set) var liveID = UUID().uuidString
+    private(set) var nextID = UUID().uuidString
     /// 這一輪她丟出來、要放在畫面上的東西（問題＋選項、資料卡片、確認卡片）
     private(set) var turnItems: [ChatItem] = []
     /// 還沒回答的問題
@@ -36,6 +43,11 @@ final class XenaConversation {
     private(set) var pendingCard: ConfirmCard?
     /// 回答太長：整段放在卡片上給你看（她只說開頭和重點；說「念給我聽」才全部念）
     private(set) var readingCard: ReadingCard?
+    /// 最近一張長回答卡片（移到上面去了也一樣，說「念給我聽」念這張）
+    @ObservationIgnored private var lastCard: ReadingCard?
+    /// 已經移到上面（之前的輪）的東西：這一輪不再重複顯示
+    @ObservationIgnored private var archivedIDs: Set<String> = []
+    @ObservationIgnored private var liveItemIDs: [String] = []
     /// 這次聽你說話用的是 iOS 26 的 SpeechAnalyzer（不然是舊的語音辨識）
     private(set) var usesAnalyzer = false
     /// 麥克風被拒絕：畫面上給「打開設定」
@@ -148,12 +160,17 @@ final class XenaConversation {
         if let micTurn { micVoice.end(micTurn) }
         micTurn = nil
         heard = ""
+        said = ""
         reply = ""
         turnItems = []
+        history = []
+        archivedIDs = []
+        liveItemIDs = []
         pendingAsk = nil
         pendingCard = nil
         watchedCard = nil
         readingCard = nil
+        lastCard = nil
         wrappingUp = false
         firstSaid = ""
         held = []
@@ -269,10 +286,13 @@ final class XenaConversation {
         }
         let previous = spokenLines
         spokenLines = []
+        let known = context(previous: previous)
+        // 你說的那一塊接成新的一輪，上一輪往上移
+        startTurn(said: text)
         // 要交給 Xena 的：她針對內容先回的那一句一好就說（「好，我查一下昨天的訂單。」），不等後面
         var reacted = false
         routing = true
-        let intent = await XenaLocal.shared.understand(text, context: context(previous: previous)) { [weak self] line in
+        let intent = await XenaLocal.shared.understand(text, context: known) { [weak self] line in
             guard let self, self.state == .thinking, Self.isAck(line, for: text) else { return }
             reacted = true
             self.say(line)
@@ -296,9 +316,41 @@ final class XenaConversation {
             c.question = ask.question
             c.options = ask.options
         }
-        c.hasReadingCard = readingCard != nil
-        c.lastReply = previous.isEmpty ? reply : previous.joined()
+        c.hasReadingCard = lastCard != nil
+        c.lastReply = previous.isEmpty ? (reply.isEmpty ? history.last?.reply ?? "" : reply) : previous.joined()
         return c
+    }
+
+    /// 這一輪的樣子（畫面用）
+    private var liveTurn: VoiceTurn {
+        VoiceTurn(id: liveID, said: said, reply: reply, card: readingCard, items: turnItems)
+    }
+
+    /// 畫面上的每一輪：之前的、這一輪、你正在說的
+    var turns: [VoiceTurn] {
+        var all = history
+        let live = liveTurn
+        if !live.isEmpty { all.append(live) }
+        if !heard.isEmpty { all.append(VoiceTurn(id: nextID, said: heard)) }
+        return all
+    }
+
+    /// 新的一輪：這一輪移到上面，你正在說的那一塊（同一個 id）接成這一輪
+    private func startTurn(said text: String) {
+        let live = liveTurn
+        if !live.isEmpty {
+            history.append(live)
+            if history.count > 40 { history.removeFirst(history.count - 40) }
+        }
+        archivedIDs.formUnion(liveItemIDs)
+        liveItemIDs = []
+        liveID = nextID
+        nextID = UUID().uuidString
+        said = text
+        heard = ""
+        reply = ""
+        readingCard = nil
+        turnItems = []
     }
 
     /// Apple Intelligence 聽懂了：手機上能做的馬上做，其他的交給 Xena
@@ -306,7 +358,7 @@ final class XenaConversation {
         switch intent.action {
         case .open:
             go(Command(place: intent.place, site: intent.site))
-        case .read where readingCard != nil:
+        case .read where lastCard != nil:
             readAloud()
         case .again where !previous.isEmpty:
             for line in previous { say(line) }
@@ -338,7 +390,7 @@ final class XenaConversation {
 
     /// 沒有 Apple Intelligence：看關鍵字
     private func fallback(_ text: String) {
-        if readingCard != nil, Self.wantsReading(text) {
+        if lastCard != nil, Self.wantsReading(text) {
             readAloud()
             return
         }
@@ -461,6 +513,7 @@ final class XenaConversation {
         toldTools = []
         wrappingUp = false
         readingCard = nil
+        lastCard = nil
         // 等太久（雲端在查比較多的資料）：像真人一樣說一聲，不要一直沒聲音
         waitTalk?.cancel()
         waitTalk = Task { [weak self] in
@@ -499,41 +552,53 @@ final class XenaConversation {
         if let userIndex, items[userIndex].id != lastUserID {
             if state == .listening { Task { await stopListening() } }
             mouth.stop()
+            if case .user(_, let t) = items[userIndex] { startTurn(said: t) }
             beginTurn()
         }
         let start = userIndex.map { items.index(after: $0) } ?? items.startIndex
+        // text：這一輪她說的整段（念的時候用）；shownText、shown：還沒移到上面去的（這一輪顯示的）
         var text = ""
+        var shownText = ""
         var shown: [ChatItem] = []
+        var ids: [String] = []
         var ask: AskItem?
         var card: ConfirmCard?
         var running: [ToolRecord] = []
         for item in items[start...] {
+            let fresh = !archivedIDs.contains(item.id)
             switch item {
             case .tool(let t):
                 if t.status == .running { running.append(t) }
             case .assistant(_, let t), .notice(_, let t):
                 text += text.isEmpty ? t : "\n" + t
+                if fresh {
+                    shownText += shownText.isEmpty ? t : "\n" + t
+                    ids.append(item.id)
+                }
             case .ask(let a):
-                shown.append(item)
+                if fresh { shown.append(item); ids.append(item.id) }
                 if a.answer == nil { ask = a }
             case .confirm(let c):
-                shown.append(item)
+                if fresh { shown.append(item); ids.append(item.id) }
                 if c.status == .pending, card == nil { card = c }
             case .cards:
-                shown.append(item)
+                if fresh { shown.append(item); ids.append(item.id) }
             default:
                 break
             }
         }
-        reply = text
+        // 手機上自己回的那一句（閒聊、切頁）不要被蓋掉
+        if !shownText.isEmpty || awaitingReply { reply = shownText }
         turnItems = shown
+        liveItemIDs = ids
         pendingAsk = ask
         pendingCard = card
 
         // 用說的確認送出去了、卡片還是沒決定（網路、伺服器的問題）：說一聲，換你再說一次
         if let id = votedCard, !session.deciding.contains(id), card?.id == id {
             votedCard = nil
-            say("沒有完成，再說一次確認，或按畫面上的按鈕。")
+            reply = "沒有完成，再說一次確認，或按畫面上的按鈕。"
+            say(reply)
             if !mouth.speaking { replyDone() }
             return
         }
@@ -546,12 +611,16 @@ final class XenaConversation {
         }).first, decided.status != .pending {
             watchedCard = nil
             if state == .listening { Task { await stopListening() } }
-            switch decided.status {
-            case .done: say(decided.result.map { "好了。\($0)" } ?? "好了，處理完了。")
-            case .cancelled: say("好，先不做。")
-            case .failed: say("沒有成功。\(decided.result ?? "")")
-            case .expired: say("這個確認已經過期了，要的話再跟我說一次。")
-            case .pending: break
+            let line: String? = switch decided.status {
+            case .done: decided.result.map { "好了。\($0)" } ?? "好了，處理完了。"
+            case .cancelled: "好，先不做。"
+            case .failed: "沒有成功。\(decided.result ?? "")"
+            case .expired: "這個確認已經過期了，要的話再跟我說一次。"
+            case .pending: nil
+            }
+            if let line {
+                if reply.isEmpty { reply = line }
+                say(line)
             }
             if !mouth.speaking { replyDone() }
             return
@@ -577,9 +646,10 @@ final class XenaConversation {
             return
         }
         // 太長（或是表格、一長串清單）：整段放卡片，Apple Intelligence 濃縮成用說的重點，再說「可以看卡片、要念就跟我說」
-        guard !wrappingUp, readingCard == nil else { return }
+        guard !wrappingUp, lastCard == nil else { return }
         wrappingUp = true
         readingCard = ReadingCard(text: text)
+        lastCard = readingCard
         let rest = held
         held = []
         let opening = firstSaid
@@ -591,6 +661,8 @@ final class XenaConversation {
             if let digest {
                 self.readingCard?.title = digest.title
                 self.readingCard?.points = digest.points
+                self.lastCard?.title = digest.title
+                self.lastCard?.points = digest.points
                 if !digest.spoken.isEmpty { self.say(digest.spoken) }
             } else {
                 // 沒有 Apple Intelligence：照順序念到上限
@@ -666,8 +738,9 @@ final class XenaConversation {
     }
 
     /// 把卡片上的整段念出來（說「念給我聽」或按卡片上的按鈕）
-    func readAloud() {
-        guard let text = readingCard?.text else { return }
+    func readAloud(_ card: ReadingCard? = nil) {
+        guard let text = (card ?? lastCard)?.text else { return }
+        heard = ""
         state = .preparing
         mouth.stop()
         if micTurn != nil { Task { await stopListening() } }
@@ -819,7 +892,8 @@ final class XenaConversation {
 
     #if DEBUG
     private func showDemo() {
-        heard = "這週黃毛丫頭整體怎麼樣？"
+        history = [VoiceTurn(id: "demo-0", said: "昨天黃毛丫頭賣得怎麼樣？", reply: "昨天有 12 筆訂單、收款 18,400 元，比前天多兩成。")]
+        said = "這週黃毛丫頭整體怎麼樣？"
         reply = "這週黃毛丫頭有 64 筆訂單、收款 102,300 元。"
         readingCard = ReadingCard(
             text: "這週黃毛丫頭有 64 筆訂單、收款 102,300 元，比上週多 18%。\n\n- 賣最好：手工蛋捲禮盒 41 盒、綜合堅果罐 27 罐\n- 訪客 3,820 人，從 Instagram 來的最多\n- 還有 5 筆等出貨，2 位客人在等回覆\n- 蛋捲禮盒庫存剩 38 盒，照這週的速度大約 6 天賣完",
@@ -837,4 +911,15 @@ struct ReadingCard: Equatable {
     var text: String
     var title = ""
     var points: [String] = []
+}
+
+/// 用說的一輪：你說的、她回的（字、長回答卡片、她丟出來的問題和卡片）
+struct VoiceTurn: Identifiable, Equatable {
+    let id: String
+    var said = ""
+    var reply = ""
+    var card: ReadingCard?
+    var items: [ChatItem] = []
+
+    var isEmpty: Bool { said.isEmpty && reply.isEmpty && card == nil && items.isEmpty }
 }

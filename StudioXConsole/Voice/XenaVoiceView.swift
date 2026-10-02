@@ -7,6 +7,9 @@ struct XenaVoiceView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.openURL) private var openURL
+    /// 對話的捲動位置：在最下面就跟著新的字往下；你往上翻在看之前的，就不拉你下來
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var pinned = true
 
     var body: some View {
         let c = model.conversation
@@ -109,42 +112,60 @@ struct XenaVoiceView: View {
         .padding(.top, 8)
     }
 
-    /// 字幕（你說的、她說的）和她丟出來的東西（問題＋選項、資料卡片、確認卡片：和打字的對話同一個樣子，可以直接按）
+    /// 一輪一輪的對話（你說的、她說的、她丟出來的問題和卡片，和打字的對話同一個樣子，可以直接按）。
+    /// 之前的每一輪都留著，往上滑找得回來；說完時你說的那一塊直接接成新的一輪，上一輪的字變淡往上移
     private var conversation: some View {
         let c = model.conversation
+        let turns = c.turns
         return ScrollView {
-            VStack(spacing: 14) {
-                if !c.heard.isEmpty {
-                    Text("「\(c.heard)」")
-                        .textRole(.body)
-                        .foregroundStyle(Theme.muted)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
-                if let card = c.readingCard {
-                    // 太長：整段放卡片（Apple Intelligence 寫的標題、重點），按一下或說「念給我聽」才全部念
-                    ReplyCard(card: card) { c.readAloud() }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else if !c.reply.isEmpty {
-                    Text(markdown(c.reply))
-                        .textRole(c.turnItems.isEmpty ? .lead : .body)
-                        .foregroundStyle(Theme.ink)
-                        .multilineTextAlignment(c.turnItems.isEmpty ? .center : .leading)
-                        .frame(maxWidth: .infinity, alignment: c.turnItems.isEmpty ? .center : .leading)
-                }
-                ForEach(c.turnItems) { item in
-                    ChatItemView(item: item)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+            VStack(spacing: 28) {
+                ForEach(turns) { turn in
+                    TurnView(turn: turn, live: turn.id == c.liveID || turn.id == c.nextID) { c.readAloud($0) }
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 18)),
+                            removal: .opacity
+                        ))
                 }
             }
+            .padding(.top, c.history.isEmpty ? 0 : 28)
             .padding(.bottom, 8)
+            .animation(.smooth(duration: 0.45), value: turns.map(\.id))
             .animation(.smooth, value: c.heard)
             .animation(.smooth, value: c.reply)
             .animation(.smooth, value: c.turnItems.map(\.id))
+            .animation(.smooth, value: c.readingCard)
         }
         .defaultScrollAnchor(.bottom)
+        .scrollPosition($position)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.visibleRect.maxY >= geometry.contentSize.height - 48
+        } action: { _, atBottom in
+            pinned = atBottom
+        }
+        .onChange(of: scrollKey) {
+            guard pinned else { return }
+            withAnimation(.smooth(duration: 0.45)) { position.scrollTo(edge: .bottom) }
+        }
         .scrollIndicators(.hidden)
+        // 上緣淡出：之前的對話在上面慢慢消失，不是一刀切
+        .mask {
+            if c.history.isEmpty {
+                Rectangle()
+            } else {
+                LinearGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.16),
+                    .init(color: .black, location: 1)
+                ], startPoint: .top, endPoint: .bottom)
+            }
+        }
         .frame(maxHeight: c.turnItems.isEmpty && c.readingCard == nil ? (sizeClass == .regular ? 260 : 200) : .infinity)
+    }
+
+    /// 內容有變（新的一輪、新的字、新的卡片）就捲到最下面（你在最下面的時候）
+    private var scrollKey: String {
+        let c = model.conversation
+        return "\(c.history.count)|\(c.said)|\(c.heard)|\(c.reply.count)|\(c.turnItems.map(\.id))|\(c.readingCard?.points.count ?? -1)"
     }
 
     /// 用的是精簡版的聲音：提醒可以免費換成自然一點的
@@ -209,6 +230,45 @@ struct XenaVoiceView: View {
         case .speaking, .thinking: "打斷，換我說"
         default: "開始說話"
         }
+    }
+}
+
+/// 一輪：你說的、她回的（字、長回答卡片、她丟出來的問題和卡片）。
+/// 之前的輪字變淡（顏色慢慢變），卡片照樣可以按，狀態跟著對話更新（確認了就顯示結果）
+private struct TurnView: View {
+    let turn: VoiceTurn
+    let live: Bool
+    let onRead: (ReadingCard) -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let plain = turn.items.isEmpty && turn.card == nil
+        VStack(spacing: 14) {
+            if !turn.said.isEmpty {
+                Text("「\(turn.said)」")
+                    .textRole(.body)
+                    .foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .opacity(live ? 1 : 0.7)
+            }
+            if let card = turn.card {
+                ReplyCard(card: card) { onRead(card) }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if !turn.reply.isEmpty {
+                Text(markdown(turn.reply))
+                    .textRole(plain ? .lead : .body)
+                    .foregroundStyle(live ? Theme.ink : Theme.muted)
+                    .multilineTextAlignment(plain ? .center : .leading)
+                    .frame(maxWidth: .infinity, alignment: plain ? .center : .leading)
+            }
+            ForEach(turn.items) { item in
+                // 之前的輪：用對話裡最新的樣子（確認卡片決定了、問題回答了）
+                ChatItemView(item: live ? item : (model.xena.items.first(where: { $0.id == item.id }) ?? item))
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.smooth(duration: 0.5), value: live)
     }
 }
 
