@@ -28,15 +28,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 選 Xcode 27
+      - name: 選 Xcode（有 27 用 27，沒有就用最新的）
         run: |
-          XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE" ]; then
-            echo "::error::這台 runner 沒有 Xcode 27（App 要 iOS 27 SDK）。有的版本：$(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')"
-            exit 1
-          fi
-          sudo xcode-select -s "$XCODE/Contents/Developer"
+          best=""; bestv="0"
+          for app in /Applications/Xcode*.app; do
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null) || continue
+            if [ "$v" != "$bestv" ] && [ "$(printf '%s\n%s\n' "$bestv" "$v" | sort -V | tail -1)" = "$v" ]; then best="$app"; bestv="$v"; fi
+          done
+          if [ -z "$best" ]; then echo "::error::找不到 Xcode"; exit 1; fi
+          sudo xcode-select -s "$best/Contents/Developer"
           xcodebuild -version
+          if [ "${bestv%%.*}" -lt 27 ]; then
+            # App 的目標是 iOS 27；GitHub 的 Mac 還沒裝 Xcode 27 時先用最新的編，抓得到絕大部分的錯，
+            # 只有 iOS 27 才有的 API 會在這裡報「找不到」——那幾個以 Xcode 27 為準
+            echo "::warning::這台 runner 還沒有 Xcode 27，先用 Xcode $bestv 編（只有 iOS 27 才有的 API 會在這裡報錯）"
+          fi
 
       - name: 編譯（模擬器、不簽章）
         run: |
