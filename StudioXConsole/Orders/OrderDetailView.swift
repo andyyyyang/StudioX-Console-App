@@ -52,6 +52,7 @@ struct OrderDetailView: View {
         .navigationTitle(detail.map { "#\($0.summary.number)" } ?? "訂單")
         .navigationBarTitleDisplayMode(.inline)
         .xenaFocus("order-\(site)-\(orderID)", prompt: "幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
+        .toolbar { AskXenaToolbar(model: model) }
         .task { await load() }
         .sheet(isPresented: $shipping) {
             ShipSheet { tracking in

@@ -3,11 +3,8 @@ import SwiftUI
 /// 首頁就是 Xena：24 小時值班的店長。
 ///   - Hero：studiox.tw 的 Xena 介紹頁開場——置中的 3D 水珠、背後一團紫粉的光；
 ///     她在跟你說話：招呼一行一行升起，接著一個字一個字說今天的狀況，水珠跟著每個字鼓起來、標點換氣；「問問Xena」
-///   - 跑馬燈：各網站現在的數字（在線、昨天的收款、等出貨）
+///   - 現在的狀況（StatusDeck）：卡片左右滑——今天的總覽、每個網站一張
 ///   - Needs you：客人在等回覆、已付款等出貨、營運異常、轉給專人的對話、新的專案詢問（點了直接去處理）
-///   - Yesterday：有商店的網站昨天的營運
-///   - This week：各網站最近 7 天的訪客
-///   - Ask Xena：常問的幾句
 struct XenaHomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -22,23 +19,20 @@ struct XenaHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     hero
-                    if settings.shows(.marquee) && !marqueeItems.isEmpty {
-                        Marquee(items: marqueeItems)
-                            .padding(.top, 8)
+                    // 現在的狀況：卡片左右滑
+                    if settings.shows(.cards) {
+                        StatusDeck()
                     }
-                    VStack(alignment: .leading, spacing: sizeClass == .regular ? 96 : 64) {
+                    VStack(alignment: .leading, spacing: sizeClass == .regular ? 72 : 48) {
                         if model.push.permission == .notDetermined && !promptDismissed {
                             NotificationPrompt(dismissed: $promptDismissed)
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                         if settings.shows(.attention) { attention }
-                        if settings.shows(.yesterday) { yesterday }
-                        if settings.shows(.week) { thisWeek }
-                        if settings.shows(.asks) { asks }
                     }
                     .pageWidth()
-                    .padding(.top, sizeClass == .regular ? 88 : 56)
-                    footer
+                    .padding(.top, sizeClass == .regular ? 56 : 40)
+                    .padding(.bottom, 64)
                 }
             }
             .scrollIndicators(.hidden)
@@ -119,7 +113,6 @@ struct XenaHomeView: View {
         let light = orb * 2.6
         return VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 14) {
-                Eyebrow("\(Date.now.dayTitle) · \(Date.now.englishDay)")
                 Spacer()
                 // 設定（iPad 在側欄）：一看就知道的齒輪
                 if !regular {
@@ -203,35 +196,15 @@ struct XenaHomeView: View {
         .padding(.bottom, regular ? 72 : 48)
     }
 
-    /// Xena 在線（說話時寫「正在跟你說」）
+    /// 她在說話、查資料時才寫一行（平常不放字）
     private var presence: some View {
-        HStack(spacing: 8) {
-            LiveDot()
-            Text("Xena・\(voice.speaking ? "正在跟你說" : model.xena.mood.label)")
-                .textRole(.xs)
-                .foregroundStyle(Theme.muted)
-                .contentTransition(.opacity)
-                .animation(.smooth, value: voice.speaking)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    // MARK: 跑馬燈
-
-    private var marqueeItems: [Marquee.Item] {
-        var items: [Marquee.Item] = []
-        for site in model.sites {
-            if let stats = site.stats {
-                items.append(.init(text: "\(site.name) 7 天 \(stats.visitors.formatted()) 位訪客"))
-                if stats.live > 0 { items.append(.init(text: "\(stats.live) 位在線", serif: true)) }
-            }
-            if let r = model.briefing.ops[site.id], r.revenueCents > 0 {
-                items.append(.init(text: "昨天收款 \(ntd(cents: r.revenueCents))"))
-            }
-        }
-        guard !items.isEmpty else { return [] }
-        items.append(.init(text: "Always on", serif: true))
-        return items
+        let active = voice.speaking || model.xena.isBusy
+        return Text(voice.speaking ? "正在跟你說" : model.xena.mood.label)
+            .textRole(.xs)
+            .foregroundStyle(Theme.muted)
+            .opacity(active ? 1 : 0)
+            .animation(.smooth, value: active)
+            .accessibilityHidden(!active)
     }
 
     // MARK: 需要你看一下
@@ -240,13 +213,9 @@ struct XenaHomeView: View {
     private var attention: some View {
         let items = model.briefing.attention(sites: model.sites)
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Needs *you*", aside: "需要你決定的事，越急的越前面。") {
+            SectionHead("Needs *you*") {
                 if model.briefing.loading {
                     ProgressView().controlSize(.small)
-                } else if let at = model.briefing.updatedAt {
-                    Text("\(at.clockText) 更新")
-                        .textRole(.xs)
-                        .foregroundStyle(Theme.muted)
                 }
             }
             if items.isEmpty {
@@ -285,100 +254,6 @@ struct XenaHomeView: View {
         case .askXena(let prompt):
             model.askXena(prompt)
         }
-    }
-
-    // MARK: 昨天
-
-    @ViewBuilder
-    private var yesterday: some View {
-        let reports = model.orderSites.compactMap { site in model.briefing.ops[site.id].map { (site, $0) } }
-        if !reports.isEmpty {
-            VStack(alignment: .leading, spacing: 28) {
-                SectionHead("Yesterday, *in numbers*", aside: reports.first?.1.rangeLabel)
-                ForEach(reports, id: \.0.id) { site, report in
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(spacing: 10) {
-                            SiteIconView(site: site, size: 26)
-                            Text(site.name)
-                                .textRole(.h4)
-                                .foregroundStyle(Theme.ink)
-                        }
-                        StatGrid {
-                            Stat(value: Double(report.createdTotal), label: "筆訂單")
-                            Stat(value: Double(report.revenueCents) / 100, label: "收款", format: { "NT$" + Int($0.rounded()).formatted() })
-                            Stat(value: Double(report.paidButUnfulfilled), label: "等出貨")
-                            Stat(value: Double(report.awaitingPayment), label: "等付款")
-                        }
-                        if !report.summary.isEmpty {
-                            Text(report.summary)
-                                .textRole(.small)
-                                .foregroundStyle(Theme.ink2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: 最近 7 天
-
-    @ViewBuilder
-    private var thisWeek: some View {
-        let sites = model.sites.filter { $0.stats != nil }
-        if !sites.isEmpty {
-            VStack(alignment: .leading, spacing: 28) {
-                SectionHead("This *week*", aside: "各網站最近 7 天的訪客。")
-                RuledList {
-                    ForEach(sites) { site in
-                        Button { model.open(.site(site.id)) } label: { SiteRow(site: site) }
-                            .buttonStyle(.row)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: 問 Xena
-
-    private var asks: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Ask *Xena*", aside: "和網頁版同一個 Xena、同一份對話紀錄。")
-            RuledList {
-                ForEach(XenaSession.starters, id: \.self) { prompt in
-                    Button { model.askXena(prompt) } label: {
-                        HStack {
-                            Text(prompt)
-                                .textRole(.h4)
-                                .foregroundStyle(Theme.ink)
-                            Spacer(minLength: 12)
-                            Text("→")
-                                .font(.brand(18, .medium))
-                                .foregroundStyle(Theme.accent)
-                        }
-                        .padding(.vertical, 18)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.row)
-                }
-            }
-        }
-    }
-
-    // MARK: 頁尾
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Xena 是你的店長，24 小時看著每個網站。")
-                .textRole(.small)
-                .foregroundStyle(Theme.inverseMuted)
-            Wordmark(color: Theme.onInverse)
-        }
-        .pageWidth()
-        .padding(.top, 56)
-        .padding(.bottom, 24)
-        .background(Theme.inverse)
-        .padding(.top, 96)
     }
 }
 

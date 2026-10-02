@@ -632,35 +632,44 @@ private struct ThreadListView: View {
     }
 }
 
-/// tab bar 上面的「問問Xena」（首頁以外的每一頁）：一個按鈕，不再放一顆水珠（會動的 Xena 在首頁）。
-/// Xena 在回覆時右邊寫她在做什麼（關掉對話也知道她還在忙）
+/// tab bar 上面常駐的 Xena（首頁以外的每一頁）：會動的小水珠＋輪播她正在看著的事，點了打開對話；右邊的麥克風是用說的
 struct XenaAccessory: View {
     @Environment(AppModel.self) private var model
+
+    private var lines: [String] {
+        let b = model.briefing
+        var out = ["值班中・看著 \(model.sites.count) 個網站"]
+        if !b.awaiting.isEmpty { out.append("\(b.awaiting.count) 位客人在等回覆") }
+        let ship = b.toShip.values.reduce(0) { $0 + $1.count }
+        if ship > 0 { out.append("\(ship) 筆訂單等出貨") }
+        let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
+        if live > 0 { out.append("現在 \(live) 人在你的網站上") }
+        return out
+    }
 
     var body: some View {
         HStack(spacing: 0) {
             Button {
                 model.showXena = true
             } label: {
-                HStack(spacing: 8) {
-                    HeroIcon("sparkles", size: 17)
-                        .foregroundStyle(Theme.accent)
-                    Text("問問Xena")
-                        .font(.brand(15, .semibold))
-                        .foregroundStyle(Theme.ink)
-                    Spacer(minLength: 8)
-                    if model.xena.isBusy {
-                        Text(model.xena.mood.label)
-                            .font(.brand(13, .regular))
-                            .foregroundStyle(Theme.muted)
+                HStack(spacing: 6) {
+                    XenaOrb(mood: model.xena.mood, size: 20, pulse: model.xena.pulse)
+                        .padding(.vertical, -6)
+                    TimelineView(.periodic(from: .now, by: 4)) { context in
+                        let all = lines
+                        let index = Int(context.date.timeIntervalSinceReferenceDate / 4) % max(all.count, 1)
+                        Text(model.xena.isBusy ? model.xena.mood.label : all[index])
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.ink)
                             .lineLimit(1)
-                            .transition(.opacity)
+                            .contentTransition(.opacity)
+                            .animation(.smooth, value: index)
                     }
+                    Spacer(minLength: 0)
                 }
-                .padding(.leading, 16)
+                .padding(.leading, 8)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .animation(.smooth, value: model.xena.isBusy)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("問問Xena")
@@ -675,6 +684,21 @@ struct XenaAccessory: View {
             .buttonStyle(.plain)
             .padding(.trailing, 4)
             .accessibilityLabel("用說的問Xena")
+        }
+    }
+}
+
+/// 網站、訂單頁右上角的「問問Xena」：打開對話（不會自己送出；對話裡第一個建議就是問這一頁）
+struct AskXenaToolbar: ToolbarContent {
+    let model: AppModel
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { model.showXena = true } label: {
+                Text("問問Xena")
+                    .font(.brand(15, .semibold))
+            }
+            .accessibilityLabel("問問Xena")
         }
     }
 }

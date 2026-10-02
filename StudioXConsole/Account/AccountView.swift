@@ -39,26 +39,25 @@ struct AccountView: View {
 
                         // 外觀：主題、字的大小、觸覺回饋
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Appearance*", aside: "只改這台裝置，改了馬上生效。", role: .h3)
+                            SectionHead("*Appearance*", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "主題", options: AppSettings.Appearance.allCases, selection: $settings.appearance) { $0.label }
-                                ChoiceRow(label: "文字大小", help: settings.textSize == .standard ? "跟著 iPhone 的「設定 → 螢幕顯示與亮度 → 文字大小」。" : nil,
-                                          options: AppSettings.TextSize.allCases, selection: $settings.textSize) { $0.label }
-                                ToggleRow(label: "觸覺回饋", help: "選擇、完成、出錯的時候輕輕震一下。", isOn: $settings.haptics)
+                                ChoiceRow(label: "文字大小", options: AppSettings.TextSize.allCases, selection: $settings.textSize) { $0.label }
+                                ToggleRow(label: "觸覺回饋", isOn: $settings.haptics)
                                     .padding(.vertical, 10)
                             }
                         }
 
                         // Xena：首頁開場要不要說話、說多快、水珠會不會動
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Xena*", aside: "App 和網頁上是同一個 Xena、同一份對話紀錄。", role: .h3)
+                            SectionHead("*Xena*", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "首頁開場說今天的狀況", help: settings.greeting.help,
                                           options: AppSettings.Greeting.allCases, selection: $settings.greeting) { $0.label }
                                 ChoiceRow(label: "說話速度", options: AppSettings.Pace.allCases, selection: $settings.pace) { $0.label }
                                     .disabled(settings.greeting == .quiet)
                                     .opacity(settings.greeting == .quiet ? 0.45 : 1)
-                                ToggleRow(label: "水珠會動", help: "關掉就停在同一個樣子，比較省電。系統的「減少動態效果」打開時也會停。", isOn: $settings.orbMotion)
+                                ToggleRow(label: "水珠會動", help: "關掉比較省電。", isOn: $settings.orbMotion)
                                     .padding(.vertical, 10)
                                 row("問問Xena") { model.showXena = true }
                                 row("動手改東西之前", value: "一律先問你", action: nil)
@@ -68,9 +67,9 @@ struct AccountView: View {
 
                         // 聲音：用說的時 Xena 用哪個聲音回答（預設 iPhone 內建、免費）
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Voice*", aside: "用說的時 Xena 開口回答的聲音；聽你說話在 iPhone 上處理。", role: .h3)
+                            SectionHead("*Voice*", role: .h3)
                             RuledList {
-                                ToggleRow(label: "用說的時，Xena 開口回答", help: "關掉就只顯示字幕。", isOn: $settings.speakReplies)
+                                ToggleRow(label: "用說的時，Xena 開口回答", isOn: $settings.speakReplies)
                                     .padding(.vertical, 10)
                                 ChoiceRow(label: "聲音從哪裡來", help: settings.voiceSource == .iphone
                                           ? "iPhone 內建的聲音，不用錢、沒網路也能用。"
@@ -121,7 +120,7 @@ struct AccountView: View {
 
                         // 首頁：打開 App 先看哪一頁、首頁放哪些
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Home*", aside: "首頁要放哪些、打開 App 先看哪一頁。", role: .h3)
+                            SectionHead("*Home*", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "打開 App 先看", options: startTabs, selection: $settings.startTab) { $0.label }
                                 ForEach(AppSettings.HomeSection.allCases) { section in
@@ -135,7 +134,7 @@ struct AccountView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Notifications*", aside: "網站有需要你處理的事，從這裡通知你。", role: .h3)
+                            SectionHead("*Notifications*", role: .h3)
                             RuledList {
                                 row("通知", value: notificationStatus) { showingNotifications = true }
                             }
@@ -144,7 +143,7 @@ struct AccountView: View {
                         SecuritySection()
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("Your *roles*", aside: "職能由網站負責人在 StudioX Console 設定。", role: .h3)
+                            SectionHead("Your *roles*", role: .h3)
                             RuledList {
                                 ForEach(model.sites) { site in
                                     HStack(spacing: 14) {
@@ -162,7 +161,7 @@ struct AccountView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Console*", aside: "在瀏覽器打開 StudioX Console。", role: .h3)
+                            SectionHead("*Console*", role: .h3)
                             RuledList {
                                 row("網站與成員") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
                                 row("連接外部 AI 的授權") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
@@ -190,9 +189,6 @@ struct AccountView: View {
                     .padding(.top, 24)
 
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Built with care in Tainan.")
-                            .font(.serif(18, italic: true))
-                            .foregroundStyle(Theme.inverseMuted)
                         Wordmark(color: Theme.onInverse)
                     }
                     .pageWidth()
@@ -319,7 +315,7 @@ private struct SecuritySection: View {
     var body: some View {
         let lock = model.lock
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("*Security*", aside: lock.available ? "存在這台裝置，換手機要重新設定。" : "這台裝置沒有設定密碼，不能鎖。", role: .h3)
+            SectionHead("*Security*", aside: lock.available ? nil : "這台裝置沒有設定密碼，不能鎖。", role: .h3)
             RuledList {
                 ToggleRow(label: "用\(lock.method.name)鎖住 App", help: "打開 App、離開一陣子回來，要先解鎖。切換 App 時畫面會蓋起來。", isOn: Binding(
                     get: { lock.enabled },

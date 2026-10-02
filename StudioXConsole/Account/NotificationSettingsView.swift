@@ -29,7 +29,7 @@ struct NotificationSettingsView: View {
 
                 if push.permission == .allowed && push.device != nil {
                     VStack(alignment: .leading, spacing: 20) {
-                        SectionHead("Your *sites*", aside: "關掉的網站，這台裝置就不會收到它的通知。", role: .h3)
+                        SectionHead("Your *sites*", role: .h3)
                         RuledList {
                             ForEach(model.sites) { site in
                                 siteRow(site)

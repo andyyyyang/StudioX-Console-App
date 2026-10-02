@@ -107,6 +107,7 @@ struct SiteHomeView: View {
             .navigationTitle(site.name)
             .navigationBarTitleDisplayMode(.inline)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
+            .toolbar { AskXenaToolbar(model: model) }
         } else {
             EmptyState(title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
                 .pageWidth()
@@ -165,6 +166,7 @@ struct SiteWorkspace: View {
             .navigationTitle("概況")
             .navigationBarTitleDisplayMode(.inline)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
+            .toolbar { AskXenaToolbar(model: model) }
         case .traffic:
             TrafficView(siteID: site.id)
         case .search:
@@ -296,7 +298,7 @@ struct SiteOverview: View {
 
     private var traffic: some View {
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Traffic", aside: days == 1 ? "今天到現在。" : "最近 \(days) 天，台北時間。") {
+            SectionHead("Traffic") {
                 MoreLink("完整報表") { model.open(.traffic(site: site.id)) }
             }
             FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "今天" : "\($0) 天" })
@@ -324,7 +326,7 @@ struct SiteOverview: View {
 
     private func store(_ ops: OpsReport) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Store, *yesterday*", aside: ops.rangeLabel) {
+            SectionHead("Store, *yesterday*") {
                 MoreLink("看訂單") {
                     model.ordersSite = site.id
                     model.ordersStatus = "paid"
@@ -364,7 +366,7 @@ struct SiteSections: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 40) {
-            SectionHead("Manage", aside: "網站後台的內容，和後台同一份；修改一律要你確認。")
+            SectionHead("Manage")
             RuledList {
                 if site.hasTraffic {
                     sectionRow(icon: "chart-bar", title: "流量", detail: "訪客、熱門頁面、來源、時段", route: .traffic(site: site.id))

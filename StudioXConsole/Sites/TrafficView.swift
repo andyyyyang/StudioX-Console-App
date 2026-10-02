@@ -164,7 +164,7 @@ struct TrafficView: View {
 
         if r.weekHours.count == 7, r.weekHours.contains(where: { $0.contains { $0 > 0 } }) {
             VStack(alignment: .leading, spacing: 20) {
-                SectionHead("When they *come*", aside: "一週七天、每個小時的瀏覽次數，顏色越深越多人。", role: .h3)
+                SectionHead("When they *come*", role: .h3)
                 WeekHeatmap(grid: r.weekHours)
             }
         }
@@ -352,7 +352,7 @@ struct FunnelView: View {
     var body: some View {
         let first = max(report.funnel.first?.visitors ?? 1, 1)
         VStack(alignment: .leading, spacing: 24) {
-            SectionHead("The *funnel*", aside: "從進站到下單，每一步還剩多少人。", role: .h3)
+            SectionHead("The *funnel*", role: .h3)
             VStack(spacing: 0) {
                 ForEach(Array(report.funnel.enumerated()), id: \.element.id) { i, step in
                     let ratio = Double(step.visitors) / Double(first)
@@ -426,7 +426,7 @@ struct ContentImpactView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("Content that *sells*", aside: "看過這頁的人，有多少去看商品、加購物車、下單。", role: .h3)
+            SectionHead("Content that *sells*", role: .h3)
             RuledList(color: Theme.hair) {
                 ForEach(pages.prefix(12)) { p in
                     VStack(alignment: .leading, spacing: 6) {

@@ -137,15 +137,12 @@ final class AppSettings {
 
     /// 首頁可以收起來的區塊
     enum HomeSection: String, CaseIterable, Identifiable {
-        case marquee, attention, yesterday, week, asks
+        case cards, attention
         var id: Self { self }
         var label: String {
             switch self {
-            case .marquee: "跑馬燈（各網站現在的數字）"
+            case .cards: "狀況卡片"
             case .attention: "需要你決定的事"
-            case .yesterday: "昨天的營運"
-            case .week: "這週的訪客"
-            case .asks: "常問 Xena 的幾句"
             }
         }
     }
