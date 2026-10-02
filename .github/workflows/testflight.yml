@@ -17,6 +17,10 @@ on:
       - "ci/**"
   workflow_dispatch:
 
+# GitHub 給這個流程的 token 只能讀 repo（簽章、上傳用的是 App Store Connect 的金鑰，不需要 GitHub 的寫入權限）
+permissions:
+  contents: read
+
 # 一次出一版（排隊，不取消正在上傳的）
 concurrency:
   group: testflight
