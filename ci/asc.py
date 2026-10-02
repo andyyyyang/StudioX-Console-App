@@ -427,20 +427,61 @@ def send_invitation(app_id, tester_id, tries=4):
             return apple_error(e)
 
 
+def tester_groups(tester_id):
+    try:
+        return [g["id"] for g in call("GET", f"/betaTesters/{tester_id}/relationships/betaGroups").get("data", [])]
+    except ApiError:
+        return None
+
+
+def add_to_group(gid, gname, email, first, last):
+    """把 App Store Connect 的使用者加進內部群組（和 fastlane pilot 一樣：建立測試員時直接指定群組）。
+    之前留下、不在任何群組裡的測試員紀錄會擋住（STATE_ERROR：Tester(s) cannot be assigned），先刪掉再建"""
+    for old in call("GET", "/betaTesters", query={"filter[email]": email, "limit": 10}).get("data", []):
+        groups = tester_groups(old["id"])
+        if groups == []:
+            try:
+                call("DELETE", f"/betaTesters/{old['id']}")
+                summary(f"- 刪掉 {mask(email)} 之前沒加成功的測試員紀錄")
+            except ApiError as e:
+                summary(f"- ⚠️ 舊的測試員紀錄刪不掉：{apple_error(e)}")
+        elif groups and gid not in groups:
+            try:
+                call("POST", f"/betaTesters/{old['id']}/relationships/betaGroups", {"data": [{"type": "betaGroups", "id": gid}]})
+                summary(f"- {mask(email)} 加進「{gname}」")
+                return
+            except ApiError as e:
+                summary(f"- ⚠️ {mask(email)} 加不進「{gname}」：{apple_error(e)}")
+    try:
+        created = call("POST", "/betaTesters", {"data": {
+            "type": "betaTesters",
+            "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
+            "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}}).get("data", {})
+        a = created.get("attributes") or {}
+        summary(f"- {mask(email)} 建立為「{gname}」的測試員（{a.get('inviteType') or '?'}／{a.get('state') or '?'}）")
+    except ApiError as e:
+        summary(f"- ⚠️ 沒辦法把 {mask(email)} 加進「{gname}」：{apple_error(e)}")
+
+
 def invite(app_id, group):
-    """寄 TestFlight 邀請給群組裡每個還沒裝的人。
-    內部群組只能放 App Store Connect 的使用者，而 Apple 的 API 不讓程式把使用者加進內部群組（STATE_ERROR：Tester(s) cannot be assigned），
-    所以第一次要在 App Store Connect 的網頁（或 iPhone 的 App Store Connect App）把自己加進去；之後每一版都自動給、這裡負責重寄邀請"""
+    """確定帳號持有人（和 TESTFLIGHT_TESTERS）在測試群組裡，寄 TestFlight 邀請給群組裡每個還沒裝的人"""
     gid, gname = group["id"], group["attributes"].get("name")
     members = group_members(gid)
+    missing = {e: n for e, n in testers().items() if e not in members}
+    for email, (first, last) in missing.items():
+        add_to_group(gid, gname, email, first, last)
+    if missing:
+        # Apple 把人放進群組要一點時間
+        for _ in range(6):
+            time.sleep(10)
+            members = group_members(gid)
+            if all(e in members for e in missing):
+                break
     summary(f"- 「{gname}」有 {len(members)} 位測試員" + ("：" + "、".join(
         f"{mask(m)}（{t['attributes'].get('state') or '?'}）" for m, t in members.items()) if members else ""))
-    wanted = set(testers())
-    if not members or (group["attributes"].get("isInternalGroup") and not wanted & set(members)):
-        summary(f"### 👉 第一次要自己加進「{gname}」（Apple 不讓 API 加內部測試員）\n"
-                f"App Store Connect → App → TestFlight → 內部測試「{gname}」→ 測試人員旁的「＋」→ 勾自己 → 加入。"
-                "Apple 會馬上寄邀請信，之後每一版都會自動出現在 iPhone 的 TestFlight。"
-                "iPhone 上的 App Store Connect App 也可以加（TestFlight → 內部群組 → 新增測試人員）")
+    if not members:
+        summary(f"### 👉 Apple 還沒有把人放進「{gname}」\n"
+                f"App Store Connect → App → TestFlight → 內部測試「{gname}」→ 測試人員旁的「＋」→ 勾自己 → 加入（一次就好）")
     for email, tester in members.items():
         if tester["attributes"].get("state") == "INSTALLED":
             summary(f"- {mask(email)} 已經裝了，打開 iPhone 的 TestFlight 就有新版")
