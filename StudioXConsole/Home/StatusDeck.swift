@@ -1,11 +1,13 @@
 import SwiftUI
 
 /// 首頁「現在的狀況」：一張一張的卡片，左右滑著看（像一手牌：旁邊的稍微小一點、斜一點、淡一點）。
-/// 第一張是今天的總覽，後面每個網站一張；點網站的卡片打開那個網站。
+/// 第一張是今天的總覽，後面每個網站一張；點了從卡片放大成 sheet（往下滑或按 ✕ 就回來）。
 struct StatusDeck: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var current: String?
+    /// 卡片放大成 sheet 的動畫
+    @Namespace private var zoom
 
     private var cards: [StatusCard] {
         [StatusCard(id: "today", site: nil)] + model.sites.map { StatusCard(id: $0.id, site: $0) }
@@ -18,14 +20,20 @@ struct StatusDeck: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
                     ForEach(all) { card in
-                        Group {
-                            if let site = card.site {
-                                Button { model.open(.site(site.id)) } label: { SiteStatusCard(site: site) }
-                                    .buttonStyle(PressScale(scale: 0.97))
-                            } else {
-                                TodayCard()
+                        Button { model.deckSheet = DeckSheet(id: card.id) } label: {
+                            Group {
+                                if let site = card.site {
+                                    SiteStatusCard(site: site)
+                                } else {
+                                    TodayCard()
+                                }
+                            }
+                            .matchedTransitionSource(id: card.id, in: zoom) { source in
+                                source.clipShape(.rect(cornerRadius: 28, style: .continuous))
                             }
                         }
+                        .buttonStyle(PressScale(scale: 0.97))
+                        .accessibilityHint("打開詳細")
                         .containerRelativeFrame(.horizontal, count: regular ? 3 : 1, span: 1, spacing: 12)
                         .scrollTransition(axis: .horizontal) { content, phase in
                             content
@@ -48,6 +56,108 @@ struct StatusDeck: View {
                 PageDots(count: all.count, index: all.firstIndex { $0.id == (current ?? "today") } ?? 0)
             }
         }
+        .sheet(item: Bindable(model).deckSheet) { sheet in
+            DeckSheetView(sheet: sheet)
+                .navigationTransition(.zoom(sourceID: sheet.id, in: zoom))
+        }
+    }
+}
+
+/// 卡片打開的 sheet：今天（總覽、要你決定的事、各網站）或一個網站（和「網站」分頁同一頁，裡面可以再往下點）。
+/// 往下滑或按 ✕ 回到首頁；要去別的分頁（收件匣、訂單、問 Xena）會先收起來再過去
+private struct DeckSheetView: View {
+    let sheet: DeckSheet
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if sheet == .today {
+                    TodaySheet()
+                } else if model.site(sheet.id) != nil {
+                    SiteHomeView(siteID: sheet.id)
+                } else {
+                    EmptyState(title: "找不到這個網站", message: "可能已經移除，或你沒有權限了。")
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        HeroIcon("x-mark", size: 18)
+                            .foregroundStyle(Theme.ink)
+                    }
+                    .accessibilityLabel("關閉")
+                }
+            }
+            .navigationDestination(for: Route.self) { RouteView(route: $0) }
+        }
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// 「今天」：要你決定幾件事、四個數字、要你決定的事（點了直接去處理）、各網站（點了在 sheet 裡往下看）
+private struct TodaySheet: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let b = model.briefing
+        let count = b.attention(sites: model.sites).count
+        let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
+        let revenue = b.ops.values.reduce(0) { $0 + $1.revenueCents }
+        let ship = b.toShip.values.reduce(0) { $0 + $1.count }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 44) {
+                VStack(alignment: .leading, spacing: 20) {
+                    if b.updatedAt == nil {
+                        SkeletonRows(rows: 2)
+                    } else if count == 0 {
+                        Text("都處理好了")
+                            .textRole(.h1)
+                            .foregroundStyle(Theme.ink)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(count)")
+                                .textRole(.stat)
+                                .foregroundStyle(Theme.accent)
+                            Text("件事等你決定")
+                                .textRole(.h3)
+                                .foregroundStyle(Theme.ink)
+                        }
+                    }
+                    HStack(spacing: 0) {
+                        DeckFigure(value: "\(live)", label: "在線", live: live > 0)
+                        if !model.orderSites.isEmpty {
+                            DeckFigure(value: ntd(cents: revenue), label: "昨天收款")
+                            DeckFigure(value: "\(ship)", label: "等出貨", highlight: ship > 0)
+                        }
+                        if !b.awaiting.isEmpty {
+                            DeckFigure(value: "\(b.awaiting.count)", label: "在等回覆", highlight: true)
+                        }
+                    }
+                }
+                AttentionList()
+                if !model.sites.isEmpty {
+                    VStack(alignment: .leading, spacing: 20) {
+                        SectionHead("Your *sites*")
+                        RuledList {
+                            ForEach(model.sites) { site in
+                                NavigationLink(value: Route.site(site.id)) { SiteRow(site: site) }
+                                    .buttonStyle(.row)
+                            }
+                        }
+                    }
+                }
+            }
+            .pageWidth()
+            .padding(.top, 8)
+            .padding(.bottom, 48)
+        }
+        .scrollIndicators(.hidden)
+        .refreshable { [model] in await model.refreshAll() }
+        .brandPage()
+        .navigationTitle("今天")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

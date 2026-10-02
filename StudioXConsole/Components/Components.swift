@@ -556,17 +556,24 @@ struct MoreLink: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Text(title)
-                Text("→")
-            }
-            .font(.brand(13.5, .medium, relativeTo: .subheadline))
-            .foregroundStyle(Theme.ink)
-            .padding(.vertical, 6)
-            .overlay(alignment: .bottom) { Rule(color: Theme.ink) }
+        Button(action: action) { MoreLinkLabel(title: title) }
+            .buttonStyle(.press)
+    }
+}
+
+/// 「全部 →」的樣子（NavigationLink 也用：在哪一疊頁面裡就往下推）
+struct MoreLinkLabel: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(title)
+            Text("→")
         }
-        .buttonStyle(.press)
+        .font(.brand(13.5, .medium, relativeTo: .subheadline))
+        .foregroundStyle(Theme.ink)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) { Rule(color: Theme.ink) }
     }
 }
 

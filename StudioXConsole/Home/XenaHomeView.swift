@@ -232,8 +232,16 @@ struct XenaHomeView: View {
 
     // MARK: 需要你看一下
 
-    @ViewBuilder
     private var attention: some View {
+        AttentionList()
+    }
+}
+
+/// Needs you：客人在等回覆、已付款等出貨、營運異常…（點了直接去處理）。首頁和「今天」卡片的 sheet 共用
+struct AttentionList: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
         let items = model.briefing.attention(sites: model.sites)
         VStack(alignment: .leading, spacing: 28) {
             SectionHead("Needs *you*") {
@@ -250,7 +258,7 @@ struct XenaHomeView: View {
             } else {
                 RuledList {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        Button { run(item.action) } label: {
+                        Button { model.handle(item.action) } label: {
                             AttentionRow(item: item, site: model.site(item.site))
                         }
                         .buttonStyle(.row)
@@ -263,19 +271,6 @@ struct XenaHomeView: View {
                     Task { await model.refreshAll() }
                 }
             }
-        }
-    }
-
-    private func run(_ action: AttentionItem.Action) {
-        switch action {
-        case .inbox:
-            model.tab = .inbox
-        case .orders(let site, let status):
-            model.ordersSite = site
-            model.ordersStatus = status
-            model.tab = .orders
-        case .askXena(let prompt):
-            model.askXena(prompt)
         }
     }
 }

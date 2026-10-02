@@ -436,6 +436,9 @@ private struct CardsRow: View {
     let item: CardsItem
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    /// 點了的那張：從卡片放大成 sheet（關掉就回到對話）
+    @State private var opened: CardSheet?
+    @Namespace private var zoom
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -448,35 +451,55 @@ private struct CardsRow: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
                     ForEach(item.cards, id: \.self) { card in
-                        Button { open(card) } label: { EntityCardView(card: card) }
-                            .buttonStyle(PressScale(scale: 0.92))
+                        Button { open(card) } label: {
+                            EntityCardView(card: card)
+                                .matchedTransitionSource(id: Self.key(card), in: zoom)
+                        }
+                        .buttonStyle(PressScale(scale: 0.92))
                     }
                 }
             }
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
         }
+        .sheet(item: $opened) { sheet in
+            NavigationStack {
+                RouteView(route: sheet.route)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { opened = nil } label: {
+                                HeroIcon("x-mark", size: 18)
+                                    .foregroundStyle(Theme.ink)
+                            }
+                            .accessibilityLabel("關閉")
+                        }
+                    }
+                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
+            }
+            .presentationDragIndicator(.visible)
+            .navigationTransition(.zoom(sourceID: sheet.id, in: zoom))
+        }
     }
 
+    /// 訂單、客服對話、商品、文章…：在對話上面開一張 sheet（關掉就回來繼續聊）；App 裡沒有這種頁面才開網頁
     private func open(_ card: EntityCard) {
         if let site = card.site, model.site(site) != nil {
-            switch card.entity {
-            case "order":
-                model.open(.order(site: site, id: card.id))
-                return
-            case "support_thread":
-                model.open(.thread(site: site, id: card.id))
-                return
-            case "assistant_conversation":
-                model.open(.xenaConversation(site: site, id: card.id))
-                return
-            default:
-                break
+            let route: Route = switch card.entity {
+            case "order": .order(site: site, id: card.id)
+            case "support_thread": .thread(site: site, id: card.id)
+            case "assistant_conversation": .xenaConversation(site: site, id: card.id)
+            default: .record(site: site, entity: card.entity, id: card.id)
             }
+            opened = CardSheet(id: Self.key(card), route: route)
+            return
         }
         if let href = card.href, let url = URL(string: href, relativeTo: ConsoleConfig.baseURL)?.absoluteURL {
             openURL(url)
         }
+    }
+
+    private static func key(_ card: EntityCard) -> String {
+        "\(card.site ?? "")/\(card.entity)/\(card.id)"
     }
 }
 
@@ -701,4 +724,10 @@ struct AskXenaToolbar: ToolbarContent {
             .accessibilityLabel("問問Xena")
         }
     }
+}
+
+/// 對話裡的資料卡片打開的 sheet
+private struct CardSheet: Identifiable {
+    let id: String
+    let route: Route
 }

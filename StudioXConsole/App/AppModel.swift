@@ -70,12 +70,32 @@ final class AppModel {
     var accountPath: [Route] = []
     var searchPath: [Route] = []
     /// 手機上「我」不在分頁列：從首頁右上角的頭像打開
-    var showAccount = false
+    var showAccount = false {
+        didSet {
+            guard showAccount, deckSheet != nil else { return }
+            showAccount = false
+            afterClosingDeck { $0.showAccount = true }
+        }
+    }
     /// iPad：每個網站自己的一疊頁面
     var sitePaths: [String: [Route]] = [:]
-    var showXena = false
+    var showXena = false {
+        didSet {
+            guard showXena, deckSheet != nil else { return }
+            showXena = false
+            afterClosingDeck { $0.showXena = true }
+        }
+    }
     /// 用說的跟 Xena 聊（整個畫面）
-    var showVoice = false
+    var showVoice = false {
+        didSet {
+            guard showVoice, deckSheet != nil else { return }
+            showVoice = false
+            afterClosingDeck { $0.showVoice = true }
+        }
+    }
+    /// 首頁狀況卡片打開的 sheet（今天的總覽，或一個網站）
+    var deckSheet: DeckSheet?
     var toast: Toast?
     /// 觸覺回饋（RootView 的 sensoryFeedback 看這幾個數字）
     private(set) var successTick = 0
@@ -201,6 +221,7 @@ final class AppModel {
     }
 
     private func didSignOut(message: String?) {
+        deckSheet = nil
         conversation.end()
         showVoice = false
         greetings = [:]
@@ -299,6 +320,7 @@ final class AppModel {
 
     /// 打開一個頁面：iPad 上網站相關的頁面打開在那個網站裡；手機上打開在對應的分頁
     func open(_ route: Route) {
+        deckSheet = nil
         showXena = false
         showAccount = false
         switch route {
@@ -381,6 +403,7 @@ final class AppModel {
     /// 點了通知：打開對應的頁面，順便重新整理首頁與收件匣
     func open(_ payload: PushPayload) {
         guard phase == .ready else { return }
+        deckSheet = nil
         // 網站已經不在清單裡（被移出、停用）：回首頁
         let site = payload.site.flatMap { self.site($0) == nil ? nil : $0 }
         switch Self.link(site: site, url: payload.url) {
@@ -436,6 +459,33 @@ final class AppModel {
     }
 
     /// 打開 Xena 接著問一句
+    /// 卡片的 sheet 開著時要打開別的畫面：先收起來，等它收好再打開（兩個 sheet 不能同時開）
+    private func afterClosingDeck(_ present: @escaping @MainActor (AppModel) -> Void) {
+        deckSheet = nil
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            if let self { present(self) }
+        }
+    }
+
+    /// 首頁「需要你決定」的一件事：直接去處理（從卡片的 sheet 按的，先收起來）
+    func handle(_ action: AttentionItem.Action) {
+        if deckSheet != nil {
+            afterClosingDeck { $0.handle(action) }
+            return
+        }
+        switch action {
+        case .inbox:
+            tab = .inbox
+        case .orders(let site, let status):
+            ordersSite = site
+            ordersStatus = status
+            tab = .orders
+        case .askXena(let prompt):
+            askXena(prompt)
+        }
+    }
+
     func askXena(_ prompt: String) {
         showXena = true
         xena.send(prompt)
@@ -504,4 +554,10 @@ private struct XenaFocusModifier: ViewModifier {
                 if model.xenaFocus?.id == id { model.xenaFocus = nil }
             }
     }
+}
+
+/// 首頁狀況卡片打開的 sheet：今天的總覽，或一個網站（id 是網站代號）
+struct DeckSheet: Identifiable, Hashable {
+    let id: String
+    static let today = DeckSheet(id: "today")
 }

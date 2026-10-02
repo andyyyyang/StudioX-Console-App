@@ -299,7 +299,9 @@ struct SiteOverview: View {
     private var traffic: some View {
         VStack(alignment: .leading, spacing: 28) {
             SectionHead("Traffic") {
-                MoreLink("完整報表") { model.open(.traffic(site: site.id)) }
+                // 在哪一疊頁面裡就往下推（首頁卡片的 sheet 裡也是）
+                NavigationLink(value: Route.traffic(site: site.id)) { MoreLinkLabel(title: "完整報表") }
+                    .buttonStyle(.press)
             }
             FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "今天" : "\($0) 天" })
             if let r = report {
