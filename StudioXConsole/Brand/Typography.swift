@@ -17,7 +17,7 @@ enum BrandFonts {
     static func register() {
         for name in faces {
             guard let url = Bundle.main.url(forResource: name, withExtension: "ttf") else { continue }
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            _ = CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
     }
 }

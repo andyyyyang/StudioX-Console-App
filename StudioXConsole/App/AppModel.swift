@@ -3,7 +3,7 @@ import Observation
 import SwiftUI
 
 enum AppTab: Hashable {
-    case xena, sites, orders, inbox, account
+    case xena, sites, orders, inbox, account, search
     /// iPad 的側欄：直接打開某個網站（網站代號）
     case site(String)
 }
@@ -67,6 +67,9 @@ final class AppModel {
     var ordersPath: [Route] = []
     var inboxPath: [Route] = []
     var accountPath: [Route] = []
+    var searchPath: [Route] = []
+    /// 手機上「我」不在分頁列：從首頁右上角的頭像打開
+    var showAccount = false
     /// iPad：每個網站自己的一疊頁面
     var sitePaths: [String: [Route]] = [:]
     var showXena = false
@@ -137,8 +140,10 @@ final class AppModel {
         ordersPath = []
         inboxPath = []
         accountPath = []
+        searchPath = []
         sitePaths = [:]
         showXena = false
+        showAccount = false
         greeted = false
         loadError = message
         schemas = [:]
@@ -207,6 +212,7 @@ final class AppModel {
     /// 打開一個頁面：iPad 上網站相關的頁面打開在那個網站裡；手機上打開在對應的分頁
     func open(_ route: Route) {
         showXena = false
+        showAccount = false
         switch route {
         case .order:
             tab = .orders
@@ -231,6 +237,12 @@ final class AppModel {
                 sitesPath = [.site(route.site), route]
             }
         }
+    }
+
+    /// 「我」：iPad 是側欄的一項；手機從首頁的頭像打開
+    func goToAccount() {
+        guard phase == .ready else { return }
+        if regular { tab = .account } else { showAccount = true }
     }
 
     /// 「網站」：手機是網站分頁；iPad 是側欄的第一個網站
@@ -264,13 +276,22 @@ final class AppModel {
         regular = value
         if value {
             // 手機的「網站」分頁 → 側欄的那個網站
-            if tab == .sites, case .site(let id)? = sitesPath.first {
-                sitePaths[id] = Array(sitesPath.dropFirst())
-                tab = .site(id)
+            if tab == .sites {
+                if case .site(let id)? = sitesPath.first {
+                    sitePaths[id] = Array(sitesPath.dropFirst())
+                    tab = .site(id)
+                } else {
+                    // 「網站」分頁在側欄是收起來的：改到第一個網站
+                    tab = sites.first.map { AppTab.site($0.id) } ?? .xena
+                }
             }
         } else if case .site(let id) = tab {
             sitesPath = [.site(id)] + (sitePaths[id] ?? [])
             tab = .sites
+        } else if tab == .account {
+            // 手機的分頁列沒有「我」：改成從首頁打開
+            tab = .xena
+            showAccount = true
         }
     }
 }

@@ -85,10 +85,17 @@ struct XenaHomeView: View {
     private var hero: some View {
         let regular = sizeClass == .regular
         return VStack(alignment: .leading, spacing: regular ? 40 : 28) {
-            HStack(alignment: .center) {
+            HStack(alignment: .center, spacing: 14) {
                 Eyebrow("\(Date.now.dayTitle) · \(Date.now.englishDay)")
                 Spacer()
                 presence
+                if !regular, let me = model.me {
+                    Button { model.goToAccount() } label: {
+                        Avatar(name: me.name, imageURL: me.imageURL, size: 32)
+                    }
+                    .buttonStyle(.press)
+                    .accessibilityLabel("我的帳號")
+                }
             }
 
             if regular {

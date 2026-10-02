@@ -27,8 +27,10 @@ struct StudioXConsoleApp: App {
                     .disabled(model.orderSites.isEmpty)
                 Button("收件匣") { model.tab = .inbox }
                     .keyboardShortcut("4")
-                Button("我") { model.tab = .account }
+                Button("我") { model.goToAccount() }
                     .keyboardShortcut("5")
+                Button("搜尋") { model.tab = .search }
+                    .keyboardShortcut("f")
                 Divider()
                 Button("和 Xena 說話") { model.showXena = true }
                     .keyboardShortcut("k")
@@ -136,6 +138,10 @@ struct MainView: View {
             Tab("我", image: "hi-user-circle", value: AppTab.account) {
                 AccountView()
             }
+            .hidden(!regular)
+            Tab(value: AppTab.search, role: .search) {
+                SearchView()
+            }
             TabSection("網站") {
                 ForEach(model.sites) { site in
                     Tab(site.name, image: site.hasOrders ? "hi-building-storefront" : "hi-globe-alt", value: AppTab.site(site.id)) {
@@ -165,6 +171,10 @@ struct MainView: View {
         }
         .sheet(isPresented: $model.showXena) {
             XenaChatView()
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $model.showAccount) {
+            AccountView()
                 .presentationDragIndicator(.visible)
         }
         .onChange(of: regular, initial: true) { _, value in
