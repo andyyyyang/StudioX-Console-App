@@ -111,7 +111,9 @@ final class XenaLocal {
             let cleaned = text
                 .replacingOccurrences(of: #"[*#`「」"“”]"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard (8...160).contains(cleaned.count), Self.numbers(in: cleaned).isSubset(of: Self.numbers(in: facts)) else { return nil }
+                // 模型愛加的開場白：「好的，老闆，現在的狀況是…」
+                .replacingOccurrences(of: #"^((好的|好喔|好|嗨|哈囉|你好|老闆|現在的狀況是|目前的狀況是)[，,、：:！!。\s]*)+"#, with: "", options: .regularExpression)
+            guard (8...120).contains(cleaned.count), Self.numbers(in: cleaned).isSubset(of: Self.numbers(in: facts)) else { return nil }
             return cleaned
         } catch {
             return nil
@@ -119,12 +121,13 @@ final class XenaLocal {
     }
 
     private static let greetingRules = """
-    你是 Xena，StudioX 幫老闆 24 小時看店的 AI 店長。用繁體中文、台灣口語，像當面跟老闆報告。
+    你是 Xena，StudioX 幫老闆 24 小時看店的 AI 店長。用繁體中文、台灣口語，像同事當面跟老闆說今天的狀況。
     規則：
+    - 直接說事情。不要開場白：不要說「好的」「老闆」「你好」「現在的狀況是」（畫面上已經打過招呼）。
     - 只能說「現在的狀況」裡有的事，不要猜、不要補充沒給的事。
     - 數字一律照抄成阿拉伯數字，不能改、不能加總、不能換算。
-    - 兩到三句、八十字以內；不要條列、不要表情符號、不要引號。
-    - 不用再打招呼（畫面上已經說過早安）。最後一句可以溫和地提醒最要緊的那件事。
+    - 一到兩句、50 字以內；不要條列、不要表情符號、不要引號。
+    - 最後可以具體提醒最要緊的那件事要做什麼（像「今天記得寄出去」）；不要說空泛的話（保持順利、加油、祝順心）。
     """
 
     // MARK: 長的回答：說重點、做卡片

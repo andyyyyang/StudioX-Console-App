@@ -46,8 +46,8 @@ struct XenaHomeView: View {
 
     // MARK: Hero
 
-    /// 招呼：三行（第二行是重點，強調詞用品牌橘）
-    private var greetingLines: [String] {
+    /// 招呼：上面一行小字（早安，Andy），下面一行大字只說重點（強調詞用 Xena 的彩虹漸層）
+    private var greeting: (hello: String, headline: String) {
         let b = model.briefing
         let hour = Calendar.taipei.component(.hour, from: .now)
         let hello = switch hour {
@@ -57,12 +57,25 @@ struct XenaHomeView: View {
         case 18..<23: "晚上好"
         default: "這麼晚還在忙"
         }
-        let name = model.me?.name ?? ""
-        let first = name.isEmpty ? "\(hello)。" : "\(hello)，\(name)。"
-        guard b.updatedAt != nil else { return [first, "我正在看你的網站，", "*等我一下*。"] }
+        let name = Self.callName(model.me?.name ?? "")
+        let first = name.isEmpty ? hello : "\(hello)，\(name)"
+        guard b.updatedAt != nil else { return (first, "我在*看你的網站*") }
         let count = b.attention(sites: model.sites).count
-        if count == 0 { return [first, "現在沒有要你決定的事，", "我*繼續看著*。"] }
-        return [first, "今天有 *\(count) 件事*", "等你決定。"]
+        if count == 0 { return (first, "現在*都處理好了*") }
+        return (first, "*\(count) 件事*等你決定")
+    }
+
+    /// 怎麼叫你：中文叫名字（黃韋豪 → 韋豪）；英文取第一個字、去掉數字（andy111yang111 → Andy）；email 只看 @ 前面
+    static func callName(_ raw: String) -> String {
+        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let at = name.firstIndex(of: "@") { name = String(name[..<at]) }
+        guard !name.isEmpty else { return "" }
+        if name.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
+            let han = name.filter { !$0.isWhitespace }
+            return han.count == 3 ? String(han.suffix(2)) : han
+        }
+        guard let word = name.split(whereSeparator: { !$0.isLetter }).first, word.count >= 2 else { return "" }
+        return word.prefix(1).uppercased() + word.dropFirst().lowercased()
     }
 
     /// Xena 的說明：昨天的訂單、現在誰在等你（照真的資料）
@@ -145,13 +158,23 @@ struct XenaHomeView: View {
 
             // 她說的話：招呼一行一行升起，接著一個字一個字說今天的狀況（水珠跟著說話）
             VStack(spacing: regular ? 24 : 18) {
-                RisingHeadline(
-                    lines: greetingLines,
-                    role: .hero,
-                    replayKey: AnyHashable(model.briefing.updatedAt == nil),
-                    alignment: .center,
-                    iridescent: true
-                )
+                VStack(spacing: regular ? 10 : 6) {
+                    RisingHeadline(
+                        lines: [greeting.hello],
+                        role: .lead,
+                        color: Theme.muted,
+                        replayKey: AnyHashable(model.briefing.updatedAt == nil),
+                        alignment: .center
+                    )
+                    RisingHeadline(
+                        lines: [greeting.headline],
+                        role: .h1,
+                        replayKey: AnyHashable(model.briefing.updatedAt == nil),
+                        alignment: .center,
+                        iridescent: true,
+                        delay: 0.12
+                    )
+                }
                 TypewriterText(
                     text: speech,
                     animate: settings.shouldSpeak(speech, spoken: model.spokenReport),
@@ -166,7 +189,7 @@ struct XenaHomeView: View {
                 // Apple Intelligence 把今天的狀況寫成她會說的話（核對過數字；寫不出來就用照資料拼的那句）
                 .task(id: report) {
                     guard wantsWrittenGreeting, model.greetings[report] == nil else { return }
-                    let written = await XenaLocal.shared.greeting(from: report, name: model.me?.name ?? "")
+                    let written = await XenaLocal.shared.greeting(from: report, name: Self.callName(model.me?.name ?? ""))
                     model.greetings[report] = written ?? report
                 }
                 .textRole(.lead)

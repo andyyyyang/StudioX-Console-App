@@ -255,6 +255,8 @@ struct RisingHeadline: View {
     var replayKey: AnyHashable = 0
     var alignment: HorizontalAlignment = .leading
     var iridescent = false
+    /// 晚一點才升起（上面那行先）
+    var delay: Double = 0
 
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -270,7 +272,7 @@ struct RisingHeadline: View {
                         content.offset(y: up ? 0 : proxy.size.height * 1.15)
                     }
                     .opacity(up ? 1 : 0)
-                    .animation(Motion.mask.delay(Double(index) * 0.11), value: up)
+                    .animation(Motion.mask.delay(delay + Double(index) * 0.11), value: up)
                     // 遮罩比行高多一點，中文的上下緣不會被切到
                     .mask { Rectangle().padding(.vertical, -6) }
             }
