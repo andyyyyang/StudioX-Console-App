@@ -292,8 +292,8 @@ final class XenaMouth {
 
     // MARK: 聲音的清單
 
-    /// Xena 預設的聲音（「朗讀內容」裡下載得到，名字是 Han）：有就用它（同名的挑品質最好的）
-    static let preferredName = "Han"
+    /// Xena 預設的聲音（iPhone「朗讀內容」裡可以免費下載）：先 Han、再 Lilian；同名的挑品質最好的
+    static let preferredNames = ["Han", "Lilian"]
 
     /// iPhone 上可以用的中文聲音：台灣的加強／高品質最先，再來是其他地區的高品質、加強，最後才是精簡版
     static var voices: [AVSpeechSynthesisVoice] {
@@ -314,12 +314,15 @@ final class XenaMouth {
         }
     }
 
-    /// 設定裡選的聲音；沒選（或選的被刪了）：有 Han 就用 Han，沒有就用最好的那個
+    /// 設定裡選的聲音；沒選（或選的被刪了）：有 Han 就用 Han、再來 Lilian，都沒有就用最好的那個
     static func chosenVoice() -> AVSpeechSynthesisVoice? {
         let id = AppSettings.shared.voiceID
         if !id.isEmpty, let voice = AVSpeechSynthesisVoice(identifier: id) { return voice }
         let all = voices
-        return all.first { $0.name.hasPrefix(preferredName) } ?? all.first ?? AVSpeechSynthesisVoice(language: "zh-TW")
+        for name in preferredNames {
+            if let voice = all.first(where: { $0.name.hasPrefix(name) }) { return voice }
+        }
+        return all.first ?? AVSpeechSynthesisVoice(language: "zh-TW")
     }
 
     /// 現在用的是不是精簡版（聽起來比較機械；設定頁、語音畫面提醒可以免費換）

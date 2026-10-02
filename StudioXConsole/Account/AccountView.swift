@@ -83,7 +83,7 @@ struct AccountView: View {
                                             .foregroundStyle(Theme.ink)
                                         Spacer()
                                         Picker("哪個聲音", selection: $settings.voiceID) {
-                                            Text("自動（有 Han 就用 Han）").tag("")
+                                            Text("自動（Han → Lilian → 最好的）").tag("")
                                             ForEach(XenaMouth.voices, id: \.identifier) { voice in
                                                 Text(XenaMouth.label(voice)).tag(voice.identifier)
                                             }
