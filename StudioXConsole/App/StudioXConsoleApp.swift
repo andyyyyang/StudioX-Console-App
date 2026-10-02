@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct StudioXConsoleApp: App {
+    /// 通知：Apple 給的 device token、點了通知（AppDelegate.swift）
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
 
     init() {
@@ -44,6 +46,15 @@ struct StudioXConsoleApp: App {
 /// 沒登入：3D 歡迎頁；登入後：品牌的載入動畫 → Xena 當店長的主畫面
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
+    /// Face ID 的鎖定畫面、切換 App 的遮罩（自己的視窗，蓋得住 sheet）
+    @State private var cover = LockWindow()
+
+    /// 要不要蓋住：鎖著，或切到別的 App／拉下通知中心（跳 Face ID 的時候不算）
+    private var covered: Bool {
+        guard model.phase != .welcome else { return false }
+        return model.lock.locked || (scenePhase != .active && !model.lock.authenticating)
+    }
 
     var body: some View {
         ZStack {
@@ -79,6 +90,23 @@ struct RootView: View {
         .sensoryFeedback(.success, trigger: model.successTick)
         .sensoryFeedback(.warning, trigger: model.warningTick)
         .sensoryFeedback(.error, trigger: model.errorTick)
+        .background { SceneProbe { cover.scene = $0 } }
+        .onChange(of: covered, initial: true) { _, value in
+            cover.show(value, model: model)
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            switch phase {
+            case .background:
+                model.lock.didLeave()
+            case .active:
+                model.lock.didReturn()
+                if model.lock.locked { Task { await model.lock.unlock() } }
+                // 回到 App：重拿通知的 token（可能換了）、在設定裡打開了通知
+                if model.phase == .ready { Task { await model.push.refresh() } }
+            default:
+                break
+            }
+        }
         .task { await model.start() }
     }
 }
@@ -182,6 +210,20 @@ struct MainView: View {
         }
         .onChange(of: regular, initial: true) { _, value in
             model.setRegular(value)
+        }
+        // 點了通知：打開對應的頁面（冷啟動的那一則等主畫面好了才開）
+        .onChange(of: model.push.pending, initial: true) { _, payload in
+            guard let payload else { return }
+            model.push.pending = nil
+            model.open(payload)
+        }
+        // App 開著時收到通知：首頁、收件匣跟著更新
+        .onChange(of: model.push.receivedTick) {
+            Task { await model.briefing.refresh(sites: model.sites) }
+        }
+        // App 圖示上的數字＝收件匣在等的
+        .onChange(of: model.inboxCount, initial: true) { _, count in
+            model.push.setBadge(count)
         }
     }
 }

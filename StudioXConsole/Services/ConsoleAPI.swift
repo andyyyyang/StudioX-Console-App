@@ -276,6 +276,70 @@ final class ConsoleAPI {
         return .done(r)
     }
 
+    // MARK: 通知（/api/app/devices、/api/app/notifications）
+
+    private func appRequest(_ path: String, method: String = "GET", query: [URLQueryItem] = [], body: JSONValue? = nil) throws -> URLRequest {
+        var c = URLComponents(url: ConsoleConfig.baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { c.queryItems = query }
+        var r = URLRequest(url: c.url!)
+        r.httpMethod = method
+        if let body {
+            r.setValue("application/json", forHTTPHeaderField: "content-type")
+            r.httpBody = try JSONEncoder().encode(body)
+        }
+        return r
+    }
+
+    private func appReply(_ data: Data, _ http: HTTPURLResponse, fallback: String) throws -> JSONValue {
+        let body = (try? json(data)) ?? .null
+        guard http.statusCode == 200 else {
+            if http.statusCode == 404, body["error"]?.string == "not_found", body["message"] == nil { throw APIError.tool("console 還沒更新到支援 App 通知的版本") }
+            throw APIError.tool(body["message"]?.string ?? "\(fallback)（\(http.statusCode)）")
+        }
+        return body
+    }
+
+    /// 登記這台裝置（Apple 給的 token；sandbox＝Xcode 直接裝，production＝TestFlight、App Store）
+    func registerDevice(token: String, environment: String, name: String) async throws -> PushRegistration {
+        let payload: JSONValue = ["token": .string(token), "environment": .string(environment), "name": .string(name)]
+        let (data, http) = try await send { try appRequest("api/app/devices", method: "POST", body: payload) }
+        return PushRegistration(try appReply(data, http, fallback: "通知登記失敗"))
+    }
+
+    /// 關掉哪些網站的通知（網站代號）
+    func setMutedSites(token: String, sites: [String]) async throws -> PushRegistration {
+        let payload: JSONValue = ["token": .string(token), "mutedSites": .array(sites.map { .string($0) })]
+        let (data, http) = try await send { try appRequest("api/app/devices", method: "PATCH", body: payload) }
+        return PushRegistration(try appReply(data, http, fallback: "沒有存起來"))
+    }
+
+    /// 登出前：這台裝置不要再收到通知
+    func removeDevice(token: String) async {
+        _ = try? await send { try appRequest("api/app/devices", method: "DELETE", query: [URLQueryItem(name: "token", value: token)]) }
+    }
+
+    /// 送一則測試通知給這台裝置。失敗丟網站（console）寫的原因
+    func testPush(token: String) async throws {
+        let payload: JSONValue = ["token": .string(token)]
+        let (data, http) = try await send { try appRequest("api/app/devices/test", method: "POST", body: payload) }
+        let body = (try? json(data)) ?? .null
+        guard http.statusCode == 200, body["ok"]?.bool == true else {
+            throw APIError.tool(body["message"]?.string ?? "測試通知沒有送出（\(http.statusCode)）")
+        }
+    }
+
+    /// 他在某個網站的個人通知設定（網站沒有的話 supported＝false）；帶 set 就是改
+    func notificationPrefs(site: String, set: JSONValue? = nil) async throws -> NotificationPrefs {
+        let (data, http): (Data, HTTPURLResponse)
+        if let set {
+            let payload: JSONValue = ["site": .string(site), "prefs": set]
+            (data, http) = try await send { try appRequest("api/app/notifications", method: "PUT", body: payload) }
+        } else {
+            (data, http) = try await send { try appRequest("api/app/notifications", query: [URLQueryItem(name: "site", value: site)]) }
+        }
+        return NotificationPrefs(try appReply(data, http, fallback: "拿不到通知設定"))
+    }
+
     // MARK: Xena（/api/copilot）
 
     private func copilotRequest(_ path: String, method: String = "GET", body: JSONValue? = nil) throws -> URLRequest {

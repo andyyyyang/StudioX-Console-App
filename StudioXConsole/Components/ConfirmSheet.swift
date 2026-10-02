@@ -96,6 +96,10 @@ struct ConfirmSheet: View {
     }
 
     private func run() async {
+        // 退款、刪除這類：確認前再驗證一次（Face ID；在「我 → 安全」可以關掉）。店主驗證碼那一步不用再驗
+        if !needsOwner && (proposal.danger || proposal.typed != nil) {
+            guard await model.lock.verify("確認：\(proposal.title)") else { return }
+        }
         busy = true
         error = nil
         defer { busy = false }

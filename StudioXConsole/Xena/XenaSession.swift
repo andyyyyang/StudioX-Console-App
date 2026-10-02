@@ -54,6 +54,8 @@ final class XenaSession {
 
     /// Xena 動手改了東西（確認卡片執行成功）：App 重新拿資料
     @ObservationIgnored var onDidWrite: (() -> Void)?
+    /// 危險動作確認前的驗證（AppModel 接到 Face ID）；回 false 就不送出
+    @ObservationIgnored var verify: ((String) async -> Bool)?
     @ObservationIgnored private let api: ConsoleAPI
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -239,6 +241,14 @@ final class XenaSession {
         deciding.insert(cardID)
         bump()
         Task {
+            // 退款、刪除這類：確認前再驗證一次（Face ID；設定裡可以關掉）
+            if approve, let card = confirmCard(cardID), card.danger || card.typed != nil, let verify {
+                guard await verify("確認：\(card.title)") else {
+                    deciding.remove(cardID)
+                    bump()
+                    return
+                }
+            }
             do {
                 let r = try await api.copilotDecide(card: cardID, approve: approve, typed: typed, thread: threadID)
                 replace(card: cardID, with: r.card)
@@ -263,6 +273,13 @@ final class XenaSession {
         guard let i = items.firstIndex(where: { $0.id == id }), case .tool(var call) = items[i] else { return }
         change(&call)
         items[i] = .tool(call)
+    }
+
+    private func confirmCard(_ id: String) -> ConfirmCard? {
+        for item in items {
+            if case .confirm(let card) = item, card.id == id { return card }
+        }
+        return nil
     }
 
     private func update(card id: String, _ change: (inout ConfirmCard) -> Void) {

@@ -10,6 +10,8 @@ import SwiftUI
 struct XenaHomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// 「打開通知」的卡片按過「之後再說」
+    @AppStorage("push.promptDismissed") private var promptDismissed = false
 
     var body: some View {
         NavigationStack(path: Bindable(model).homePath) {
@@ -21,6 +23,10 @@ struct XenaHomeView: View {
                             .padding(.top, 8)
                     }
                     VStack(alignment: .leading, spacing: sizeClass == .regular ? 96 : 64) {
+                        if model.push.permission == .notDetermined && !promptDismissed {
+                            NotificationPrompt(dismissed: $promptDismissed)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                         attention
                         yesterday
                         thisWeek
@@ -394,5 +400,33 @@ struct SiteRow: View {
         }
         .padding(.vertical, 16)
         .contentShape(.rect)
+    }
+}
+
+/// 第一次：請他打開通知（先說清楚會通知什麼，再跳系統的詢問）
+private struct NotificationPrompt: View {
+    @Binding var dismissed: Bool
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Eyebrow("通知")
+            Headline("Let me *tap your shoulder*.", role: .h3)
+            Text("客人在等回覆、對話轉給專人、有事等你決定時，我第一時間跟你說。哪些事要通知、什麼時候安靜，都可以在「我 → 通知」調整。")
+                .textRole(.small)
+                .foregroundStyle(Theme.ink2)
+            HStack(spacing: 10) {
+                Button("打開通知") {
+                    Task { await model.push.requestPermission() }
+                }
+                .buttonStyle(.brand(.accent))
+                Button("之後再說") {
+                    withAnimation(Motion.ease) { dismissed = true }
+                }
+                .buttonStyle(.brand(.ghost))
+            }
+        }
+        .panel()
+        .reveal()
     }
 }

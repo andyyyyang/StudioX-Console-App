@@ -14,6 +14,18 @@ open StudioXConsole.xcodeproj
 
 Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用 Xcode 的「同步資料夾」：
 `StudioXConsole/` 底下新增的檔案自動加進專案，不用改 `project.pbxproj`。
+`StudioXConsole.entitlements`（專案根目錄）開了 Push Notifications 與 Time Sensitive Notifications：
+自動簽章會幫 App ID 打開這兩項，第一次用新的 Team 跑實機時 Xcode 會問要不要註冊，按好。
+
+### 建置與上架
+
+- **每次推上 GitHub 都會編一次**（`.github/workflows/ios.yml`）：GitHub 的 Mac（macos-26）選 Xcode 27，
+  編模擬器版、不簽章；編不過時 Actions 的摘要列出每個錯誤與警告（檔案、行號）。只在 App 的檔案有改時跑，
+  同一個分支連推只編最新的一次。私有 repo 的 Mac 分鐘數是一般的 10 倍，注意 GitHub 方案的額度。
+- **TestFlight／App Store 用 Xcode Cloud**：Apple 自己的建置服務，直接連 GitHub 這個 repo，簽章、上傳 TestFlight 都由 Apple 處理，
+  不用把憑證或金鑰放到 GitHub。第一次在 Xcode：Product → Xcode Cloud → Create Workflow → 選這個 App、授權 GitHub、
+  動作選 Archive（iOS）＋ TestFlight（Internal Testing），之後推到指定的分支就會出新版。App Store Connect 要先建好 bundle id
+  `tw.studiox.console` 的 App。開發者帳號每月含 25 小時的 Xcode Cloud。
 
 **console 與各網站要先部署 `claude/ios-app-prototype-4492mf`**：atelier-cms（console、studiox.tw、博信）與 yellowgirl-website（黃毛丫頭）。
 App 的登入 client、API 與欄位定義在那裡（見下面「伺服器」）；網站還沒更新的話，內容的編輯畫面會說明「網站還沒更新到支援 App 編輯的版本」。
@@ -68,8 +80,34 @@ cd Web/welcome && npm install && npm run build
 | **訂單** | 等出貨／待付款／已出貨／已完成／全部；一次選好幾張標記出貨；訂單內容：品項、金額、收件、付款（匯款單標出「客人說的、還沒對帳」，看過帳單可以確認收款）、物流單號與貨態、託運單、7-11 取貨單號、電子發票（載具、統編、捐贈）、退款；標記已出貨、已完成、取消、退款；分享追蹤頁、出貨單 |
 | **收件匣** | 客服信（等最久的在前）、Xena 轉給專人的網站對話、新的專案詢問、信箱（不是客服對話的信：轉成客服對話或收起來）；客服信可以看這位客人的訂單、直接回信、結案 |
 | **搜尋** | 分頁列右邊的放大鏡：一次搜所有網站——訂單編號、收件人、電話、會員、折價碼、商品（商店網站的 search），以及每個網站的文章、作品、服務、FAQ（內容集合的 list）；結果照網站分組，點了直接打開 |
-| **我** | 首頁右上角的頭像（iPad 在側欄）：帳號、各網站的職能、Xena、console、登出（只撤銷這台裝置） |
+| **我** | 首頁右上角的頭像（iPad 在側欄）：帳號、各網站的職能、通知、安全（Face ID）、Xena、console、登出（只撤銷這台裝置、不再收到通知） |
 | **Xena 對話** | tab bar 上面常駐的小條點開；和網頁版同一個 Xena、同一份對話紀錄；查了什麼逐筆顯示，要改東西出確認卡片 |
+
+### 通知
+
+網站要通知後台人員的事（客人在等回覆、Xena 轉真人、新訂單、物流異常、等你決定的自動化…）也送到 App：
+
+- **誰收什麼由網站決定**，和網站後台的手機推播（Web Push）同一套：職能、自己在網站的通知設定、勿擾時段、訊息預覽。
+  網站把該收到的人交給 console，console 經 Apple 的推播（APNs）送到他登記過的 iPhone、iPad。不用先在瀏覽器開通知
+- **第一次**：首頁出現「打開通知」的卡片，說明會通知什麼，按了才跳系統的詢問。允許後 App 向 Apple 拿 device token，
+  登記到 console（`/api/app/devices`；Xcode 直接裝的是測試環境、TestFlight 與 App Store 是正式環境，App 自己看簽章判斷）
+- **我 → 通知**：這台裝置的狀態、送一則測試通知、每個網站開或關；有個人通知設定的網站（黃毛丫頭）可以直接改哪些事要通知、
+  勿擾時段（緊急的照樣通知）、訊息預覽——和網站後台「通知設定 → 手機推播」是同一份
+- **點通知直接打開那件事**：客服信、訂單、Xena 的網站對話、等你決定的自動化執行、新的專案詢問（收件匣的那一段）；
+  通知依網站分組，同一件事的新通知取代舊的，轉真人、等你決定這類緊急的在專注模式也會出現。App 開著時照樣跳出來，首頁與收件匣跟著更新
+- App 圖示上的數字＝收件匣在等的（客人在等回覆＋轉給專人＋新的詢問）
+- 登出時從 console 移除這台裝置；撤銷 App 的授權、被移出網站的人也不會再收到
+
+伺服器要設定 Apple 的推播金鑰（console 的 `APNS_KEY`、`APNS_KEY_ID`、`APNS_TEAM_ID`，見 atelier-cms 的 README）；
+沒設定時「我 → 通知」會說「伺服器還沒設定推播」。
+
+### Face ID
+
+- **鎖住 App**（預設開）：打開 App、離開超過設定的時間（立刻／1、5、15 分鐘／1 小時，預設 1 分鐘）回來要先解鎖；
+  沒有 Face ID／Touch ID 的裝置用裝置密碼。鎖定畫面放在自己的視窗，連打開中的 Xena、確認卡片、編輯畫面都蓋得住
+- **切換 App 時蓋住畫面**：多工畫面、拉下通知中心時看不到訂單與客人資料
+- **退款、刪除前再驗證一次**（預設開）：要打字確認或標成危險的動作，在 App 的確認卡片與 Xena 的確認卡片按下去之前都要再驗證
+- 這三個在「我 → 安全」調整（存在這台裝置）；關掉保護也要先驗證，借手機的人不能自己關
 
 ### 內容的編輯畫面（和 CMS 同步）
 
@@ -97,6 +135,8 @@ cd Web/welcome && npm install && npm run build
 | `GET /api/app/record?site=&entity=&id=` | 一筆資料現在的欄位值（網站的 `site/record`） |
 | `POST /api/mcp` | 各網站的資料與動作：`list`／`get`（order、support_thread、assistant_conversation、inquiry）、`traffic_report`、`ops_report`、`update_order`、`bulk_update_orders`、`refund_order`、`reply_support`、`update` |
 | `/api/copilot/*` | Xena：對話（SSE）、確認卡片、對話紀錄 |
+| `/api/app/devices`、`/api/app/devices/test` | 通知：登記這台裝置、關掉哪些網站、登出時移除、送測試通知 |
+| `GET/PUT /api/app/notifications?site=` | 自己在某個網站的通知設定（網站的 `site/push-prefs`） |
 
 token 存在 Keychain（這台裝置、解鎖後才讀得到）。console 的「AI → 連接外部 AI」看得到「StudioX App」，撤銷＝所有裝置登出。
 
@@ -104,7 +144,8 @@ token 存在 Keychain（這台裝置、解鎖後才讀得到）。console 的「
 
 ```
 StudioXConsole/
-  App/         進入點、分頁與側欄、選單列的快捷鍵、AppModel（登入狀態、網站清單、欄位定義、導覽）
+  App/         進入點、分頁與側欄、選單列的快捷鍵、AppModel（登入狀態、網站清單、欄位定義、導覽、通知打開的頁面）、
+               AppDelegate（通知的 token 與點擊）、鎖定畫面
   Search/      所有網站一起搜
   Brand/       顏色、字（Inter Tight＋Instrument Serif，Fonts/）、動態、平面標誌
   Components/  按鈕、標籤、卡片、細線清單、區塊標題、數字、欄位、空狀態、確認（兩步驟寫入）、招牌元件
@@ -114,10 +155,11 @@ StudioXConsole/
   CMS/         照網站欄位定義畫的清單與編輯畫面、欄位、預覽、圖片、會員、攤位菜單、FAQ、信箱
   Orders/      訂單、訂單內容
   Inbox/       收件匣、客服信、Xena 的網站對話
-  Account/     我
+  Account/     我、通知設定、安全
   Xena/        水滴、對話（XenaSession）、對話畫面
   Model/       資料（照網站工具回的 JSON）、欄位定義（Schema）、Xena 的事件
-  Services/    Auth（OAuth＋PKCE＋Keychain）、ConsoleAPI（token 自動換新、MCP、欄位定義、上傳、Xena 的 SSE）、SiteData（各工具）
+  Services/    Auth（OAuth＋PKCE＋Keychain）、ConsoleAPI（token 自動換新、MCP、欄位定義、上傳、通知、Xena 的 SSE）、SiteData（各工具）、
+               PushCenter（通知）、AppLock（Face ID）
 Web/
   welcome/     歡迎頁的打包（esbuild；logo3d.ts 複製自 studio_website）
   assets/      從後台原始碼產生的圖：icons.cjs（Heroicons）、xena-orb.mjs（Xena 的水滴）
@@ -127,5 +169,5 @@ Swift 6、預設 `@MainActor`、`@Observable`、SwiftUI＋Liquid Glass、Swift C
 
 ## 還沒做
 
-- 推播（APNs）：網站後台現在是 Web Push（`lib/web-push.ts`）；要加 App 的裝置註冊與 APNs 管道（需要 Apple Developer 的推播金鑰）
-- Face ID 解鎖、小工具（今天的訂單、等你回覆的數字）、App Intents（「問 Xena 今天營收」）
+- 小工具（今天的訂單、等你回覆的數字）、App Intents（「問 Xena 今天營收」）
+- 通知上直接回覆、標記出貨（通知的動作按鈕）

@@ -1,0 +1,68 @@
+# 每次推上來都在 GitHub 的 Mac 上用 Xcode 27 編一次 App（模擬器版、不簽章），
+# 編不過就在 Actions 頁面看得到是哪一行。上架 TestFlight 用 Xcode Cloud（見 README「建置與上架」）。
+name: iOS build
+
+on:
+  push:
+    paths:
+      - "StudioXConsole/**"
+      - "StudioXConsole.xcodeproj/**"
+      - "StudioXConsole.entitlements"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "StudioXConsole/**"
+      - "StudioXConsole.xcodeproj/**"
+      - "StudioXConsole.entitlements"
+  workflow_dispatch:
+
+# 同一個分支連推好幾次：只編最新的那次（Mac 的分鐘數比較貴）
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 選 Xcode 27
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then
+            echo "::error::這台 runner 沒有 Xcode 27（App 要 iOS 27 SDK）。有的版本：$(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: 編譯（模擬器、不簽章）
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project StudioXConsole.xcodeproj \
+            -target StudioXConsole \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: 錯誤與警告
+        if: always()
+        run: |
+          if [ -f build.log ]; then
+            echo "## 錯誤" >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^/.*error:" build.log | sed "s|$GITHUB_WORKSPACE/||" | sort -u | head -100 | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || true
+            echo "## 警告" >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^/.*warning:" build.log | sed "s|$GITHUB_WORKSPACE/||" | sort -u | head -100 | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7

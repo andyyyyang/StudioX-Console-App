@@ -48,7 +48,11 @@ struct InboxList: View {
     var picked: Binding<Route?>?
 
     @Environment(AppModel.self) private var model
-    @State private var segment: Segment = .support
+    /// 現在看的分段（存在 AppModel：點了通知會直接切到對應的分段）；這個人沒有的分段就看客服
+    private var segment: Segment {
+        let wanted = Segment(rawValue: model.inboxSegment) ?? .support
+        return segments.contains(wanted) ? wanted : .support
+    }
     @State private var mailbox: [(site: String, row: RecordSummary)] = []
     @State private var mailboxLoaded = false
 
@@ -67,7 +71,7 @@ struct InboxList: View {
                         .textRole(.xs)
                         .foregroundStyle(Theme.muted)
                 }
-                FilterBar(items: segments, selection: $segment, title: { title($0) }, count: { count($0) })
+                FilterBar(items: segments, selection: Binding(get: { segment }, set: { model.inboxSegment = $0.rawValue }), title: { title($0) }, count: { count($0) })
                 switch segment {
                 case .support: supportList(b.awaiting)
                 case .handoffs: handoffList(b.handoffs)

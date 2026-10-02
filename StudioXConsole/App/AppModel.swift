@@ -86,9 +86,16 @@ final class AppModel {
     /// 寬的畫面（iPad 的一般寬度）：網站直接放在側欄
     var regular = false
 
+    /// 收件匣現在看的分段（support、handoffs、inquiries、mailbox；點通知會設好）
+    var inboxSegment = "support"
+
     @ObservationIgnored let api: ConsoleAPI
     let xena: XenaSession
     let briefing: Briefing
+    /// 通知（Apple 的 token、登記到 console、點通知打開的頁面）
+    let push = PushCenter.shared
+    /// Face ID 鎖
+    let lock = AppLock()
     @ObservationIgnored private var schemaTasks: [String: Task<SiteSchema?, Never>] = [:]
 
     init() {
@@ -101,6 +108,12 @@ final class AppModel {
         xena.onDidWrite = { [weak self] in
             Task { await self?.refreshAll() }
         }
+        xena.verify = { [weak self] reason in
+            await self?.lock.verify(reason) ?? false
+        }
+        push.api = api
+        // 還沒登入：歡迎頁不用鎖
+        if !api.isSignedIn { lock.reset() }
     }
 
     var sites: [SiteSummary] { me?.sites ?? [] }
@@ -126,11 +139,14 @@ final class AppModel {
 
     func signIn(using session: WebAuthenticationSession) async throws {
         try await api.signIn(using: session)
+        lock.reset()
         phase = .loading
         await loadMe(minimumDuration: .milliseconds(1900))
     }
 
     func signOut() async {
+        // 先從 console 移除這台裝置（登出之後就沒有 token 可以叫 API 了）
+        await push.unregister()
         await api.signOut()
         didSignOut(message: nil)
     }
@@ -156,6 +172,10 @@ final class AppModel {
         schemaTasks = [:]
         xena.reset()
         briefing.reset()
+        inboxSegment = "support"
+        lock.reset()
+        // 登入過期：token 已經沒了，只清掉這邊的狀態（console 那邊的裝置會因為 App 沒登入而不再收到通知）
+        Task { await push.unregister() }
     }
 
     /// 拿網站清單。剛登入時讓載入動畫至少演完（標誌卡上去、字升起來、000→100）
@@ -169,6 +189,7 @@ final class AppModel {
             me = next
             loadError = nil
             phase = .ready
+            await push.refresh()
             await briefing.refresh(sites: sites)
         } catch APIError.unauthorized {
             didSignOut(message: "登入已經過期，請重新登入")
@@ -241,6 +262,87 @@ final class AppModel {
                 sitesPath = [.site(route.site), route]
             }
         }
+    }
+
+    // MARK: 通知打開的頁面
+
+    /// 點了通知要去的地方（網站給的後台路徑對應到 App 的頁面）
+    enum PushLink: Equatable {
+        case route(Route)
+        /// 訂單清單（那個網站）
+        case orders(site: String)
+        /// 收件匣的某個分段
+        case inbox(String)
+        case home
+    }
+
+    /// 網站的後台路徑 → App 的頁面。對不到的打開那個網站；不知道是哪個網站就回首頁
+    static func link(site: String?, url: String?) -> PushLink {
+        guard let site else { return .home }
+        guard let url, let c = URLComponents(string: url) else { return .route(.site(site)) }
+        var q: [String: String] = [:]
+        for item in c.queryItems ?? [] where q[item.name] == nil {
+            if let value = item.value, !value.isEmpty { q[item.name] = value }
+        }
+        let parts = c.path.split(separator: "/").map(String.init)
+        guard parts.first == "admin" else { return .route(.site(site)) }
+        let section = parts.count > 1 ? parts[1] : ""
+        let sub = parts.count > 2 ? parts[2] : nil
+        switch section {
+        case "support":
+            // yellowgirl 的 Xena 對話（/admin/support/xena?c=）：收件匣的「轉給專人」
+            if sub == "xena" { return .inbox("handoffs") }
+            if let id = q["thread"] { return .route(.thread(site: site, id: id)) }
+            return .inbox("support")
+        case "orders":
+            if let id = sub ?? q["id"] { return .route(.order(site: site, id: id)) }
+            return .orders(site: site)
+        case "inbox":
+            if let id = q["c"] { return .route(.xenaConversation(site: site, id: id)) }
+            if let run = q["run"] { return .route(.record(site: site, entity: "automation_run", id: run)) }
+            if q["inquiry"] != nil { return .inbox("inquiries") }
+            return .inbox("support")
+        case "automations":
+            if let run = q["run"] { return .route(.record(site: site, entity: "automation_run", id: run)) }
+            if let id = sub { return .route(.record(site: site, entity: "automation", id: id)) }
+            return .route(.collection(site: site, entity: "automation"))
+        case "products", "categories":
+            return .route(.collection(site: site, entity: "product"))
+        default:
+            return .route(.site(site))
+        }
+    }
+
+    /// 點了通知：打開對應的頁面，順便重新整理首頁與收件匣
+    func open(_ payload: PushPayload) {
+        guard phase == .ready else { return }
+        // 網站已經不在清單裡（被移出、停用）：回首頁
+        let site = payload.site.flatMap { self.site($0) == nil ? nil : $0 }
+        switch Self.link(site: site, url: payload.url) {
+        case .route(let route):
+            if case .order = route, orderSites.isEmpty {
+                open(.site(route.site))
+            } else {
+                open(route)
+            }
+        case .orders(let site):
+            showXena = false
+            showAccount = false
+            ordersSite = site
+            ordersPath = []
+            tab = orderSites.isEmpty ? .xena : .orders
+        case .inbox(let segment):
+            showXena = false
+            showAccount = false
+            inboxSegment = segment
+            inboxPath = []
+            tab = .inbox
+        case .home:
+            showXena = false
+            showAccount = false
+            tab = .xena
+        }
+        Task { await briefing.refresh(sites: sites) }
     }
 
     /// 「我」：iPad 是側欄的一項；手機從首頁的頭像打開
