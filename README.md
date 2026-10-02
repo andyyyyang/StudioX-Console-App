@@ -50,6 +50,9 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
   5. TestFlight → 內部測試「＋」建一個群組，把自己和同事加進去
   6. 回 Actions 重跑。之後每次推上來，十幾分鐘後 iPhone 上的 TestFlight 就有新版
 
+  **只要重寄邀請**（不建置）：Actions → TestFlight 邀請 → Run workflow（`.github/workflows/testflight-invite.yml`）。
+  邀請信寄到 App Store Connect 帳號的 Apple ID 信箱；也可以直接打開 iPhone 的 TestFlight（同一個 Apple ID 登入）。
+
   金鑰被拒時，Actions 的摘要會列出 Apple 回的錯誤，和每個 Secret 的格式檢查（只檢查格式、不會印出內容）。
   團隊金鑰與個人金鑰（Individual key）都可以，流程會自己判斷。
 

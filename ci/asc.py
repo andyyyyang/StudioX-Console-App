@@ -8,6 +8,8 @@ App Store Connect API（GitHub Actions 的 TestFlight 流程用，.github/workfl
       這一次建置專用的簽章：打開 App ID 的推播能力、建一張 Apple Distribution 憑證（私鑰只在這台 Mac）、
       建 App Store 描述檔，寫出 signing.p12（密碼在 signing.pass）、profile.mobileprovision、appstore.entitlements，
       輸出 cert_id、profile_id、profile_uuid
+  python3 ci/asc.py invite
+      只寄 TestFlight 邀請（帳號持有人＋TESTFLIGHT_TESTERS），不建置；.github/workflows/testflight-invite.yml
   python3 ci/asc.py cleanup --cert <id> --profile <id>
       用完就撤銷憑證、刪掉描述檔（已經上傳的版本不受影響；不會越積越多）
   python3 ci/asc.py finish --app <id> --version 1.0 --build 2610021405 --notes notes.txt
@@ -395,43 +397,86 @@ def testers():
     return people
 
 
-def invite(app_id, group):
-    """把人加進內部測試群組，並寄 TestFlight 邀請（已經接受過的不會重複打擾）"""
-    gid, gname = group["id"], group["attributes"].get("name")
-    for email, (first, last) in testers().items():
+def group_members(gid):
+    """群組裡的測試員（email → 資料）。用群組裡看到的 id 寄邀請最可靠"""
+    out = {}
+    try:
+        for t in call("GET", f"/betaGroups/{gid}/betaTesters").get("data", []):
+            email = (t["attributes"].get("email") or "").lower()
+            if email:
+                out[email] = t
+    except ApiError as e:
+        summary(f"- ⚠️ 讀不到群組的測試員：{apple_error(e)}")
+    return out
+
+
+def send_invitation(app_id, tester_id, tries=4):
+    """寄（或重寄）TestFlight 邀請。剛加進群組時 Apple 可能還沒同步，404 就等一下再試"""
+    for i in range(tries):
         try:
-            found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
-            if found:
-                tester = found[0]
-                try:
-                    call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": tester["id"]}]})
-                except ApiError as e:
-                    if e.status not in (409, 422):
-                        raise
-            else:
-                tester = call("POST", "/betaTesters", {"data": {
-                    "type": "betaTesters",
-                    "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
-                    "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})["data"]
-            state = (tester.get("attributes") or {}).get("state")
-            if state in ("ACCEPTED", "INSTALLED"):
-                summary(f"- {mask(email)} 已經在「{gname}」，打開 iPhone 的 TestFlight 就有新版")
-            elif group["attributes"].get("isInternalGroup"):
-                # 內部測試：加進群組時 Apple 自己寄邀請信（betaTesterInvitations 只給外部測試員用）
-                summary(f"- {mask(email)} 在「{gname}」：Apple 會寄 TestFlight 邀請信；"
-                        "或直接打開 iPhone 的 TestFlight（用同一個 Apple ID 登入）就看得到")
-            else:
-                try:
-                    call("POST", "/betaTesterInvitations", {"data": {
-                        "type": "betaTesterInvitations",
-                        "relationships": {
-                            "app": {"data": {"type": "apps", "id": app_id}},
-                            "betaTester": {"data": {"type": "betaTesters", "id": tester["id"]}}}}})
-                    summary(f"- 寄了 TestFlight 邀請給 {mask(email)}（「{gname}」）")
-                except ApiError as e:
-                    summary(f"- {mask(email)} 加進了「{gname}」；邀請信：{apple_error(e)}")
+            call("POST", "/betaTesterInvitations", {"data": {
+                "type": "betaTesterInvitations",
+                "relationships": {
+                    "app": {"data": {"type": "apps", "id": app_id}},
+                    "betaTester": {"data": {"type": "betaTesters", "id": tester_id}}}}})
+            return None
         except ApiError as e:
-            summary(f"- ⚠️ 沒辦法邀請 {mask(email)}：{apple_error(e)}")
+            if e.status == 404 and i < tries - 1:
+                time.sleep(20)
+                continue
+            return apple_error(e)
+
+
+def invite(app_id, group):
+    """把人加進測試群組，寄 TestFlight 邀請（已經裝好的不打擾）"""
+    gid, gname = group["id"], group["attributes"].get("name")
+    members = group_members(gid)
+    for email, (first, last) in testers().items():
+        tester = members.get(email)
+        if tester is None:
+            try:
+                found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
+                if found:
+                    try:
+                        call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": found[0]["id"]}]})
+                    except ApiError as e:
+                        if e.status not in (409, 422):
+                            raise
+                else:
+                    call("POST", "/betaTesters", {"data": {
+                        "type": "betaTesters",
+                        "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
+                        "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})
+            except ApiError as e:
+                summary(f"- ⚠️ 沒辦法把 {mask(email)} 加進「{gname}」：{apple_error(e)}")
+                continue
+            time.sleep(5)
+            tester = group_members(gid).get(email)
+            if tester is None:
+                summary(f"- ⚠️ {mask(email)} 加進了「{gname}」，但 Apple 還查不到，下一次會再寄邀請")
+                continue
+        state = tester["attributes"].get("state")
+        if state == "INSTALLED":
+            summary(f"- {mask(email)} 已經裝了，打開 iPhone 的 TestFlight 就有新版")
+            continue
+        error = send_invitation(app_id, tester["id"])
+        if error is None:
+            summary(f"- ✉️ 寄了 TestFlight 邀請給 {mask(email)}（「{gname}」）")
+        else:
+            summary(f"- ⚠️ 邀請信沒寄出（{mask(email)}）：{error}\n"
+                    f"  可以在 App Store Connect → TestFlight →「{gname}」→ 測試人員，勾選後按「重新傳送邀請」")
+
+
+def invite_cmd():
+    apps = call("GET", "/apps", query={"filter[bundleId]": BUNDLE_ID, "limit": 1}).get("data", [])
+    if not apps:
+        summary("### ⏸ App Store Connect 上還沒有這個 App")
+        sys.exit(1)
+    groups = internal_groups(apps[0]["id"])
+    if not groups:
+        sys.exit(1)
+    summary(f"### TestFlight 邀請（{apps[0]['attributes'].get('name')}）")
+    invite(apps[0]["id"], groups[0])
 
 
 def give_to_internal_groups(app_id, build_id):
@@ -469,6 +514,7 @@ def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
+    sub.add_parser("invite")
     sg = sub.add_parser("signing")
     sg.add_argument("--dir", required=True)
     sg.add_argument("--name", required=True)
@@ -484,7 +530,7 @@ def main():
     for name in ("ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY"):
         if not os.environ.get(name, "").strip():
             sys.exit(f"缺少 {name}")
-    {"prepare": lambda: prepare(), "signing": lambda: signing(args),
+    {"prepare": lambda: prepare(), "invite": lambda: invite_cmd(), "signing": lambda: signing(args),
      "cleanup": lambda: cleanup(args), "finish": lambda: finish(args)}[args.cmd]()
 
 
