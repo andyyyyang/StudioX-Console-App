@@ -1,7 +1,7 @@
 import Foundation
 
 // Xena 對話的資料型別：和 atelier-cms 的 src/lib/copilot/engine.ts、cards.ts 一致，
-// 接上正式的 console 時直接解 /api/copilot/chat 的 SSE 事件。
+// App 直接解 /api/copilot/chat 的 SSE 事件。
 
 nonisolated enum ConfirmStatus: String, Codable, Sendable {
     case pending, done, failed, cancelled, expired
@@ -86,15 +86,13 @@ nonisolated enum CopilotEvent: Decodable, Sendable {
     case confirm(ConfirmCard)
     case cards(CardsItem)
     case ask(AskItem)
-    /// App 這邊的延伸：回答完建議下一句可以問什麼
-    case suggestions([String])
     case error(String)
     case done
     /// 看不懂的事件（伺服器比 App 新）：略過
     case unknown
 
     private nonisolated enum Keys: String, CodingKey {
-        case type, id, title, text, call, status, result, ms, card, item, items, message
+        case type, id, title, text, call, status, result, ms, card, item, message
     }
 
     init(from decoder: any Decoder) throws {
@@ -119,8 +117,6 @@ nonisolated enum CopilotEvent: Decodable, Sendable {
             self = .cards(try c.decode(CardsItem.self, forKey: .item))
         case "ask":
             self = .ask(try c.decode(AskItem.self, forKey: .item))
-        case "suggestions":
-            self = .suggestions(try c.decodeIfPresent([String].self, forKey: .items) ?? [])
         case "error":
             self = .error(try c.decodeIfPresent(String.self, forKey: .message) ?? "發生錯誤，請再試一次")
         case "done":
@@ -131,20 +127,60 @@ nonisolated enum CopilotEvent: Decodable, Sendable {
     }
 }
 
-/// 送給 Xena 的一句話
-nonisolated struct XenaRequest: Sendable {
-    var message: String
-    var threadID: String?
-    /// 回答 Xena 的提問（ask_user）：那張卡片的 id
-    var answering: String?
-    /// 從哪個網站的頁面問的（讓 Xena 知道在說哪個網站）
-    var siteID: String?
+/// 存起來的一串對話（GET /api/copilot 的 thread.view；engine.ts 的 ViewItem）
+nonisolated enum ViewItemDTO: Decodable, Sendable {
+    case user(String)
+    case assistant(String)
+    case tool(ToolRecord)
+    case confirm(ConfirmCard)
+    case cards(CardsItem)
+    case ask(AskItem)
+    case unknown
+
+    private nonisolated enum Keys: String, CodingKey {
+        case kind, text
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        switch try c.decodeIfPresent(String.self, forKey: .kind) ?? "" {
+        case "user": self = .user(try c.decodeIfPresent(String.self, forKey: .text) ?? "")
+        case "assistant": self = .assistant(try c.decodeIfPresent(String.self, forKey: .text) ?? "")
+        case "tool": self = .tool(try ToolRecord(from: decoder))
+        case "confirm": self = .confirm(try ConfirmCard(from: decoder))
+        case "cards": self = .cards(try CardsItem(from: decoder))
+        case "ask": self = .ask(try AskItem(from: decoder))
+        default: self = .unknown
+        }
+    }
 }
 
-/// 確認卡片按下去之後的結果
-nonisolated struct DecideResult: Sendable {
-    var status: ConfirmStatus
-    var result: String?
-    /// Xena 接著說的話
-    var followUp: String?
+nonisolated struct ThreadDTO: Decodable, Sendable {
+    var id: String
+    var title: String
+    var view: [ViewItemDTO]
+}
+
+/// GET /api/copilot：能不能用、這一串的內容
+nonisolated struct CopilotStateDTO: Decodable, Sendable {
+    var problem: String?
+    var thread: ThreadDTO?
+}
+
+/// 對話列表（GET /api/copilot/threads）
+nonisolated struct ThreadSummaryDTO: Decodable, Sendable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var updatedAt: String?
+}
+
+nonisolated struct ThreadListDTO: Decodable, Sendable {
+    var threads: [ThreadSummaryDTO]
+}
+
+/// 確認卡片按下去之後（POST /api/copilot/confirm）：這張卡的結果、要不要接著確認下一張、執行的工具
+nonisolated struct ConfirmResponseDTO: Decodable, Sendable {
+    var card: ConfirmCard
+    var next: ConfirmCard?
+    var tool: ToolRecord?
 }

@@ -22,7 +22,8 @@ enum ChatItem: Identifiable, Equatable {
     }
 }
 
-/// 一串和 Xena 的對話：送出一句話、把串流事件接成畫面、處理確認卡片
+/// 和 Xena 的對話（console 的 /api/copilot，和網頁版的 Xena 是同一個、同一份對話紀錄）：
+/// 送出一句話、把串流事件接成畫面、處理確認卡片。打開 App 時接著最近的一串。
 @Observable
 final class XenaSession {
     enum Phase: Equatable {
@@ -35,29 +36,41 @@ final class XenaSession {
         case waitingForYou
     }
 
-    static let starters = ["今天營收多少？", "有誰在等我回覆？", "把已付款的訂單改成備貨中", "這週流量怎麼樣？"]
+    static let starters = ["今天有什麼要我注意的？", "有誰在等我回覆？", "昨天賣了多少？", "這週流量怎麼樣？"]
 
     private(set) var items: [ChatItem] = []
     private(set) var phase: Phase = .idle
-    private(set) var suggestions: [String] = XenaSession.starters
-    /// 每次畫面有變（新事件、字多了）加一：捲到最下面
+    private(set) var threadID: String?
+    private(set) var threadTitle: String?
+    /// 不能用的原因（方案、設定）
+    private(set) var problem: String?
+    private(set) var threads: [ThreadSummaryDTO] = []
+    /// 每次畫面有變加一：捲到最下面
     private(set) var revision = 0
     /// 回答完、事情做完時加一：水滴彈一下
     private(set) var pulse = 0
-    /// 正在送出確認的卡片
     private(set) var deciding: Set<String> = []
-    private(set) var threadID: String?
+    private(set) var loaded = false
 
-    private let backend: any ConsoleBackend
+    /// Xena 動手改了東西（確認卡片執行成功）：App 重新拿資料
+    @ObservationIgnored var onDidWrite: (() -> Void)?
+    @ObservationIgnored private let api: ConsoleAPI
     @ObservationIgnored private var task: Task<Void, Never>?
-    /// 做完事（確認卡片執行完、回答結束）：App 重新拿資料
-    @ObservationIgnored var onChange: (() -> Void)?
 
-    init(backend: any ConsoleBackend) {
-        self.backend = backend
+    init(api: ConsoleAPI) {
+        self.api = api
     }
 
     var isBusy: Bool { phase == .thinking || phase == .speaking }
+
+    var mood: XenaMood {
+        switch phase {
+        case .idle: .idle
+        case .thinking: .thinking
+        case .speaking: .speaking
+        case .waitingForYou: .listening
+        }
+    }
 
     private var hasPendingConfirm: Bool {
         items.contains { item in
@@ -66,7 +79,86 @@ final class XenaSession {
         }
     }
 
-    func send(_ text: String, answering: String? = nil, siteID: String? = nil) {
+    // MARK: 對話串
+
+    /// 接著最近的一串（網頁上聊到一半的，在 App 裡也看得到）
+    func loadLatest() async {
+        guard !loaded else { return }
+        loaded = true
+        do {
+            let state = try await api.copilotState()
+            problem = state.problem
+            // 從別的頁面「問 Xena」已經開始新的一句了：不要用舊的那串蓋掉
+            guard items.isEmpty, !isBusy else { return }
+            apply(thread: state.thread)
+        } catch {
+            problem = error.localizedDescription
+            // 下次打開再試
+            loaded = false
+        }
+    }
+
+    func open(thread id: String) async {
+        stop()
+        do {
+            apply(thread: try await api.copilotState(thread: id).thread)
+        } catch {
+            items.append(.notice(id: newID("notice"), text: error.localizedDescription))
+        }
+        bump()
+    }
+
+    func loadThreads() async {
+        threads = (try? await api.copilotThreads()) ?? threads
+    }
+
+    func deleteThread(_ id: String) async {
+        try? await api.deleteThread(id)
+        threads.removeAll { $0.id == id }
+        if id == threadID { newThread() }
+    }
+
+    /// 開新的一串
+    func newThread() {
+        stop()
+        items = []
+        threadID = nil
+        threadTitle = nil
+        phase = .idle
+        bump()
+    }
+
+    /// 登出
+    func reset() {
+        newThread()
+        threads = []
+        problem = nil
+        loaded = false
+    }
+
+    private func apply(thread: ThreadDTO?) {
+        threadID = thread?.id
+        threadTitle = thread?.title
+        var restored: [ChatItem] = []
+        for (i, item) in (thread?.view ?? []).enumerated() {
+            switch item {
+            case .user(let text): restored.append(.user(id: "u\(i)", text: text))
+            case .assistant(let text): restored.append(.assistant(id: "a\(i)", text: text))
+            case .tool(let t): restored.append(.tool(t))
+            case .confirm(let c): restored.append(.confirm(c))
+            case .cards(let c): restored.append(.cards(c))
+            case .ask(let a): restored.append(.ask(a))
+            case .unknown: break
+            }
+        }
+        items = restored
+        phase = hasPendingConfirm ? .waitingForYou : .idle
+        bump()
+    }
+
+    // MARK: 說話
+
+    func send(_ text: String, answering: String? = nil) {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, !isBusy else { return }
         if let answering, let i = items.firstIndex(where: { $0.id == answering }), case .ask(var ask) = items[i] {
@@ -74,17 +166,18 @@ final class XenaSession {
             items[i] = .ask(ask)
         }
         items.append(.user(id: newID("user"), text: message))
-        suggestions = []
         phase = .thinking
         bump()
-        let stream = backend.chat(XenaRequest(message: message, threadID: threadID, answering: answering, siteID: siteID))
+        let stream = api.copilotChat(message: message, thread: threadID, answering: answering)
         task = Task { [weak self] in
             do {
                 for try await event in stream {
                     self?.apply(event)
                 }
+            } catch is CancellationError {
+                // 使用者按了停止
             } catch {
-                self?.items.append(.notice(id: newID("notice"), text: "連線中斷了，再試一次？"))
+                self?.items.append(.notice(id: newID("notice"), text: error.localizedDescription))
             }
             self?.finish()
         }
@@ -93,50 +186,14 @@ final class XenaSession {
     func stop() {
         task?.cancel()
         task = nil
-        finish()
-    }
-
-    /// 開新的一串
-    func reset() {
-        task?.cancel()
-        task = nil
-        items = []
-        threadID = nil
-        phase = .idle
-        suggestions = Self.starters
-        bump()
-    }
-
-    func decide(_ cardID: String, approve: Bool, typed: String? = nil) {
-        guard !deciding.contains(cardID) else { return }
-        deciding.insert(cardID)
-        bump()
-        Task {
-            do {
-                let r = try await backend.decide(cardID, approve: approve, typed: typed)
-                updateConfirm(cardID) {
-                    $0.status = r.status
-                    $0.result = r.result
-                }
-                if let follow = r.followUp {
-                    items.append(.assistant(id: newID("assistant"), text: follow))
-                }
-                if r.status == .done { pulse += 1 }
-            } catch {
-                // 卡片留著，可以再按一次
-                updateConfirm(cardID) { $0.result = error.localizedDescription }
-            }
-            deciding.remove(cardID)
-            phase = hasPendingConfirm ? .waitingForYou : .idle
-            bump()
-            onChange?()
-        }
+        if isBusy { finish() }
     }
 
     private func apply(_ event: CopilotEvent) {
         switch event {
-        case .thread(let id, _):
+        case .thread(let id, let title):
             threadID = id
+            threadTitle = title
         case .text(let chunk):
             phase = .speaking
             if case .assistant(let id, let text)? = items.last {
@@ -148,11 +205,10 @@ final class XenaSession {
             phase = .thinking
             items.append(.tool(call))
         case .toolDone(let id, let status, let result, let ms):
-            if let i = items.firstIndex(where: { $0.id == id }), case .tool(var call) = items[i] {
-                call.status = status
-                call.result = result
-                call.ms = ms
-                items[i] = .tool(call)
+            update(tool: id) {
+                $0.status = status
+                $0.result = result
+                $0.ms = ms
             }
         case .confirm(let card):
             items.append(.confirm(card))
@@ -160,8 +216,6 @@ final class XenaSession {
             items.append(.cards(item))
         case .ask(let item):
             items.append(.ask(item))
-        case .suggestions(let list):
-            suggestions = list
         case .error(let message):
             items.append(.notice(id: newID("notice"), text: message))
         case .done, .unknown:
@@ -174,20 +228,59 @@ final class XenaSession {
         let wasWorking = isBusy
         phase = hasPendingConfirm ? .waitingForYou : .idle
         if wasWorking { pulse += 1 }
-        if suggestions.isEmpty && !hasPendingConfirm && !items.contains(where: { if case .ask(let a) = $0 { return a.answer == nil }; return false }) {
-            suggestions = Self.starters
-        }
         bump()
-        onChange?()
     }
 
-    private func updateConfirm(_ id: String, _ change: (inout ConfirmCard) -> Void) {
+    // MARK: 確認卡片
+
+    /// 確認執行或取消（退款、刪除要打字）。確認碼只在伺服器，App 只送決定
+    func decide(_ cardID: String, approve: Bool, typed: String? = nil) {
+        guard !deciding.contains(cardID) else { return }
+        deciding.insert(cardID)
+        bump()
+        Task {
+            do {
+                let r = try await api.copilotDecide(card: cardID, approve: approve, typed: typed, thread: threadID)
+                replace(card: cardID, with: r.card)
+                if let tool = r.tool {
+                    if let i = items.firstIndex(where: { $0.id == tool.id }) { items[i] = .tool(tool) } else { items.append(.tool(tool)) }
+                }
+                if let next = r.next { items.append(.confirm(next)) }
+                if r.card.status == .done {
+                    pulse += 1
+                    onDidWrite?()
+                }
+            } catch {
+                update(card: cardID) { $0.result = error.localizedDescription }
+            }
+            deciding.remove(cardID)
+            phase = hasPendingConfirm ? .waitingForYou : .idle
+            bump()
+        }
+    }
+
+    private func update(tool id: String, _ change: (inout ToolRecord) -> Void) {
+        guard let i = items.firstIndex(where: { $0.id == id }), case .tool(var call) = items[i] else { return }
+        change(&call)
+        items[i] = .tool(call)
+    }
+
+    private func update(card id: String, _ change: (inout ConfirmCard) -> Void) {
         guard let i = items.firstIndex(where: { $0.id == id }), case .confirm(var card) = items[i] else { return }
         change(&card)
+        items[i] = .confirm(card)
+    }
+
+    private func replace(card id: String, with card: ConfirmCard) {
+        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         items[i] = .confirm(card)
     }
 
     private func bump() {
         revision &+= 1
     }
+}
+
+nonisolated func newID(_ prefix: String) -> String {
+    "\(prefix)-\(UUID().uuidString.prefix(8).lowercased())"
 }

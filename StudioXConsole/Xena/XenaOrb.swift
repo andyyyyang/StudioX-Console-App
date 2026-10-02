@@ -1,278 +1,193 @@
 import SwiftUI
 
-/// Xena 現在的狀態：決定水滴的能量（變形、旋轉、流光、呼吸的速度與幅度）
+/// Xena 現在在做什麼：決定水滴的速度（和網頁版一樣只有「靜靜呼吸」與「正在回答」兩種，中間平滑過渡）
 enum XenaMood: Equatable {
-    /// 值班中：靜靜呼吸
     case idle
-    /// 在聽你說（打字中、等你確認）
+    /// 在等你（打字中、有確認卡片等你按）
     case listening
     /// 查資料、呼叫工具
     case thinking
-    /// 正在回答
+    /// 回答中
     case speaking
-    /// 有事要跟你說：光核偏暖
-    case alert
-    /// 夜班：暗一點、慢一點，還是醒著
-    case resting
 
     var energy: Double {
         switch self {
-        case .idle: 0.08
+        case .idle: 0
         case .listening: 0.35
-        case .thinking: 0.75
-        case .speaking: 1
-        case .alert: 0.4
-        case .resting: 0
+        case .thinking, .speaking: 1
         }
     }
 
     var label: String {
         switch self {
         case .idle: "值班中"
-        case .listening: "在聽你說"
+        case .listening: "在等你"
         case .thinking: "查資料中…"
         case .speaking: "回覆中…"
-        case .alert: "有事想跟你說"
-        case .resting: "夜班中"
         }
     }
 }
 
-/// Xena 的玻璃水滴（和網頁版同一顆：atelier-cms 的 copilot/orb3d.ts、orb-motion.ts）
-///   - 中間一團會發光、會旋轉的彩色光核（粉、青、琥珀、紫四團光）
-///   - 左上一扇柔和的窗光、清透的玻璃邊緣（iOS 的 Liquid Glass，會折射後面的畫面）
-///   - 底下一圈會呼吸的淡淡光暈；回答時晃得大一點、轉得快一點，回答完「彈」一下（pulse 加一）
+/// Xena 的玻璃水滴：和後台右下角那顆同一個樣子（atelier-cms 的 copilot/styles.ts 的 ORB_BALL_CSS）。
+/// 五層圖（光暈、水珠、光核、邊緣的流光、玻璃的柔光）是直接從那份 CSS 畫出來的（Assets 的 Xena/），
+/// 這裡只負責照網頁的節奏動：
+///   靜靜呼吸：光暈與光核 3.8 秒一次、水珠 9 秒變形一輪、流光 14 秒轉一圈（很淡）
+///   正在回答：光暈與光核 1.1 秒、水珠 2.4 秒、光核 2.2 秒轉一圈、流光 1.1 秒一圈（全亮）
+/// 兩種之間用「能量」平滑過渡、相位累加，切換時不會跳。回答完、事情做完 pulse 加一：彈一下。
+/// 出場像一滴水冒出來（從一個點長大、稍微超過再彈回）。減少動態時停住。
 struct XenaOrb: View {
     var mood: XenaMood = .idle
+    /// 水珠的直徑（光暈在外面，整個畫框是 1.7 倍）
     var size: CGFloat = 120
-    /// 每加一次就彈一下（回答結束、事情做完）
     var pulse: Int = 0
 
     @State private var motion = OrbMotion()
+    @State private var entered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: size < 60 ? 1.0 / 30 : nil, paused: reduceMotion)) { context in
-            let frame = motion.step(context.date.timeIntervalSinceReferenceDate, mood: mood)
-            OrbLayers(frame: frame, size: size, dark: scheme == .dark, glass: !reduceTransparency)
+        TimelineView(.animation(minimumInterval: size < 48 ? 1.0 / 30 : nil, paused: reduceMotion)) { context in
+            OrbLayers(frame: motion.step(context.date.timeIntervalSinceReferenceDate, energy: mood.energy), size: size)
         }
-        .frame(width: size * 1.36, height: size * 1.36)
+        .frame(width: size * OrbLayers.canvas, height: size * OrbLayers.canvas)
+        .scaleEffect(entered || reduceMotion ? 1 : 0.01)
+        .offset(y: entered || reduceMotion ? 0 : size * 0.12)
+        .onAppear {
+            guard !entered else { return }
+            withAnimation(.spring(response: 0.75, dampingFraction: 0.55)) { entered = true }
+        }
         .onChange(of: pulse) { motion.pop() }
         .accessibilityElement()
         .accessibilityLabel("Xena，\(mood.label)")
     }
 }
 
-/// 一格畫面要用的數值
+/// 一格要用的數值
 struct OrbFrame {
-    var energy: Double
+    var haloScale: Double
+    var haloOpacity: Double
+    var morphX: Double
+    var morphY: Double
+    var glowScale: Double
+    var glowOpacity: Double
     var swirl: Double
-    var morph: Double
     var flow: Double
-    var breath: Double
+    var flowOpacity: Double
     var pop: Double
-    /// 0～1：有事要說時光核偏暖
-    var warmth: Double
-    /// 0～1：夜班時暗一點
-    var rest: Double
 }
 
-/// 動態：能量平滑地追向目標值，各種相位用累加的（從回答切回靜止時是慢慢減速，不會跳回原位）。
-/// 不是 @Observable：只在畫面每一格裡往前推，不觸發重畫
+/// 能量平滑追目標，各動畫的相位用累加的（速度變了也不會跳）。不是 @Observable：只在每一格裡往前推
 final class OrbMotion {
     private var last: TimeInterval?
-    private var energy = 0.08
-    private var warmth = 0.0
-    private var rest = 0.0
-    private var swirl = Double.random(in: 0...6)
-    private var morph = Double.random(in: 0...100)
-    private var flow = 0.0
-    private var breath = 0.0
+    private var energy = 0.0
+    private var halo = 0.0
+    private var morph = Double.random(in: 0...1)
+    private var swirl = Double.random(in: 0...(2 * .pi))
+    private var flow = Double.random(in: 0...(2 * .pi))
     private var popAt: TimeInterval = -10
 
     func pop() {
         popAt = last ?? 0
     }
 
-    func step(_ t: TimeInterval, mood: XenaMood) -> OrbFrame {
+    func step(_ t: TimeInterval, energy target: Double) -> OrbFrame {
         let dt = min(max(t - (last ?? t), 0), 1.0 / 15)
         last = t
-        let k = 1 - exp(-dt * 3.2)
-        let warmTarget: Double = mood == .alert ? 1 : 0
-        let restTarget: Double = mood == .resting ? 1 : 0
-        energy += (mood.energy - energy) * k
-        warmth += (warmTarget - warmth) * k
-        rest += (restTarget - rest) * k
-        swirl += dt * lerp(0.35, 2.6, energy)
-        morph += dt * lerp(0.45, 1.5, energy)
-        flow += dt * lerp(0.5, 3.8, energy)
-        breath += dt * lerp(1.05, 2.1, energy) * (1 - 0.45 * rest)
+        energy += (target - energy) * (1 - exp(-dt * 3))
+        let e = energy
+        // 一輪幾秒（ease-in-out 的呼吸用 sin 近似）
+        halo += dt / lerp(3.8, 1.1, e)
+        morph += dt / lerp(9, 2.4, e)
+        swirl += dt * 2 * .pi / lerp(18, 2.2, e)
+        flow += dt * 2 * .pi / lerp(14, 1.1, e)
+
+        let breathe = 0.5 - 0.5 * cos(halo * 2 * .pi)
+        // cp-morph：0% (1,1) → 25% (1.015,.985) → 50% (.99,1.015) → 75% (1.01,.99)
+        let m = morph * 2 * .pi
         let since = t - popAt
-        let pop = since >= 0 && since < 1.2 ? sin(min(since / 0.35, 1) * .pi / 2) * exp(-since * 3.2) : 0
-        return OrbFrame(energy: energy, swirl: swirl, morph: morph, flow: flow, breath: breath, pop: pop, warmth: warmth, rest: rest)
+        let pop = since >= 0 && since < 1.2 ? sin(min(since / 0.3, 1) * .pi / 2) * exp(-since * 3.5) : 0
+        return OrbFrame(
+            haloScale: lerp(0.96, 1.04, breathe),
+            haloOpacity: lerp(0.6, 1, breathe),
+            morphX: 1 + 0.0125 * sin(m),
+            morphY: 1 - 0.0125 * sin(m) + 0.0025 * sin(2 * m),
+            glowScale: lerp(0.97, 1.02, breathe),
+            glowOpacity: lerp(0.85, 1, breathe),
+            swirl: swirl,
+            flow: flow,
+            flowOpacity: lerp(0.35, 1, e),
+            pop: pop
+        )
     }
 }
 
 private struct OrbLayers: View {
+    /// 圖的畫布是水珠的幾倍大（光暈在 CSS 裡是 inset -32%，再留一點模糊的空間）
+    static let canvas: CGFloat = 1.7
+
     let frame: OrbFrame
     let size: CGFloat
-    let dark: Bool
-    let glass: Bool
 
     var body: some View {
         let f = frame
-        let wobble = lerp(0.012, 0.035, f.energy)
-        let sx = 1 + wobble * sin(f.morph * 0.71) + 0.07 * f.pop
-        let sy = 1 + wobble * cos(f.morph * 0.53) + 0.07 * f.pop
-        let breathe = 0.5 + 0.5 * sin(f.breath)
+        let bump = 1 + 0.08 * f.pop
         ZStack {
-            halo(breathe)
-            ball
-                .scaleEffect(x: sx, y: sy)
-        }
-    }
-
-    /// 底下一圈會呼吸的光暈：邊緣帶顏色、中間是空的
-    private func halo(_ breathe: Double) -> some View {
-        Circle()
-            .stroke(
-                AngularGradient(
-                    colors: [XenaPalette.pink, XenaPalette.violet, XenaPalette.cyan, XenaPalette.amber, XenaPalette.pink],
-                    center: .center,
-                    angle: .radians(frame.flow * 0.6)
-                ),
-                lineWidth: size * 0.16
-            )
-            .frame(width: size * 1.02, height: size * 1.02)
-            .blur(radius: size * 0.11)
-            .opacity((0.26 + 0.2 * breathe) * (1 - 0.5 * frame.rest) + 0.28 * frame.energy)
-            .offset(y: size * 0.04)
-    }
-
-    private var ball: some View {
-        ZStack {
-            // 清透的水
-            Circle()
-                .fill(RadialGradient(
-                    colors: [.white.opacity(dark ? 0.06 : 0.3), .white.opacity(dark ? 0.02 : 0.08)],
-                    center: UnitPoint(x: 0.4, y: 0.35),
-                    startRadius: 0,
-                    endRadius: size * 0.6
-                ))
-            core
-            // 下半部的陰影：有厚度
-            Circle()
-                .fill(RadialGradient(
-                    colors: [.clear, .black.opacity(dark ? 0.4 : 0.14)],
-                    center: UnitPoint(x: 0.5, y: 0.3),
-                    startRadius: size * 0.28,
-                    endRadius: size * 0.62
-                ))
-            // 左上一扇柔和的窗光
-            Ellipse()
-                .fill(.white.opacity(0.85))
-                .frame(width: size * 0.34, height: size * 0.19)
-                .rotationEffect(.degrees(-32))
-                .offset(x: -size * 0.19, y: -size * 0.24)
-                .blur(radius: size * 0.03)
-            Circle()
-                .fill(.white)
-                .frame(width: size * 0.06, height: size * 0.06)
-                .offset(x: -size * 0.12, y: -size * 0.31)
-                .blur(radius: size * 0.006)
-                .opacity(0.9)
-            // 玻璃邊緣
-            Circle()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.9), .white.opacity(0.05), .white.opacity(0.4)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: max(0.8, size * 0.012)
-                )
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .background {
-            if glass {
-                Color.clear.glassEffect(.clear, in: Circle())
-            } else {
-                Circle().fill(Brand.sheet)
+            layer("halo")
+                .scaleEffect(f.haloScale)
+                .opacity(f.haloOpacity)
+            ZStack {
+                layer("ball")
+                layer("core")
+                    .rotationEffect(.radians(f.swirl))
+                    .scaleEffect(f.glowScale)
+                    .opacity(f.glowOpacity)
+                layer("flow")
+                    .rotationEffect(.radians(f.flow))
+                    .opacity(f.flowOpacity)
+                    .blendMode(.screen)
+                layer("glass")
             }
+            .scaleEffect(x: f.morphX * bump, y: f.morphY * bump)
         }
-        .shadow(color: XenaPalette.violet.opacity(0.16 + 0.22 * frame.energy), radius: size * 0.12, y: size * 0.06)
+        .frame(width: size * Self.canvas, height: size * Self.canvas)
     }
 
-    /// 中間發光的彩色光核：四團顏色在裡面旋轉、被扭成漩渦
-    private var core: some View {
-        let f = frame
-        let warm = f.warmth
-        let colors = [
-            XenaPalette.pink.mix(with: Brand.accent, by: warm * 0.6),
-            XenaPalette.cyan.mix(with: XenaPalette.amber, by: warm * 0.5),
-            XenaPalette.amber.mix(with: Brand.accent, by: warm * 0.4),
-            XenaPalette.violet.mix(with: XenaPalette.pink, by: warm * 0.4),
-        ]
-        // 四團光的位置（和 orb3d.ts 的 d1～d4 相同，y 向下）
-        let spots: [CGPoint] = [CGPoint(x: -0.42, y: -0.34), CGPoint(x: 0.44, y: -0.3), CGPoint(x: 0.36, y: 0.42), CGPoint(x: -0.38, y: 0.4)]
-        return Canvas { ctx, canvas in
-            let r = min(canvas.width, canvas.height) / 2
-            let c = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
-            ctx.addFilter(.blur(radius: r * 0.22))
-            if dark { ctx.blendMode = .plusLighter }
-            let a = f.swirl * 0.55
-            for (i, spot) in spots.enumerated() {
-                let wob = 0.14 * sin(f.morph * 0.9 + Double(i) * 1.7)
-                let x = Double(spot.x) * cos(a) - Double(spot.y) * sin(a) + wob
-                let y = Double(spot.x) * sin(a) + Double(spot.y) * cos(a) + 0.1 * cos(f.morph * 0.7 + Double(i))
-                let blob = r * 0.6
-                let px = c.x + CGFloat(x) * r * 0.78
-                let py = c.y + CGFloat(y) * r * 0.78
-                ctx.fill(
-                    Path(ellipseIn: CGRect(x: px - blob, y: py - blob, width: blob * 2, height: blob * 2)),
-                    with: .color(colors[i].opacity(0.95))
-                )
-            }
-        }
-        .mask {
-            RadialGradient(colors: [.black, .black.opacity(0.85), .clear], center: .center, startRadius: 0, endRadius: size * 0.47)
-        }
-        .saturation(1 - 0.45 * f.rest)
-        .opacity(0.8 + 0.2 * f.energy - 0.25 * f.rest)
+    private func layer(_ name: String) -> some View {
+        Image("Xena/orb-\(name)")
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size * Self.canvas, height: size * Self.canvas)
     }
 }
 
-/// 對話裡每一段 Xena 的回答前面的小水滴（靜態，不耗電）
-struct OrbDot: View {
-    var size: CGFloat = 18
+/// 小小的 Xena（對話裡的頭像、清單）：後台側欄的 OrbIcon（Assets 的 XenaOrb）
+struct OrbIcon: View {
+    var size: CGFloat = 20
 
     var body: some View {
-        Circle()
-            .fill(AngularGradient(colors: [XenaPalette.pink, XenaPalette.violet, XenaPalette.cyan, XenaPalette.amber, XenaPalette.pink], center: .center))
-            .blur(radius: size * 0.12)
-            .overlay {
-                Circle()
-                    .fill(RadialGradient(colors: [.white.opacity(0.85), .clear], center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: size * 0.4))
-            }
-            .clipShape(Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 0.5))
+        Image("XenaOrb")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            // 圖的畫布 100、水珠 76：放大到水珠剛好是 size
+            .frame(width: size * 100 / 76, height: size * 100 / 76)
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
 }
 
+nonisolated func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
+    a + (b - a) * t
+}
+
 #Preview {
-    VStack(spacing: 30) {
-        XenaOrb(mood: .idle, size: 140)
-        HStack(spacing: 20) {
-            XenaOrb(mood: .speaking, size: 70)
-            XenaOrb(mood: .alert, size: 70)
-            XenaOrb(mood: .resting, size: 70)
+    VStack(spacing: 24) {
+        XenaOrb(mood: .idle, size: 132)
+        HStack(spacing: 24) {
+            XenaOrb(mood: .thinking, size: 64)
+            OrbIcon(size: 28)
         }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Brand.paper)
+    .admPage()
 }

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>StudioX</title>
+<style>
+/* 和 console 的登入畫面（atelier-cms 的 auth/AuthScreen.tsx）同一套：顏色、字、Logo 的大小與位置 */
+@font-face{font-family:'Inter Tight';font-style:normal;font-display:block;font-weight:100 900;src:url(inter-tight-latin.woff2) format('woff2')}
+:root{--bg:#f2f0eb;--accent:#ff5a1f;--ink:#0f0f0e;--sheet:0px}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0d0c;--ink:#f2f0eb}}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;overscroll-behavior:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+*,*::before,*::after{box-sizing:border-box}
+.au-hero{position:fixed;inset:0;overflow:hidden;display:flex;flex-direction:column;align-items:center;color:var(--ink);
+  padding:max(28px,env(safe-area-inset-top)) 18px var(--sheet);
+  font-family:'Inter Tight',system-ui,-apple-system,'PingFang TC',sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
+.au-canvas{position:absolute;inset:0;width:100%;height:100%;opacity:0;transition:opacity .9s cubic-bezier(.22,1,.36,1);touch-action:none}
+.au-hero.is-3d .au-canvas{opacity:1}
+.au-word{position:relative;z-index:1;margin:0;font-weight:640;letter-spacing:-.055em;line-height:.86;white-space:nowrap;
+  font-size:24vw;pointer-events:none;opacity:0;transform:translateY(12px);animation:au-in .9s cubic-bezier(.22,1,.36,1) .05s forwards}
+.au-stage{position:relative;flex:1;width:100%;display:grid;place-items:center;min-height:0;pointer-events:none}
+.au-stage-box{width:min(64vw,40svh,340px);aspect-ratio:1}
+.au-flat{width:100%;height:100%;color:var(--ink);transition:opacity .6s;animation:au-float 6s ease-in-out infinite}
+.au-hero.is-3d .au-flat{opacity:0;animation:none}
+@keyframes au-in{to{opacity:1;transform:none}}
+@keyframes au-float{50%{transform:translateY(-8px)}}
+@media (prefers-reduced-motion:reduce){.au-word{animation:none;opacity:1;transform:none}.au-flat{animation:none}}
+@media (min-width:700px){.au-word{font-size:12vw}.au-stage-box{width:min(40vw,46svh,460px)}}
+</style>
+</head>
+<body>
+<main class="au-hero">
+  <canvas class="au-canvas" aria-hidden="true"></canvas>
+  <h1 class="au-word">StudioX</h1>
+  <div class="au-stage">
+    <div class="au-stage-box">
+      <!-- 平面 Logo（lib/brand-mark.ts）：3D 準備好之前、或不能畫 3D 的裝置 -->
+      <svg class="au-flat" viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+        <defs><clipPath id="m"><path d="M17.199 16.849H29.65A0.35 0.35 0 0 1 30 17.199V29.65A0.35 0.35 0 0 1 29.65 30H17.199A0.35 0.35 0 0 1 16.849 29.65V17.199A0.35 0.35 0 0 1 17.199 16.849Z"/></clipPath></defs>
+        <path d="M2.35 2H29.155A0.35 0.35 0 0 1 29.403 2.597L2.597 29.403A0.35 0.35 0 0 1 2 29.155V2.35A0.35 0.35 0 0 1 2.35 2Z"/>
+        <g clip-path="url(#m)"><path d="M16.849 16.849H30V30Z"/><path d="M16.849 16.849L30 30H16.849Z" fill="var(--accent)"/></g>
+      </svg>
+    </div>
+  </div>
+</main>
+<script src="welcome.js"></script>
+</body>
+</html>

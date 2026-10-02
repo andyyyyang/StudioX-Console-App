@@ -1,65 +1,64 @@
 import SwiftUI
 
 /// 首頁就是 Xena：24 小時值班的店長。
-///   - 上面：水滴＋她跟你打招呼（一個字一個字打出來）
-///   - 「需要你看一下」：她主動找你的事。要動手改的，按「交給 Xena」先出確認卡片，你確認了她才做
-///   - 「我值班時做了這些」：昨晚到現在的值班紀錄（你確認的事也會記進來）
+///   - 水滴＋她跟你打招呼（照真的資料說：昨天的訂單、現在誰在等你）
+///   - 需要你看一下：客人在等回覆、已付款等出貨、營運異常、Xena 轉給專人的對話、新的專案詢問（點了直接去處理）
+///   - 昨天：有商店的網站各自的營運報表
+///   - 最近 7 天：每個網站的訪客
 struct XenaHomeView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var model = model
-        NavigationStack(path: $model.homePath) {
+        NavigationStack(path: Bindable(model).homePath) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 30) {
+                VStack(alignment: .leading, spacing: 26) {
                     presence
-                    if !model.openNotes.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            SectionHeader(title: "需要你看一下", trailing: "\(model.openNotes.count) 件")
-                            ForEach(model.openNotes) { note in
-                                NoteCard(note: note)
-                                    .transition(.asymmetric(insertion: .opacity, removal: .opacity.combined(with: .scale(scale: 0.96))))
-                            }
-                        }
-                    }
-                    if !model.doneNotes.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionHeader(title: "處理好了")
-                            ForEach(model.doneNotes) { note in
-                                DoneNoteRow(note: note)
-                            }
-                        }
-                    }
-                    shiftLog
+                    attention
+                    yesterday
+                    traffic
                     asks
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, Metric.gutter)
                 .padding(.bottom, 32)
-                .animation(.smooth(duration: 0.45), value: model.notes)
             }
             .scrollIndicators(.hidden)
-            .background {
-                ZStack {
-                    Brand.paper
-                    AmbientField(intensity: 0.45)
-                }
-                .ignoresSafeArea()
-            }
+            .refreshable { [model] in await model.refreshAll() }
+            .admPage()
             .navigationTitle(Date.now.dayTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        model.showXena = true
-                    } label: {
-                        Image(systemName: "text.bubble")
-                    }
-                    .accessibilityLabel("跟 Xena 說話")
-                }
-            }
-            .refreshable { await model.refresh() }
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
         }
+    }
+
+    // MARK: 招呼
+
+    private var greeting: String {
+        let b = model.briefing
+        guard b.updatedAt != nil else { return "我正在看你的網站昨晚到現在的狀況，等我一下…" }
+        let hour = Calendar.current.component(.hour, from: .now)
+        let hello = switch hour {
+        case 5..<11: "早安"
+        case 11..<14: "午安"
+        case 14..<18: "下午好"
+        case 18..<23: "晚上好"
+        default: "這麼晚還在忙"
+        }
+        var parts: [String] = []
+        for site in model.orderSites {
+            if let r = b.ops[site.id] {
+                parts.append(r.createdTotal > 0 ? "昨天\(site.name)有 \(r.createdTotal) 筆訂單、收款 \(ntd(cents: r.revenueCents))" : "昨天\(site.name)沒有新訂單")
+            }
+        }
+        var now: [String] = []
+        if !b.awaiting.isEmpty { now.append("\(b.awaiting.count) 位客人在等回覆") }
+        let ship = b.toShip.values.reduce(0) { $0 + $1.count }
+        if ship > 0 { now.append("\(ship) 筆訂單等出貨") }
+        if !b.handoffs.isEmpty { now.append("\(b.handoffs.count) 段對話轉給專人") }
+        if !b.inquiries.isEmpty { now.append("\(b.inquiries.count) 筆新的專案詢問") }
+        var text = "\(hello)，\(model.me?.name ?? "")。"
+        if !parts.isEmpty { text += parts.joined(separator: "；") + "。" }
+        text += now.isEmpty ? "現在沒有要你決定的事，我繼續看著 ☕️" : "現在" + now.joined(separator: "、") + "，我列在下面。"
+        return text
     }
 
     private var presence: some View {
@@ -67,204 +66,246 @@ struct XenaHomeView: View {
             Button {
                 model.showXena = true
             } label: {
-                XenaOrb(mood: model.xenaMood, size: 132, pulse: model.xena.pulse)
+                XenaOrb(mood: model.xena.mood, size: 112, pulse: model.xena.pulse)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressScale())
             .accessibilityHint("打開對話")
 
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Text("Xena")
-                    .font(.system(size: 30, weight: .semibold))
-                    .tracking(-0.8)
+                    .font(.system(size: 26, weight: .semibold))
+                    .tracking(-0.4)
+                    .foregroundStyle(Theme.ink)
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(model.xenaMood == .resting ? XenaPalette.violet : Brand.success)
+                        .fill(Theme.successFG)
                         .frame(width: 7, height: 7)
-                    Text("店長 · \(model.xenaMood.label) · 24 小時在線")
+                    Text("店長・\(model.xena.mood.label)・24 小時在線")
                 }
-                .font(.footnote)
-                .foregroundStyle(Brand.muted)
+                .font(.admMeta)
+                .foregroundStyle(Theme.inkMuted)
             }
 
-            TypewriterText(text: model.greeting, animate: !model.greeted, speed: .milliseconds(30)) {
-                model.greeted = true
+            TypewriterText(text: greeting, animate: !model.greeted) {
+                if model.briefing.updatedAt != nil { model.greeted = true }
             }
-            .font(.system(size: 17))
-            .foregroundStyle(Brand.ink)
-            .lineSpacing(3)
+            .font(.system(size: 16))
+            .lineSpacing(4)
+            .foregroundStyle(Theme.ink)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
-            .glassEffect(.regular, in: .rect(cornerRadius: 26))
+            .admCard()
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 6)
+        .padding(.top, 4)
     }
 
-    private var shiftLog: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(title: "我值班時做了這些", trailing: "過去 14 小時")
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(model.shiftLog.enumerated()), id: \.element.id) { index, entry in
-                    ShiftRow(entry: entry, isLast: index == model.shiftLog.count - 1)
+    // MARK: 需要你看一下
+
+    @ViewBuilder
+    private var attention: some View {
+        let items = model.briefing.attention(sites: model.sites)
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "需要你看一下") {
+                if model.briefing.loading { ProgressView().controlSize(.small) } else if let at = model.briefing.updatedAt { Text("\(at.clockText) 更新") }
+            }
+            if items.isEmpty {
+                if model.briefing.updatedAt != nil {
+                    EmptyState(icon: "check-circle", title: "都處理好了", message: "沒有要你決定的事，我繼續看著。")
+                        .admCard(padding: 0)
+                } else {
+                    LoadingRow(text: "Xena 正在看各網站…")
+                        .admCard(padding: 0)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 56) }
+                        Button { run(item.action) } label: { AttentionRow(item: item, site: model.site(item.site)) }
+                            .buttonStyle(RowPressStyle())
+                    }
+                }
+                .admCard(padding: 0)
+            }
+            ForEach(model.briefing.failures.sorted(by: { $0.key < $1.key }), id: \.key) { site, message in
+                ErrorNote(message: "\(model.site(site)?.name ?? site)：\(message)") {
+                    Task { await model.refreshAll() }
                 }
             }
-            .raisedCard(cornerRadius: 24, padding: 18)
+        }
+    }
+
+    private func run(_ action: AttentionItem.Action) {
+        switch action {
+        case .inbox:
+            model.tab = .inbox
+        case .orders(let site, let status):
+            model.ordersSite = site
+            model.ordersStatus = status
+            model.tab = .orders
+        case .askXena(let prompt):
+            model.askXena(prompt)
+        }
+    }
+
+    // MARK: 昨天
+
+    @ViewBuilder
+    private var yesterday: some View {
+        let reports = model.orderSites.compactMap { site in model.briefing.ops[site.id].map { (site, $0) } }
+        if !reports.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "昨天") { Text(reports.first?.1.rangeLabel ?? "") }
+                ForEach(reports, id: \.0.id) { site, report in
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            SiteIconView(site: site, size: 28)
+                            Text(site.name)
+                                .font(.admCardTitle)
+                                .foregroundStyle(Theme.ink)
+                        }
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
+                            GridRow {
+                                MetricTile(label: "訂單", value: "\(report.createdTotal)")
+                                MetricTile(label: "收款", value: ntd(cents: report.revenueCents))
+                            }
+                            GridRow {
+                                MetricTile(label: "等付款", value: "\(report.awaitingPayment)")
+                                MetricTile(label: "等出貨", value: "\(report.paidButUnfulfilled)", tone: report.paidButUnfulfilled > 0 ? .gold : nil)
+                            }
+                        }
+                        if !report.summary.isEmpty {
+                            Text(report.summary)
+                                .font(.admMeta)
+                                .foregroundStyle(Theme.inkMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .admCard()
+                }
+            }
+        }
+    }
+
+    // MARK: 最近 7 天
+
+    @ViewBuilder
+    private var traffic: some View {
+        let sites = model.sites.filter { $0.stats != nil }
+        if !sites.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "最近 7 天") { Text("訪客") }
+                VStack(spacing: 0) {
+                    ForEach(Array(sites.enumerated()), id: \.element.id) { index, site in
+                        if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 56) }
+                        Button { model.open(.site(site.id)) } label: { SiteStatRow(site: site) }
+                            .buttonStyle(RowPressStyle())
+                    }
+                }
+                .admCard(padding: 0)
+            }
         }
     }
 
     private var asks: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "你也可以問我")
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(["今天營收多少？", "有誰在等我回覆？", "這週流量怎麼樣？", "幫博信國際起草一篇新消息", "你是誰？"], id: \.self) { prompt in
-                        Button(prompt) { model.askXena(prompt) }
-                            .buttonStyle(.glass)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            .scrollClipDisabled()
-        }
-    }
-}
-
-/// Xena 主動找你的一件事
-private struct NoteCard: View {
-    let note: XenaNote
-    @Environment(AppModel.self) private var model
-    @State private var confirming = false
-    @State private var busy = false
-
-    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: note.kind.symbol)
-                    .foregroundStyle(note.kind.tone.color)
-                if let site = model.site(note.siteID) {
-                    SiteChip(site: site)
-                }
-                Spacer()
-                Text(note.at, format: .relative(presentation: .named))
-                    .font(.caption)
-                    .foregroundStyle(Brand.muted)
-            }
-            Text(note.title)
-                .font(.system(size: 17, weight: .semibold))
-            Text(note.body)
-                .font(.subheadline)
-                .foregroundStyle(Brand.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let card = note.proposal {
-                if confirming {
-                    ConfirmCardView(card: card, busy: busy) { approve, _ in
-                        busy = true
-                        Task {
-                            await model.decideNote(note, approve: approve)
-                            busy = false
-                            confirming = false
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                } else {
-                    HStack(spacing: 10) {
-                        Button {
-                            withAnimation(.smooth) { confirming = true }
-                        } label: {
-                            Label("交給 Xena", systemImage: "sparkles")
-                        }
-                        .buttonStyle(.pill(.dark, compact: true))
-                        Button("看訂單") {
-                            if let first = model.orders.first(where: { $0.status == .paid }) {
-                                model.open(.order(first.id))
-                            }
-                        }
-                        .buttonStyle(.pill(.light, compact: true))
-                    }
-                    .padding(.top, 4)
-                }
-            } else if let prompt = note.prompt {
-                Button {
-                    model.askXena(prompt, site: note.siteID)
-                } label: {
-                    Label(note.promptLabel ?? "問 Xena", systemImage: "sparkles")
-                }
-                .buttonStyle(.pill(.light, compact: true))
-                .padding(.top, 4)
-            }
-        }
-        .padding(18)
-        .background(Brand.sheet.opacity(0.92), in: .rect(cornerRadius: 26))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26)
-                .strokeBorder(note.kind == .attention ? Brand.accent.opacity(0.35) : Brand.line, lineWidth: 1)
+            SectionHeader("問 Xena")
+            ChipFlow(items: XenaSession.starters) { model.askXena($0) }
         }
     }
 }
 
-private struct DoneNoteRow: View {
-    let note: XenaNote
-    @Environment(AppModel.self) private var model
+/// 首頁的一件事
+private struct AttentionRow: View {
+    let item: AttentionItem
+    let site: SiteSummary?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Brand.success)
+            HeroIcon(item.icon, size: 18)
+                .foregroundStyle(item.tone.foreground)
+                .frame(width: 32, height: 32)
+                .background(item.tone.background, in: .rect(cornerRadius: Metric.radiusMd, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(note.title)
-                    .font(.subheadline.weight(.semibold))
-                    .strikethrough(color: Brand.muted)
-                    .foregroundStyle(Brand.muted)
-                Text(note.resolution ?? "")
-                    .font(.footnote)
-                    .foregroundStyle(Brand.muted)
+                Text(item.title)
+                    .font(.admCardTitle)
+                    .foregroundStyle(Theme.ink)
+                    .multilineTextAlignment(.leading)
+                Text(item.detail)
+                    .font(.admMeta)
+                    .foregroundStyle(Theme.inkMuted)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
-            Spacer(minLength: 0)
-            if let site = model.site(note.siteID) {
-                SiteIcon(site: site, size: 22)
-            }
+            Spacer(minLength: 8)
+            HeroIcon("chevron-right", size: 14)
+                .foregroundStyle(Theme.faint)
+                .padding(.top, 9)
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 }
 
-private struct ShiftRow: View {
-    let entry: ShiftEntry
-    let isLast: Bool
-    @Environment(AppModel.self) private var model
+/// 網站一列：圖示、名稱、7 天訪客、走勢（console 網站選擇器的 .au-site）
+struct SiteStatRow: View {
+    let site: SiteSummary
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(entry.at.clockText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(Brand.muted)
-                .frame(width: 40, alignment: .trailing)
-                .padding(.top, 2)
-            VStack(spacing: 0) {
-                Image(systemName: entry.symbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(entry.tone.color)
-                    .frame(width: 24, height: 24)
-                    .background(entry.tone.color.opacity(0.12), in: .circle)
-                if !isLast {
-                    Rectangle()
-                        .fill(Brand.line)
-                        .frame(width: 1)
-                        .frame(maxHeight: .infinity)
+        HStack(spacing: 12) {
+            SiteIconView(site: site, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(site.name)
+                    .font(.admCardTitle)
+                    .foregroundStyle(Theme.ink)
+                Text([site.org, site.host].compactMap { $0 }.joined(separator: " · "))
+                    .font(.admMeta)
+                    .foregroundStyle(Theme.inkMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let stats = site.stats {
+                Sparkline(values: stats.trend.map(Double.init))
+                    .stroke(Theme.chart[0], style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    .frame(width: 56, height: 18)
+                    .opacity(0.8)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(stats.visitors.formatted())
+                        .font(.system(.subheadline, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(Theme.ink)
+                    ChangeLabel(percent: stats.change)
                 }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.text)
-                    .font(.subheadline)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let site = model.site(entry.siteID) {
-                    SiteChip(site: site)
-                }
-            }
-            .padding(.top, 2)
-            .padding(.bottom, isLast ? 0 : 16)
-            Spacer(minLength: 0)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+}
+
+/// 一個數字＋標籤
+struct MetricTile: View {
+    let label: String
+    let value: String
+    var tone: Tone?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            FieldLabel(label)
+            Text(value)
+                .font(.system(.title3, weight: .semibold).monospacedDigit())
+                .foregroundStyle(tone?.foreground ?? Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 清單的一列：按下有淡淡的底（--adm-hover）
+struct RowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Theme.hover : .clear)
     }
 }

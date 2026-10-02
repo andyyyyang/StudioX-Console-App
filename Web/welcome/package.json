@@ -1,0 +1,12 @@
+{
+  "name": "studiox-app-welcome",
+  "private": true,
+  "description": "App 歡迎頁的 3D 玻璃標誌（和 studiox.tw 首頁同一份 logo3d.ts），打包進 StudioXConsole/Welcome/",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "three": "0.186.1"
+  }
+}
