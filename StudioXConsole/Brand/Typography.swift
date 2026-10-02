@@ -182,22 +182,49 @@ struct Headline: View {
     var role: TextRole = .h2
     var color: Color = Theme.ink
     var accent: Color = Theme.accent
+    /// 強調詞用 Xena 的彩虹漸層（介紹頁 .xh__title em：粉 → 淡紫 → 青），不是品牌橘
+    var iridescent = false
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    init(_ text: String, role: TextRole = .h2, color: Color = Theme.ink, accent: Color = Theme.accent) {
+    init(_ text: String, role: TextRole = .h2, color: Color = Theme.ink, accent: Color = Theme.accent, iridescent: Bool = false) {
         self.text = text
         self.role = role
         self.color = color
         self.accent = accent
+        self.iridescent = iridescent
     }
 
     var body: some View {
         let size = role.size(regular: sizeClass == .regular)
-        Text(Self.attributed(text, size: size, role: role, accent: accent))
-            .foregroundStyle(color)
-            .textRole(role)
-            .accessibilityLabel(text.replacingOccurrences(of: "*", with: ""))
+        Group {
+            if iridescent {
+                Self.iridescentText(text, size: size, role: role)
+            } else {
+                Text(Self.attributed(text, size: size, role: role, accent: accent))
+            }
+        }
+        .foregroundStyle(color)
+        .textRole(role)
+        .accessibilityLabel(text.replacingOccurrences(of: "*", with: ""))
+    }
+
+    /// 強調詞是 Xena 的漸層（一段一段接起來的 Text，漸層才畫得上去）
+    static func iridescentText(_ text: String, size: CGFloat, role: TextRole) -> Text {
+        var out = Text(verbatim: "")
+        for (i, part) in text.split(separator: "*", omittingEmptySubsequences: false).enumerated() {
+            let piece = Text(String(part))
+            if i % 2 == 1 {
+                let em = piece
+                    .font(.serif(size * 1.08, relativeTo: role.style))
+                    .tracking(0)
+                    .foregroundStyle(Theme.xenaGradient)
+                out = Text("\(out)\(em)")
+            } else {
+                out = Text("\(out)\(piece)")
+            }
+        }
+        return out
     }
 
     /// 拆成一般字與強調詞；強調詞用 Instrument Serif（襯線字比 Inter Tight 小一點，放大 8% 對齊視覺大小）
@@ -226,15 +253,18 @@ struct RisingHeadline: View {
     var color: Color = Theme.ink
     /// 換了內容要重新升起時改這個
     var replayKey: AnyHashable = 0
+    var alignment: HorizontalAlignment = .leading
+    var iridescent = false
 
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: alignment, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                 let up = shown || reduceMotion
-                Headline(line, role: role, color: color)
+                Headline(line, role: role, color: color, iridescent: iridescent)
+                    .multilineTextAlignment(alignment == .center ? .center : .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .visualEffect { content, proxy in
                         content.offset(y: up ? 0 : proxy.size.height * 1.15)

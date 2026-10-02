@@ -75,7 +75,8 @@ jobs:
           mkdir -p shots
           scenes=(
             "welcome|"
-            "home|-demo"
+            "talk|-demo|5"
+            "home|-demo|13"
             "sites|-demo -demoTab sites"
             "site|-demo -demoRoute site"
             "traffic|-demo -demoRoute traffic"
@@ -97,10 +98,11 @@ jobs:
             xcrun simctl install "$dev" "$app"
             xcrun simctl ui "$dev" appearance "$appearance"
             for scene in "${scenes[@]}"; do
-              name="${scene%%|*}"; args="${scene#*|}"
+              # 名稱|啟動參數|等幾秒（預設 8；talk 是 Xena 說到一半、home 是說完）
+              IFS='|' read -r name args wait <<< "$scene"
               xcrun simctl terminate "$dev" tw.studiox.console 2>/dev/null || true
               xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null
-              sleep 8
+              sleep "${wait:-8}"
               xcrun simctl io "$dev" screenshot "shots/$label-$appearance-$name.png" >/dev/null 2>&1 || true
             done
             xcrun simctl shutdown "$dev" || true

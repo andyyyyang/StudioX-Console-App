@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// 首頁就是 Xena：24 小時值班的店長。版面照 studiox.tw 的首頁：
-///   - Hero：日期、一行一行升起的招呼（照真的資料說）、Xena 的水滴，背後是柔光與點陣
+/// 首頁就是 Xena：24 小時值班的店長。
+///   - Hero：studiox.tw 的 Xena 介紹頁開場——置中的 3D 水珠、背後一團紫粉的光；
+///     她在跟你說話：招呼一行一行升起，接著一個字一個字說今天的狀況，水珠跟著每個字鼓起來、標點換氣；「問問Xena」
 ///   - 跑馬燈：各網站現在的數字（在線、昨天的收款、等出貨）
 ///   - Needs you：客人在等回覆、已付款等出貨、營運異常、轉給專人的對話、新的專案詢問（點了直接去處理）
 ///   - Yesterday：有商店的網站昨天的營運
@@ -12,6 +13,8 @@ struct XenaHomeView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     /// 「打開通知」的卡片按過「之後再說」
     @AppStorage("push.promptDismissed") private var promptDismissed = false
+    /// Xena 說話的聲音（打字機一個字一個字推動水珠）
+    @State private var voice = XenaVoice()
 
     var body: some View {
         NavigationStack(path: Bindable(model).homePath) {
@@ -88,13 +91,19 @@ struct XenaHomeView: View {
         return text
     }
 
+    /// Xena 說話時水珠跟著每個字鼓起來
+    private var heroMood: XenaMood {
+        voice.speaking ? .speaking : model.xena.mood
+    }
+
     private var hero: some View {
         let regular = sizeClass == .regular
-        return VStack(alignment: .leading, spacing: regular ? 40 : 28) {
+        let orb: CGFloat = regular ? 220 : 156
+        let light = orb * 2.6
+        return VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 14) {
                 Eyebrow("\(Date.now.dayTitle) · \(Date.now.englishDay)")
                 Spacer()
-                presence
                 if !regular, let me = model.me {
                     Button { model.goToAccount() } label: {
                         Avatar(name: me.name, imageURL: me.imageURL, size: 32)
@@ -103,65 +112,66 @@ struct XenaHomeView: View {
                     .accessibilityLabel("我的帳號")
                 }
             }
+            .pageWidth()
 
-            if regular {
-                HStack(alignment: .bottom, spacing: 48) {
-                    greeting
-                    Button { model.showXena = true } label: {
-                        XenaOrb(mood: model.xena.mood, size: 200, pulse: model.xena.pulse)
-                    }
-                    .buttonStyle(.press)
-                    .accessibilityLabel("和 Xena 說話")
-                }
-            } else {
-                greeting
-                HStack(alignment: .center, spacing: 16) {
-                    Button { model.showXena = true } label: {
-                        XenaOrb(mood: model.xena.mood, size: 76, pulse: model.xena.pulse)
-                    }
-                    .buttonStyle(.press)
-                    .accessibilityLabel("和 Xena 說話")
-                    Button("和 Xena 說話") { model.showXena = true }
-                        .buttonStyle(.brand(.primary, size: .md, arrow: true))
-                }
+            // Xena：置中的 3D 水珠，背後一團紫粉的光（介紹頁的開場）；點她也能問
+            Button { model.showXena = true } label: {
+                XenaOrb(mood: heroMood, size: orb, pulse: model.xena.pulse, voice: voice, light: light)
+                    .background { XenaLight(radius: light) }
+                    .contentShape(Circle())
             }
+            .buttonStyle(.press)
+            .accessibilityLabel("問問Xena")
+            .padding(.top, regular ? 36 : 24)
+            // 光很大：畫在日期、招呼後面，不蓋到字
+            .zIndex(-1)
+
+            presence
+                .padding(.top, regular ? 4 : 0)
+
+            // 她說的話：招呼一行一行升起，接著一個字一個字說今天的狀況（水珠跟著說話）
+            VStack(spacing: regular ? 24 : 18) {
+                RisingHeadline(
+                    lines: greetingLines,
+                    role: .hero,
+                    replayKey: AnyHashable(model.briefing.updatedAt == nil),
+                    alignment: .center,
+                    iridescent: true
+                )
+                TypewriterText(
+                    text: report,
+                    animate: model.spokenReport != report,
+                    speed: .milliseconds(42),
+                    delay: .milliseconds(model.spokenReport == nil ? 900 : 250),
+                    voice: voice
+                ) {
+                    model.spokenReport = report
+                }
+                .textRole(.lead)
+                .foregroundStyle(Theme.ink2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 560)
+                Button("問問Xena") { model.showXena = true }
+                    .buttonStyle(.brand(.primary, size: .md, arrow: true))
+                    .padding(.top, regular ? 12 : 6)
+            }
+            .frame(maxWidth: .infinity)
+            .pageWidth()
+            .padding(.top, regular ? 28 : 20)
         }
-        .pageWidth()
-        .padding(.top, regular ? 72 : 64)
+        .padding(.top, regular ? 40 : 16)
         .padding(.bottom, regular ? 72 : 48)
-        .background {
-            // 背景：點陣、柔光、四個角的裁切記號（PageHeroFull）
-            ZStack {
-                DotGrid()
-                Glow(size: regular ? 520 : 340)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: regular ? .trailing : .topTrailing)
-                    .offset(x: regular ? -40 : 80, y: regular ? 0 : -40)
-                CropMarks()
-            }
-            .ignoresSafeArea(edges: .top)
-        }
     }
 
-    private var greeting: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            RisingHeadline(lines: greetingLines, role: .hero, replayKey: AnyHashable(model.briefing.updatedAt == nil))
-            TypewriterText(text: report, animate: !model.greeted) {
-                if model.briefing.updatedAt != nil { model.greeted = true }
-            }
-            .textRole(.lead)
-            .foregroundStyle(Theme.ink2)
-            .frame(maxWidth: 560, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Xena 在線
+    /// Xena 在線（說話時寫「正在跟你說」）
     private var presence: some View {
         HStack(spacing: 8) {
             LiveDot()
-            Text("Xena・\(model.xena.mood.label)")
+            Text("Xena・\(voice.speaking ? "正在跟你說" : model.xena.mood.label)")
                 .textRole(.xs)
                 .foregroundStyle(Theme.muted)
+                .contentTransition(.opacity)
+                .animation(.smooth, value: voice.speaking)
         }
         .accessibilityElement(children: .combine)
     }

@@ -1007,34 +1007,63 @@ struct RemoteImage: View {
     }
 }
 
-/// Xena 說話：一個字一個字打出來（版面一開始就用整句的大小，不會一直長高）
+/// Xena 說話：一個字一個字打出來。整句一開始就排好（還沒說到的字是透明的），
+/// 置中、換行都不會跳，版面也不會一直長高。
+/// 給了 voice：每個字讓水珠鼓一下，標點停一下（像換氣），說完 voice 就安靜下來
 struct TypewriterText: View {
     let text: String
     var animate = true
     var speed: Duration = .milliseconds(26)
+    /// 開始說之前等多久（例如等標題升起來）
+    var delay: Duration = .zero
+    var voice: XenaVoice?
     var onFinish: (() -> Void)?
 
     @State private var shown = 0
 
     var body: some View {
-        Text(text)
-            .opacity(0)
-            .overlay(alignment: .topLeading) {
-                Text(String(text.prefix(animate ? shown : text.count)))
-            }
+        Text(display)
             .accessibilityElement()
             .accessibilityLabel(text)
             .task(id: text) {
                 guard animate else { return }
                 shown = 0
-                let total = text.count
-                while shown < total {
-                    try? await Task.sleep(for: speed)
+                if delay > .zero {
+                    try? await Task.sleep(for: delay)
+                    if Task.isCancelled { return }
+                }
+                // 換了一句話時，上一句被取消的收尾不會把這一句的聲音關掉
+                let turn = voice?.begin()
+                defer { if let turn { voice?.end(turn) } }
+                for character in text {
+                    try? await Task.sleep(for: speed + pause())
                     if Task.isCancelled { return }
                     shown += 1
+                    voice?.say(character)
                 }
+                if let turn { voice?.end(turn) }
                 onFinish?()
             }
+    }
+
+    private var display: AttributedString {
+        let count = animate ? min(shown, text.count) : text.count
+        var said = AttributedString(String(text.prefix(count)))
+        var rest = AttributedString(String(text.dropFirst(count)))
+        rest.foregroundColor = Color.clear
+        said.append(rest)
+        return said
+    }
+
+    /// 說話的節奏：逗號短停、句號長停（只有給了 voice 才停，一般的打字機照原本的速度）
+    private func pause() -> Duration {
+        guard voice != nil, shown > 0 else { return .zero }
+        let previous = text[text.index(text.startIndex, offsetBy: shown - 1)]
+        switch previous {
+        case "，", "、", "；", "：", ",", ";": return .milliseconds(170)
+        case "。", "！", "？", "…", ".", "!", "?", "\n": return .milliseconds(320)
+        default: return .zero
+        }
     }
 }
 

@@ -51,16 +51,7 @@ struct OrderDetailView: View {
         .brandPage()
         .navigationTitle(detail.map { "#\($0.summary.number)" } ?? "訂單")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    model.askXena("幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
-                } label: {
-                    HeroIcon("sparkles")
-                }
-                .accessibilityLabel("問 Xena")
-            }
-        }
+        .xenaFocus("order-\(site)-\(orderID)", prompt: "幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
         .task { await load() }
         .sheet(isPresented: $shipping) {
             ShipSheet { tracking in

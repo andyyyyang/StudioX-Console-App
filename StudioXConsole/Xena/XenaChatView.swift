@@ -7,6 +7,8 @@ struct XenaChatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
     @State private var showThreads = false
+    /// 一打開對話，Xena 說自我介紹時水珠跟著說
+    @State private var voice = XenaVoice()
     @FocusState private var focused: Bool
 
     private let bottomID = "bottom"
@@ -54,11 +56,7 @@ struct XenaChatView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
-                        if !session.items.isEmpty {
-                            XenaOrb(mood: session.mood, size: 18, pulse: session.pulse)
-                                .padding(.vertical, -6)
-                        }
-                        VStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .center, spacing: 0) {
                             Text("Xena")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Theme.ink)
@@ -88,16 +86,27 @@ struct XenaChatView: View {
         .task { await session.loadLatest() }
     }
 
+    /// 建議問的：正在看的網站、訂單排第一
+    private var suggestions: [String] {
+        let focus = model.xenaFocus.map { [$0.prompt] } ?? []
+        return focus + XenaSession.starters.filter { !focus.contains($0) }
+    }
+
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 14) {
-            XenaOrb(mood: session.mood, size: 72, pulse: session.pulse)
+            XenaOrb(mood: voice.speaking ? .speaking : session.mood, size: 84, pulse: session.pulse, voice: voice, backdrop: Theme.sheet)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-            Text("我是 Xena，你的店長。問我任何網站的事，或請我動手處理——要改東西之前，我一定先問你。")
-                .font(.system(size: 15))
-                .lineSpacing(4)
-                .foregroundStyle(Theme.muted)
-            ChipFlow(items: XenaSession.starters) { session.send($0) }
+            TypewriterText(
+                text: "我是 Xena，你的店長。問我任何網站的事，或請我動手處理——要改東西之前，我一定先問你。",
+                speed: .milliseconds(30),
+                delay: .milliseconds(350),
+                voice: voice
+            )
+            .font(.system(size: 15))
+            .lineSpacing(4)
+            .foregroundStyle(Theme.muted)
+            ChipFlow(items: suggestions) { session.send($0) }
         }
         .padding(.vertical, 8)
     }
@@ -608,47 +617,35 @@ private struct ThreadListView: View {
     }
 }
 
-/// tab bar 上面常駐的 Xena（後台右下角的水滴）：輪播她正在看著的事，點了打開對話
+/// tab bar 上面的「問問Xena」（首頁以外的每一頁）：一個按鈕，不再放一顆水珠（會動的 Xena 在首頁）。
+/// Xena 在回覆時右邊寫她在做什麼（關掉對話也知道她還在忙）
 struct XenaAccessory: View {
     @Environment(AppModel.self) private var model
-
-    private var lines: [String] {
-        let b = model.briefing
-        var out = ["值班中・看著 \(model.sites.count) 個網站"]
-        if !b.awaiting.isEmpty { out.append("\(b.awaiting.count) 位客人在等回覆") }
-        let ship = b.toShip.values.reduce(0) { $0 + $1.count }
-        if ship > 0 { out.append("\(ship) 筆訂單等出貨") }
-        let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
-        if live > 0 { out.append("現在 \(live) 人在你的網站上") }
-        return out
-    }
 
     var body: some View {
         Button {
             model.showXena = true
         } label: {
-            HStack(spacing: 6) {
-                XenaOrb(mood: model.xena.mood, size: 20, pulse: model.xena.pulse)
-                    .padding(.vertical, -6)
-                TimelineView(.periodic(from: .now, by: 4)) { context in
-                    let all = lines
-                    let index = Int(context.date.timeIntervalSinceReferenceDate / 4) % max(all.count, 1)
-                    Text(model.xena.isBusy ? model.xena.mood.label : all[index])
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                        .animation(.smooth, value: index)
-                }
-                Spacer(minLength: 0)
-                HeroIcon("sparkles", size: 16)
+            HStack(spacing: 8) {
+                HeroIcon("sparkles", size: 17)
                     .foregroundStyle(Theme.accent)
+                Text("問問Xena")
+                    .font(.brand(15, .semibold))
+                    .foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                if model.xena.isBusy {
+                    Text(model.xena.mood.label)
+                        .font(.brand(13, .regular))
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1)
+                        .transition(.opacity)
+                }
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 14)
+            .padding(.horizontal, 16)
             .contentShape(Rectangle())
+            .animation(.smooth, value: model.xena.isBusy)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("跟 Xena 說話")
+        .accessibilityLabel("問問Xena")
     }
 }

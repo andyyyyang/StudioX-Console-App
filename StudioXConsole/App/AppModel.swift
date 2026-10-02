@@ -82,8 +82,10 @@ final class AppModel {
     /// 訂單頁現在看的網站與狀態（首頁的「等出貨」點進去會設好）
     var ordersSite: String?
     var ordersStatus = "paid"
-    /// Xena 的招呼打過字了（之後回到首頁直接顯示）
-    var greeted = false
+    /// 首頁 Xena 已經說過的那段話（同一段話回到首頁不再重說一次）
+    var spokenReport: String?
+    /// 現在在看的網站、訂單：按「問問Xena」時第一個建議就是問這個（.xenaFocus）
+    var xenaFocus: XenaFocus?
     /// 寬的畫面（iPad 的一般寬度）：網站直接放在側欄
     var regular = false
 
@@ -199,7 +201,7 @@ final class AppModel {
         sitePaths = [:]
         showXena = false
         showAccount = false
-        greeted = false
+        spokenReport = nil
         loadError = message
         schemas = [:]
         schemaErrors = [:]
@@ -445,5 +447,35 @@ final class AppModel {
             tab = .xena
             showAccount = true
         }
+    }
+}
+
+/// 畫面上正在看的東西（哪一頁設的、要問 Xena 的那一句）
+struct XenaFocus: Equatable {
+    let id: String
+    let prompt: String
+}
+
+extension View {
+    /// 這一頁在畫面上時，「問問Xena」打開的對話第一個建議就是 prompt（離開這一頁就拿掉，被下一頁換掉的不會誤刪）
+    func xenaFocus(_ id: String, prompt: String) -> some View {
+        modifier(XenaFocusModifier(id: id, prompt: prompt))
+    }
+}
+
+private struct XenaFocusModifier: ViewModifier {
+    let id: String
+    let prompt: String
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { model.xenaFocus = XenaFocus(id: id, prompt: prompt) }
+            .onChange(of: prompt) { _, value in
+                if model.xenaFocus?.id == id { model.xenaFocus = XenaFocus(id: id, prompt: value) }
+            }
+            .onDisappear {
+                if model.xenaFocus?.id == id { model.xenaFocus = nil }
+            }
     }
 }

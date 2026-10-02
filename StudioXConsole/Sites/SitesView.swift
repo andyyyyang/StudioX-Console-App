@@ -106,7 +106,7 @@ struct SiteHomeView: View {
             .brandPage()
             .navigationTitle(site.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { SiteToolbar(site: site, model: model) }
+            .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
         } else {
             EmptyState(title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
                 .pageWidth()
@@ -164,7 +164,7 @@ struct SiteWorkspace: View {
             .brandPage()
             .navigationTitle("概況")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { SiteToolbar(site: site, model: model) }
+            .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
         case .traffic:
             TrafficView(siteID: site.id)
         case .search:
@@ -253,21 +253,6 @@ struct SiteHeader: View {
             }
         }
         .reveal()
-    }
-}
-
-/// 網站頁首右上角：問 Xena
-struct SiteToolbar: ToolbarContent {
-    let site: SiteSummary
-    let model: AppModel
-
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Button { model.askXena("幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣") } label: {
-                HeroIcon("sparkles")
-            }
-            .accessibilityLabel("問 Xena 這個網站")
-        }
     }
 }
 
