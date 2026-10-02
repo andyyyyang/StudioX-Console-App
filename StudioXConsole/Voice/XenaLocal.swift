@@ -94,6 +94,29 @@ final class XenaLocal {
     - 不用再打招呼（畫面上已經說過早安）。最後一句可以溫和地提醒最要緊的那件事。
     """
 
+    // MARK: 長的回答：說重點
+
+    /// 用說的時回答太長：濃縮成一句聽得懂的重點（數字都要在原文裡，不然 nil）
+    func outline(of text: String) async -> String? {
+        guard available else { return nil }
+        let session = LanguageModelSession(instructions: Self.outlineRules)
+        do {
+            let out = try await session.respond(to: text, options: GenerationOptions(temperature: 0.3)).content
+            let cleaned = out
+                .replacingOccurrences(of: #"[*#`「」"“”]"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (4...90).contains(cleaned.count), Self.numbers(in: cleaned).isSubset(of: Self.numbers(in: text)) else { return nil }
+            return cleaned
+        } catch {
+            return nil
+        }
+    }
+
+    private static let outlineRules = """
+    把 Xena 的一段回答濃縮成一句口語的重點，讓老闆用聽的就知道大概：繁體中文、台灣口語、40 字以內。
+    只能說原文裡有的事，數字照抄成阿拉伯數字，不要加開場白、不要說「總結」、不要條列。
+    """
+
     /// 一段話裡的數字（拿掉千分位的逗號）
     static func numbers(in text: String) -> Set<String> {
         let plain = text.replacingOccurrences(of: ",", with: "")

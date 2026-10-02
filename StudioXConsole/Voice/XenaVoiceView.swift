@@ -12,7 +12,7 @@ struct XenaVoiceView: View {
         let c = model.conversation
         let regular = sizeClass == .regular
         // 她丟出東西（問題、卡片、確認）時水珠縮小，讓位給畫面上的東西
-        let busy = !c.turnItems.isEmpty
+        let busy = !c.turnItems.isEmpty || c.readingCard != nil
         let orb: CGFloat = busy ? (regular ? 150 : 104) : (regular ? 240 : 190)
         let light = orb * 2.4
         VStack(spacing: 0) {
@@ -121,7 +121,11 @@ struct XenaVoiceView: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
-                if !c.reply.isEmpty {
+                if let full = c.readingCard {
+                    // 太長：整段放卡片，按一下或說「念給我聽」才全部念
+                    ReplyCard(text: full) { c.readAloud() }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if !c.reply.isEmpty {
                     Text(markdown(c.reply))
                         .textRole(c.turnItems.isEmpty ? .lead : .body)
                         .foregroundStyle(Theme.ink)
@@ -140,7 +144,7 @@ struct XenaVoiceView: View {
         }
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.hidden)
-        .frame(maxHeight: c.turnItems.isEmpty ? (sizeClass == .regular ? 260 : 200) : .infinity)
+        .frame(maxHeight: c.turnItems.isEmpty && c.readingCard == nil ? (sizeClass == .regular ? 260 : 200) : .infinity)
     }
 
     /// 用的是精簡版的聲音：提醒可以免費換成自然一點的
@@ -205,5 +209,31 @@ struct XenaVoiceView: View {
         case .speaking, .thinking: "打斷，換我說"
         default: "開始說話"
         }
+    }
+}
+
+/// 太長的回答：整段在卡片上，下面一顆「念給我聽」
+private struct ReplyCard: View {
+    let text: String
+    let onRead: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(markdown(text))
+                .font(.system(size: 15))
+                .lineSpacing(5)
+                .foregroundStyle(Theme.ink)
+                .tint(Theme.accent)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: onRead) {
+                Label { Text("念給我聽") } icon: { HeroIcon("microphone", size: 15) }
+                    .font(.brand(14, .semibold))
+            }
+            .buttonStyle(.brand(.ghost, size: .sm))
+        }
+        .padding(16)
+        .background(Theme.surface, in: .rect(cornerRadius: Metric.xenaCard, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line) }
     }
 }
