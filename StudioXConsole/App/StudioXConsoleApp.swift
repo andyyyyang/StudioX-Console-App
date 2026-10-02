@@ -151,7 +151,7 @@ struct MainView: View {
         @Bindable var model = model
         let regular = sizeClass == .regular
         TabView(selection: $model.tab) {
-            Tab("Xena", image: "XenaOrb", value: AppTab.xena) {
+            Tab("Xena", image: "XenaTab", value: AppTab.xena) {
                 XenaHomeView()
             }
             Tab("網站", image: "hi-globe-alt", value: AppTab.sites) {

@@ -1,0 +1,128 @@
+# UI 截圖：在 GitHub 的 Mac 上用模擬器打開 App 的每個畫面（示範模式的假資料，見 DemoServer.swift），
+# 截圖存到 docs/screenshots/（iPhone 淺色、深色，iPad 深色），提交回這個分支。
+# 提交訊息有 [screenshots] 才跑（Mac 的分鐘數比較貴），也可以手動 Run workflow。
+name: UI 截圖
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "StudioXConsole/**"
+      - "StudioXConsole.xcodeproj/**"
+      - ".github/workflows/ui-screenshots.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screenshots]')
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 選 Xcode（有 27 用 27，沒有就用最新的）
+        run: |
+          best=""; bestv="0"
+          for app in /Applications/Xcode*.app; do
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null) || continue
+            if [ "$v" != "$bestv" ] && [ "$(printf '%s\n%s\n' "$bestv" "$v" | sort -V | tail -1)" = "$v" ]; then best="$app"; bestv="$v"; fi
+          done
+          sudo xcode-select -s "$best/Contents/Developer"
+          xcodebuild -version
+          echo "SIM_SDK=$(xcrun --sdk iphonesimulator --show-sdk-version)" >> "$GITHUB_ENV"
+
+      - name: 編譯（模擬器、Debug，示範模式只在 Debug）
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project StudioXConsole.xcodeproj \
+            -scheme StudioXConsole \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            IPHONEOS_DEPLOYMENT_TARGET="$SIM_SDK" \
+            2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: 選模擬器
+        run: |
+          xcrun simctl list devices available -j > devices.json
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, re
+          d = json.load(open("devices.json"))["devices"]
+          ios = sorted([k for k in d if "iOS" in k], key=lambda k: [int(x) for x in re.findall(r"\d+", k)])
+          devs = [x for k in reversed(ios) for x in d[k]]
+          def pick(prefs, kind):
+              for p in prefs:
+                  for x in devs:
+                      if x["name"] == p: return x["udid"]
+              for x in devs:
+                  if x["name"].startswith(kind): return x["udid"]
+          print("IPHONE=" + pick(["iPhone 17 Pro", "iPhone 16 Pro", "iPhone 17"], "iPhone"))
+          print("IPAD=" + pick(["iPad Pro 13-inch (M5)", "iPad Pro 13-inch (M4)", "iPad Air 13-inch (M3)"], "iPad"))
+          PY
+
+      - name: 截圖
+        run: |
+          app="build/Build/Products/Debug-iphonesimulator/StudioXConsole.app"
+          mkdir -p shots
+          scenes=(
+            "welcome|"
+            "home|-demo"
+            "sites|-demo -demoTab sites"
+            "site|-demo -demoRoute site"
+            "traffic|-demo -demoRoute traffic"
+            "products|-demo -demoRoute products"
+            "product|-demo -demoRoute product"
+            "orders|-demo -demoTab orders"
+            "order|-demo -demoRoute order"
+            "inbox|-demo -demoTab inbox"
+            "thread|-demo -demoRoute thread"
+            "account|-demo -demoTab account"
+            "xena|-demo -demoRoute xena"
+            "lock|-demo -demoLock YES"
+          )
+          shoot() {
+            dev=$1; label=$2; appearance=$3
+            xcrun simctl boot "$dev" || true
+            xcrun simctl bootstatus "$dev" -b
+            xcrun simctl status_bar "$dev" override --time "9:41" --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4 || true
+            xcrun simctl install "$dev" "$app"
+            xcrun simctl ui "$dev" appearance "$appearance"
+            for scene in "${scenes[@]}"; do
+              name="${scene%%|*}"; args="${scene#*|}"
+              xcrun simctl terminate "$dev" tw.studiox.console 2>/dev/null || true
+              xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null
+              sleep 8
+              xcrun simctl io "$dev" screenshot "shots/$label-$appearance-$name.png" >/dev/null 2>&1 || true
+            done
+            xcrun simctl shutdown "$dev" || true
+          }
+          shoot "$IPHONE" iphone dark
+          shoot "$IPHONE" iphone light
+          shoot "$IPAD" ipad dark
+          ls shots | wc -l
+
+      - name: 縮小、提交回分支
+        run: |
+          mkdir -p docs/screenshots
+          rm -f docs/screenshots/*.jpg
+          for f in shots/*.png; do
+            sips -Z 1000 -s format jpeg -s formatOptions 70 "$f" --out "docs/screenshots/$(basename "${f%.png}").jpg" >/dev/null
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots
+          if git diff --cached --quiet; then echo "沒有變更"; exit 0; fi
+          git commit -m "UI 截圖（自動）[skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && break
+            sleep 5
+          done

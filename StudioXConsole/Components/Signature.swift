@@ -33,7 +33,9 @@ struct Marquee: View {
             }
             .offset(x: x)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // 兩段字是照原本的寬度排的（比螢幕寬很多）：寬度一定要鎖在可用的寬度（minWidth: 0），
+        // 不然整個頁面會被撐寬、置中之後左邊被切掉
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, sizeClass == .regular ? 26 : 18)
         .clipped()
         .background(Theme.inverse)

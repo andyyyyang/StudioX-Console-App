@@ -115,6 +115,11 @@ final class AppModel {
         push.api = api
         // 還沒登入：歡迎頁不用鎖
         if !api.isSignedIn { lock.reset() }
+        #if DEBUG
+        if DemoServer.enabled {
+            if UserDefaults.standard.bool(forKey: "demoLock") { lock.showDemoLock() } else { lock.reset() }
+        }
+        #endif
     }
 
     var sites: [SiteSummary] { me?.sites ?? [] }
@@ -136,7 +141,36 @@ final class AppModel {
     func start() async {
         guard phase == .loading else { return }
         await loadMe(minimumDuration: .milliseconds(1900))
+        #if DEBUG
+        if DemoServer.enabled { openDemoScreen() }
+        #endif
     }
+
+    #if DEBUG
+    /// 示範模式的截圖：-demoTab、-demoRoute 打開指定的畫面
+    private func openDemoScreen() {
+        let defaults = UserDefaults.standard
+        switch defaults.string(forKey: "demoTab") {
+        case "sites": goToSites()
+        case "orders": tab = .orders
+        case "inbox": tab = .inbox
+        case "account": goToAccount()
+        case "search": tab = .search
+        default: break
+        }
+        let shop = "yellowgirl.tw"
+        switch defaults.string(forKey: "demoRoute") {
+        case "site": open(.site(shop))
+        case "traffic": open(.traffic(site: shop))
+        case "order": open(.order(site: shop, id: "o1"))
+        case "thread": open(.thread(site: shop, id: "t1"))
+        case "products": open(.collection(site: shop, entity: "product"))
+        case "product": open(.record(site: shop, entity: "product", id: "p1"))
+        case "xena": showXena = true
+        default: break
+        }
+    }
+    #endif
 
     func signIn(using session: WebAuthenticationSession) async throws {
         try await api.signIn(using: session)

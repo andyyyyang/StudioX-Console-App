@@ -40,6 +40,10 @@ final class ConsoleAPI {
 
     init() {
         tokens = Auth.load()
+        #if DEBUG
+        // 示範模式：不用登入，所有請求由 DemoServer 回答
+        if DemoServer.enabled { tokens = Tokens(access: "demo", refresh: "demo", expiresAt: .distantFuture) }
+        #endif
     }
 
     var isSignedIn: Bool { tokens != nil }
@@ -91,6 +95,9 @@ final class ConsoleAPI {
 
     /// 帶 token 送出；401 就換 token 再試一次
     private func send(_ makeRequest: () throws -> URLRequest) async throws -> (Data, HTTPURLResponse) {
+        #if DEBUG
+        if DemoServer.enabled { return DemoServer.respond(to: try makeRequest()) }
+        #endif
         for attempt in 0..<2 {
             var request = try makeRequest()
             request.setValue("Bearer \(try await accessToken(forceRefresh: attempt > 0))", forHTTPHeaderField: "authorization")
