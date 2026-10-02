@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/testflight-invite.yml"
       - "ci/asc.py"
+      - "ci/testers.enc"
 
 permissions:
   contents: read
@@ -24,4 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: pip install --quiet pyjwt cryptography
+      - name: 加密名單用的公鑰（ci/testers.enc）
+        run: python3 ci/asc.py pubkey
       - run: python3 ci/asc.py invite

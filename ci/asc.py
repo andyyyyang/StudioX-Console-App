@@ -21,6 +21,7 @@ App Store Connect API（GitHub Actions 的 TestFlight 流程用，.github/workfl
 只用標準函式庫＋PyJWT（pip install pyjwt cryptography）。
 """
 import argparse
+import base64
 import json
 import os
 import sys
@@ -393,7 +394,59 @@ def testers():
         summary(f"- ⚠️ 讀不到帳號持有人（金鑰要 Admin）：{apple_error(e)}")
     for email, name in parse_testers(os.environ.get("TESTFLIGHT_TESTERS", "")).items():
         people.setdefault(email, name)
+    for email, name in sealed_testers().items():
+        people.setdefault(email, name)
     return people
+
+
+# ci/testers.enc：用 App Store Connect 金鑰的公鑰加密的名單（一行一筆「姓名 <email>」），repo 裡看不到 Email。
+# 只有拿得到 ASC_PRIVATE_KEY 的 GitHub Actions 解得開。加一筆：python3 ci/seal_tester.py <公鑰> "姓名 <email>" >> ci/testers.enc
+# （公鑰印在「TestFlight 邀請」的摘要；金鑰換了要重新加密）
+SEALED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testers.enc")
+SEAL_INFO = b"studiox-testflight-testers-v1"
+
+
+def signing_key():
+    from cryptography.hazmat.primitives import serialization
+    return serialization.load_pem_private_key(private_key().encode(), password=None)
+
+
+def public_key_b64():
+    from cryptography.hazmat.primitives import serialization
+    point = signing_key().public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    return base64.b64encode(point).decode()
+
+
+def sealed_testers():
+    if not os.path.exists(SEALED):
+        return {}
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    key = signing_key()
+    out = {}
+    for line in open(SEALED, encoding="utf-8"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            blob = base64.b64decode(line)
+            ephemeral = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), blob[:65])
+            shared = key.exchange(ec.ECDH(), ephemeral)
+            aes = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=SEAL_INFO).derive(shared)
+            text = AESGCM(aes).decrypt(blob[65:77], blob[77:], SEAL_INFO).decode("utf-8")
+            out.update(parse_testers(text))
+        except Exception:
+            summary("- ⚠️ ci/testers.enc 有一筆解不開（App Store Connect 的金鑰換過了？用新的公鑰重新加密）")
+    return out
+
+
+def pubkey_cmd():
+    """印出加密名單用的公鑰（公鑰不是秘密）"""
+    pub = public_key_b64()
+    print(pub)
+    summary(f"### 加密測試員名單用的公鑰\n`{pub}`\n\n`python3 ci/seal_tester.py {pub} \"姓名 <email>\" >> ci/testers.enc`")
 
 
 def parse_testers(raw):
@@ -611,6 +664,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
     sub.add_parser("invite")
+    sub.add_parser("pubkey")
     sg = sub.add_parser("signing")
     sg.add_argument("--dir", required=True)
     sg.add_argument("--name", required=True)
@@ -626,7 +680,7 @@ def main():
     for name in ("ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY"):
         if not os.environ.get(name, "").strip():
             sys.exit(f"缺少 {name}")
-    {"prepare": lambda: prepare(), "invite": lambda: invite_cmd(), "signing": lambda: signing(args),
+    {"prepare": lambda: prepare(), "invite": lambda: invite_cmd(), "pubkey": lambda: pubkey_cmd(), "signing": lambda: signing(args),
      "cleanup": lambda: cleanup(args), "finish": lambda: finish(args)}[args.cmd]()
 
 
