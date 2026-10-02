@@ -182,10 +182,35 @@ nonisolated enum DemoServer {
 
     // MARK: 流量、搜尋
 
+    private static func dailyVisitors(base: Int, day i: Int) -> Int {
+        let wave: Double = Double(base) * 0.25 * sin(Double(i) * 1.3)
+        let bump: Int = (i % 3) * base / 10
+        return base + Int(wave) + bump
+    }
+
+    private static func hourRow(base: Int, day d: Int) -> String {
+        var cells: [String] = []
+        for h in 0..<24 {
+            let busy: Double = (h > 9 && h < 23) ? 1.5 : 0.3
+            let jitter: Double = Double((d * 7 + h) % 5)
+            let value: Double = Double(base) / 12 * busy + jitter
+            cells.append(String(max(0, Int(value))))
+        }
+        return "[" + cells.joined(separator: ",") + "]"
+    }
+
+    private static var searchTrend: String {
+        (0..<28).map { (i: Int) -> String in
+            let clicks: Int = 12 + i % 7 * 3
+            let impressions: Int = 380 + i % 5 * 40
+            return #"{"label":"\#(day(28 - i))","clicks":\#(clicks),"impressions":\#(impressions)}"#
+        }.joined(separator: ",")
+    }
+
     private static func traffic(site: String, days: Int) -> String {
         let base = site == "yellowgirl.tw" ? 260 : site == "studiox.tw" ? 58 : 14
-        let values = (0..<max(days, 1)).map { i in base + Int(Double(base) * 0.25 * sin(Double(i) * 1.3)) + (i % 3) * base / 10 }
-        let hours = (0..<7).map { d in "[" + (0..<24).map { h in String(max(0, Int(Double(base) / 12 * (h > 9 && h < 23 ? 1.5 : 0.3) + Double((d * 7 + h) % 5)))) }.joined(separator: ",") + "]" }.joined(separator: ",")
+        let values: [Int] = (0..<max(days, 1)).map { (i: Int) -> Int in dailyVisitors(base: base, day: i) }
+        let hours: String = (0..<7).map { (d: Int) -> String in hourRow(base: base, day: d) }.joined(separator: ",")
         return """
         {"installed":true,"days":\(days),"live":\(base / 20 + 1),"visitors":\(values.reduce(0, +)),"pageviews":\(values.reduce(0, +) * 3),"visits":\(values.reduce(0, +) * 5 / 4),
          "bounceRate":0.38,"avgDurationMs":94000,"change":{"visitors":0.18,"pageviews":0.12},
@@ -206,7 +231,7 @@ nonisolated enum DemoServer {
     private static var search: String { """
     {"status":"ok","property":"sc-domain:yellowgirl.tw","range":{"start":"\(day(28))","end":"\(day(1))"},
      "totals":{"clicks":482,"impressions":12840,"ctr":0.0375,"position":8.4},"change":{"clicks":0.11,"impressions":0.06},
-     "trend":[\((0..<28).map { i in #"{"label":"\#(day(28 - i))","clicks":\#(12 + i % 7 * 3),"impressions":\#(380 + i % 5 * 40)}"# }.joined(separator: ","))],
+     "trend":[\(searchTrend)],
      "queries":[{"key":"台南 蛋捲","clicks":96,"impressions":1820,"ctr":0.052,"position":3.1},{"key":"手工蛋捲 禮盒","clicks":71,"impressions":1430,"ctr":0.049,"position":4.6}],
      "pages":[{"key":"https://yellowgirl.tw/","clicks":210,"impressions":4100,"ctr":0.051,"position":5.2}],"countries":[{"key":"twn","clicks":460,"impressions":12100,"ctr":0.038,"position":8.1}]}
     """ }
