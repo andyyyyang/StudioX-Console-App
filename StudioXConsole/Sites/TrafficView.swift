@@ -67,7 +67,7 @@ struct TrafficChart: View {
                 }
             }
         }
-        .sensoryFeedback(.selection, trigger: selected)
+        .haptic(.selection, trigger: selected)
         .accessibilityLabel("\(name)走勢")
     }
 }
@@ -337,7 +337,7 @@ struct WeekHeatmap: View {
             .textRole(.xs)
             .foregroundStyle(Theme.muted)
         }
-        .sensoryFeedback(.selection, trigger: picked.map { $0.day * 24 + $0.hour })
+        .haptic(.selection, trigger: picked.map { $0.day * 24 + $0.hour })
     }
 }
 

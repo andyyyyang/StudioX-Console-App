@@ -201,7 +201,7 @@ struct FilterChip: View {
             .contentShape(.rect)
         }
         .buttonStyle(.press)
-        .sensoryFeedback(.selection, trigger: selected)
+        .haptic(.selection, trigger: selected)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

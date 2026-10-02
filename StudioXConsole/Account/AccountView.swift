@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// 我（後台左下角的頭貼選單）：帳號、各網站的職能、Xena、console、登出
+/// 設定（手機：首頁右上角的齒輪；iPad：側欄）：帳號、外觀、Xena、首頁、通知、安全、各網站的職能、console、登出。
+/// 可以微調的偏好在 AppSettings（存在這台裝置，改了馬上生效）
 struct AccountView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -14,25 +15,79 @@ struct AccountView: View {
     }
 
     var body: some View {
+        @Bindable var settings = AppSettings.shared
         NavigationStack(path: Bindable(model).accountPath) {
             ScrollView {
                 VStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 56) {
                         if let me = model.me {
-                            VStack(alignment: .leading, spacing: 18) {
-                                HStack(spacing: 14) {
-                                    Avatar(name: me.name, imageURL: me.imageURL, size: 60)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        if me.staff { Eyebrow("StudioX 團隊") } else { Eyebrow("StudioX 帳號") }
-                                        Text(me.email)
-                                            .textRole(.small)
-                                            .foregroundStyle(Theme.muted)
-                                    }
+                            HStack(spacing: 14) {
+                                Avatar(name: me.name, imageURL: me.imageURL, size: 56)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(me.name)
+                                        .textRole(.h3)
+                                        .foregroundStyle(Theme.ink)
+                                    Text(me.email)
+                                        .textRole(.small)
+                                        .foregroundStyle(Theme.muted)
+                                    if me.staff { Eyebrow("StudioX 團隊") }
                                 }
-                                Headline("Hello, *\(me.name)*", role: .h1)
                             }
                             .reveal()
                         }
+
+                        // 外觀：主題、字的大小、觸覺回饋
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Appearance*", aside: "只改這台裝置，改了馬上生效。", role: .h3)
+                            RuledList {
+                                ChoiceRow(label: "主題", options: AppSettings.Appearance.allCases, selection: $settings.appearance) { $0.label }
+                                ChoiceRow(label: "文字大小", help: settings.textSize == .standard ? "跟著 iPhone 的「設定 → 螢幕顯示與亮度 → 文字大小」。" : nil,
+                                          options: AppSettings.TextSize.allCases, selection: $settings.textSize) { $0.label }
+                                ToggleRow(label: "觸覺回饋", help: "選擇、完成、出錯的時候輕輕震一下。", isOn: $settings.haptics)
+                                    .padding(.vertical, 10)
+                            }
+                        }
+
+                        // Xena：首頁開場要不要說話、說多快、水珠會不會動
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Xena*", aside: "App 和網頁上是同一個 Xena、同一份對話紀錄。", role: .h3)
+                            RuledList {
+                                ChoiceRow(label: "首頁開場說今天的狀況", help: settings.greeting.help,
+                                          options: AppSettings.Greeting.allCases, selection: $settings.greeting) { $0.label }
+                                ChoiceRow(label: "說話速度", options: AppSettings.Pace.allCases, selection: $settings.pace) { $0.label }
+                                    .disabled(settings.greeting == .quiet)
+                                    .opacity(settings.greeting == .quiet ? 0.45 : 1)
+                                ToggleRow(label: "水珠會動", help: "關掉就停在同一個樣子，比較省電。系統的「減少動態效果」打開時也會停。", isOn: $settings.orbMotion)
+                                    .padding(.vertical, 10)
+                                row("問問Xena") { model.showXena = true }
+                                row("動手改東西之前", value: "一律先問你", action: nil)
+                                row("退款、刪除", value: "要打字確認", action: nil)
+                            }
+                        }
+
+                        // 首頁：打開 App 先看哪一頁、首頁放哪些
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Home*", aside: "首頁要放哪些、打開 App 先看哪一頁。", role: .h3)
+                            RuledList {
+                                ChoiceRow(label: "打開 App 先看", options: startTabs, selection: $settings.startTab) { $0.label }
+                                ForEach(AppSettings.HomeSection.allCases) { section in
+                                    ToggleRow(label: section.label, isOn: Binding(
+                                        get: { settings.shows(section) },
+                                        set: { settings.setShows(section, $0) }
+                                    ))
+                                    .padding(.vertical, 8)
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Notifications*", aside: "網站有需要你處理的事，從這裡通知你。", role: .h3)
+                            RuledList {
+                                row("通知", value: notificationStatus) { showingNotifications = true }
+                            }
+                        }
+
+                        SecuritySection()
 
                         VStack(alignment: .leading, spacing: 20) {
                             SectionHead("Your *roles*", aside: "職能由網站負責人在 StudioX Console 設定。", role: .h3)
@@ -53,24 +108,6 @@ struct AccountView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Notifications*", aside: "網站有需要你處理的事，從這裡通知你。", role: .h3)
-                            RuledList {
-                                row("通知", value: notificationStatus) { showingNotifications = true }
-                            }
-                        }
-
-                        SecuritySection()
-
-                        VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Xena*", aside: "App 和網頁上是同一個 Xena、同一份對話紀錄。", role: .h3)
-                            RuledList {
-                                row("跟 Xena 說話") { model.showXena = true }
-                                row("動手改東西之前", value: "一律先問你", action: nil)
-                                row("退款、刪除", value: "要打字確認", action: nil)
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 20) {
                             SectionHead("*Console*", aside: "在瀏覽器打開 StudioX Console。", role: .h3)
                             RuledList {
                                 row("網站與成員") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
@@ -80,10 +117,19 @@ struct AccountView: View {
                             ConnectorCard()
                         }
 
-                        Button {
-                            confirmingSignOut = true
-                        } label: { Text("登出") }
-                        .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
+                        VStack(spacing: 12) {
+                            if !settings.isDefault {
+                                Button {
+                                    withAnimation(Motion.fast) { settings.reset() }
+                                } label: { Text("外觀、Xena、首頁回到預設值") }
+                                .buttonStyle(.brand(.ghost, size: .lg, fullWidth: true))
+                                .transition(.opacity)
+                            }
+                            Button {
+                                confirmingSignOut = true
+                            } label: { Text("登出") }
+                            .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
+                        }
                     }
                     .frame(maxWidth: Metric.readable + 120, alignment: .leading)
                     .pageWidth()
@@ -103,8 +149,17 @@ struct AccountView: View {
                 }
             }
             .brandPage()
-            .navigationTitle("我")
+            .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // 手機是從首頁的齒輪打開的一張卡片：右上角收起來
+                if model.showAccount {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("完成") { model.showAccount = false }
+                            .fontWeight(.semibold)
+                    }
+                }
+            }
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
             .navigationDestination(isPresented: $showingNotifications) { NotificationSettingsView() }
             .confirmationDialog("要登出嗎？", isPresented: $confirmingSignOut, titleVisibility: .visible) {
@@ -114,6 +169,11 @@ struct AccountView: View {
                 Text("這台裝置的登入會撤銷、不再收到通知，其他裝置與 AI 連接器不受影響。")
             }
         }
+    }
+
+    /// 沒有商店的帳號不給選「訂單」
+    private var startTabs: [AppSettings.StartTab] {
+        AppSettings.StartTab.allCases.filter { $0 != .orders || !model.orderSites.isEmpty }
     }
 
     private var notificationStatus: String {
@@ -153,6 +213,39 @@ struct AccountView: View {
         } else {
             content
         }
+    }
+}
+
+/// 設定裡的單選：標題、一排方形的選項（選到的墨色實心），下面一行說明
+private struct ChoiceRow<Option: Identifiable & Hashable>: View {
+    let label: String
+    var help: String?
+    let options: [Option]
+    @Binding var selection: Option
+    let title: (Option) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label)
+                .textRole(.body)
+                .foregroundStyle(Theme.ink)
+            FlowLayout(spacing: 8) {
+                ForEach(options) { option in
+                    FilterChip(title: title(option), selected: option == selection) {
+                        withAnimation(Motion.fast) { selection = option }
+                    }
+                    .accessibilityLabel("\(label)：\(title(option))")
+                }
+            }
+            if let help {
+                Text(help)
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.opacity)
+            }
+        }
+        .padding(.vertical, 14)
     }
 }
 

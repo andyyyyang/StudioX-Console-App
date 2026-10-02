@@ -153,11 +153,11 @@ StudioXConsole/
   CMS/         照網站欄位定義畫的清單與編輯畫面、欄位、預覽、圖片、會員、攤位菜單、FAQ、信箱
   Orders/      訂單、訂單內容
   Inbox/       收件匣、客服信、Xena 的網站對話
-  Account/     我、通知設定、安全
+  Account/     設定（首頁右上角的齒輪／iPad 側欄）：外觀、字的大小、Xena 怎麼說話、首頁放哪些、通知、安全
   Xena/        3D 水珠（XenaOrb.metal：studiox.tw Xena 介紹頁的 orb3d.ts 搬到 Metal）、對話（XenaSession）、對話畫面
   Model/       資料（照網站工具回的 JSON）、欄位定義（Schema）、Xena 的事件
   Services/    Auth（OAuth＋PKCE＋Keychain）、ConsoleAPI（token 自動換新、MCP、欄位定義、上傳、通知、Xena 的 SSE）、SiteData（各工具）、
-               PushCenter（通知）、AppLock（Face ID）
+               PushCenter（通知）、AppLock（Face ID）、AppSettings（設定頁可以微調的偏好）
 Web/
   welcome/     歡迎頁的打包（esbuild；logo3d.ts 複製自 studio_website）
   assets/      從後台原始碼產生的圖：icons.cjs（Heroicons）

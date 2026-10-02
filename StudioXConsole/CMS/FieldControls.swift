@@ -440,7 +440,7 @@ struct ToggleRow: View {
         }
         .tint(Theme.primary)
         .padding(.vertical, 4)
-        .sensoryFeedback(.selection, trigger: isOn)
+        .haptic(.selection, trigger: isOn)
     }
 }
 

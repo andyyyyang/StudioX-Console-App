@@ -15,13 +15,14 @@ struct XenaHomeView: View {
     @AppStorage("push.promptDismissed") private var promptDismissed = false
     /// Xena 說話的聲音（打字機一個字一個字推動水珠）
     @State private var voice = XenaVoice()
+    private var settings: AppSettings { .shared }
 
     var body: some View {
         NavigationStack(path: Bindable(model).homePath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     hero
-                    if !marqueeItems.isEmpty {
+                    if settings.shows(.marquee) && !marqueeItems.isEmpty {
                         Marquee(items: marqueeItems)
                             .padding(.top, 8)
                     }
@@ -30,10 +31,10 @@ struct XenaHomeView: View {
                             NotificationPrompt(dismissed: $promptDismissed)
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        attention
-                        yesterday
-                        thisWeek
-                        asks
+                        if settings.shows(.attention) { attention }
+                        if settings.shows(.yesterday) { yesterday }
+                        if settings.shows(.week) { thisWeek }
+                        if settings.shows(.asks) { asks }
                     }
                     .pageWidth()
                     .padding(.top, sizeClass == .regular ? 88 : 56)
@@ -104,12 +105,16 @@ struct XenaHomeView: View {
             HStack(alignment: .center, spacing: 14) {
                 Eyebrow("\(Date.now.dayTitle) · \(Date.now.englishDay)")
                 Spacer()
-                if !regular, let me = model.me {
+                // 設定（iPad 在側欄）：一看就知道的齒輪
+                if !regular {
                     Button { model.goToAccount() } label: {
-                        Avatar(name: me.name, imageURL: me.imageURL, size: 32)
+                        HeroIcon("cog-6-tooth", size: 21)
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 40, height: 40)
+                            .glassEffect(.regular.interactive(), in: .circle)
                     }
                     .buttonStyle(.press)
-                    .accessibilityLabel("我的帳號")
+                    .accessibilityLabel("設定")
                 }
             }
             .pageWidth()
@@ -140,12 +145,14 @@ struct XenaHomeView: View {
                 )
                 TypewriterText(
                     text: report,
-                    animate: model.spokenReport != report,
-                    speed: .milliseconds(42),
+                    animate: settings.shouldSpeak(report, spoken: model.spokenReport),
+                    speed: settings.pace.perCharacter,
                     delay: .milliseconds(model.spokenReport == nil ? 900 : 250),
                     voice: voice
                 ) {
                     model.spokenReport = report
+                    // 「每天一次」：說完今天的狀況（不是「我在看…」那句）就算說過了
+                    if model.briefing.updatedAt != nil { settings.greetedDay = AppSettings.today }
                 }
                 .textRole(.lead)
                 .foregroundStyle(Theme.ink2)

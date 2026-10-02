@@ -130,7 +130,8 @@ final class LockWindow {
             let host = UIHostingController(rootView: LockOverlay()
                 .environment(model)
                 .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
-                .tint(Theme.primary))
+                .tint(Theme.primary)
+                .appSettingsAppearance())
             host.view.backgroundColor = .clear
             w.rootViewController = host
             window = w

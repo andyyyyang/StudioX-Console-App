@@ -47,15 +47,6 @@ enum Theme {
 
     /// --accent：品牌橘（強調的字、點、按下時填滿）
     static let accent = Color(light: 0xFF5A1F, dark: 0xFF6A33)
-    /// Xena 的彩虹（介紹頁 .xh__title em 的漸層）：深色底用網頁的粉、淡紫、青；淺色底用深一點的同色系才讀得到
-    static let xenaPink = Color(light: 0xD23A98, dark: 0xFF8AD8)
-    static let xenaLavender = Color(light: 0x7652F5, dark: 0xB49BFF)
-    static let xenaCyan = Color(light: 0x1391C4, dark: 0x6FD6FF)
-    static let xenaGradient = LinearGradient(
-        colors: [xenaPink, xenaLavender, xenaCyan, xenaLavender, xenaPink],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
     /// 橘色上的字
     static let onAccent = Color.white
     /// 小字用的橘（在紙色上夠清楚；後台的 --adm-accent）
@@ -92,6 +83,15 @@ enum Theme {
     static let xenaPink = Color(hex: 0xFF6BD1)
     static let xenaViolet = Color(hex: 0x845CFF)
     static let xenaCyan = Color(hex: 0x40CCFF)
+    /// Xena 說話時強調詞的彩虹（介紹頁 .xh__title em：粉 → 淡紫 → 青）：深色底用網頁的顏色；淺色底用深一點的同色系才讀得到
+    static let xenaIrisPink = Color(light: 0xD23A98, dark: 0xFF8AD8)
+    static let xenaIrisLavender = Color(light: 0x7652F5, dark: 0xB49BFF)
+    static let xenaIrisCyan = Color(light: 0x1391C4, dark: 0x6FD6FF)
+    static let xenaGradient = LinearGradient(
+        colors: [xenaIrisPink, xenaIrisLavender, xenaIrisCyan, xenaIrisLavender, xenaIrisPink],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
 
     // MARK: 圖表（資料標記，順序固定、跟著「東西」走；theme.ts）
 

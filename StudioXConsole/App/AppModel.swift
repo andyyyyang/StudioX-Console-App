@@ -215,6 +215,16 @@ final class AppModel {
         Task { await push.unregister() }
     }
 
+    /// 設定裡「打開 App 先看」的那一頁（沒有商店就從今天開始）
+    private var startTab: AppTab {
+        switch AppSettings.shared.startTab {
+        case .today: .xena
+        case .sites: regular ? (sites.first.map { AppTab.site($0.id) } ?? .xena) : .sites
+        case .orders: orderSites.isEmpty ? .xena : .orders
+        case .inbox: .inbox
+        }
+    }
+
     /// 拿網站清單。剛登入時讓載入動畫至少演完（標誌卡上去、字升起來、000→100）
     func loadMe(minimumDuration: Duration = .zero) async {
         let clock = ContinuousClock()
@@ -225,6 +235,7 @@ final class AppModel {
             if left > .zero { try? await Task.sleep(for: left) }
             me = next
             loadError = nil
+            if phase != .ready { tab = startTab }
             phase = .ready
             await push.refresh()
             await briefing.refresh(sites: sites)

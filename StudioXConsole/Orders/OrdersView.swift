@@ -193,7 +193,7 @@ struct OrdersList: View {
                 }
             }
             .buttonStyle(.row)
-            .sensoryFeedback(.selection, trigger: selected.contains(order.id))
+            .haptic(.selection, trigger: selected.contains(order.id))
         } else if let picked {
             Button {
                 picked.wrappedValue = order.id

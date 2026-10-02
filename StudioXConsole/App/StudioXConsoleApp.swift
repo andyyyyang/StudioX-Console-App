@@ -16,6 +16,7 @@ struct StudioXConsoleApp: App {
                 .environment(model)
                 .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
                 .tint(Theme.primary)
+                .appSettingsAppearance()
         }
         .commands {
             // iPad 的鍵盤與選單列：⌘1–⌘5 切換、⌘K 找 Xena、⌘R 重新整理
@@ -29,8 +30,8 @@ struct StudioXConsoleApp: App {
                     .disabled(model.orderSites.isEmpty)
                 Button("收件匣") { model.tab = .inbox }
                     .keyboardShortcut("4")
-                Button("我") { model.goToAccount() }
-                    .keyboardShortcut("5")
+                Button("設定") { model.goToAccount() }
+                    .keyboardShortcut(",")
                 Button("搜尋") { model.tab = .search }
                     .keyboardShortcut("f")
                 Divider()
@@ -87,9 +88,9 @@ struct RootView: View {
             }
         }
         .animation(Motion.spring, value: model.toast)
-        .sensoryFeedback(.success, trigger: model.successTick)
-        .sensoryFeedback(.warning, trigger: model.warningTick)
-        .sensoryFeedback(.error, trigger: model.errorTick)
+        .haptic(.success, trigger: model.successTick)
+        .haptic(.warning, trigger: model.warningTick)
+        .haptic(.error, trigger: model.errorTick)
         .background { SceneProbe { cover.scene = $0 } }
         .onChange(of: covered, initial: true) { _, value in
             cover.show(value, model: model)
@@ -167,7 +168,7 @@ struct MainView: View {
                 InboxView()
             }
             .badge(model.inboxCount)
-            Tab("我", image: "hi-user-circle", value: AppTab.account) {
+            Tab("設定", image: "hi-cog-6-tooth", value: AppTab.account) {
                 AccountView()
             }
             .hidden(!regular)

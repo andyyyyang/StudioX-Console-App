@@ -88,9 +88,11 @@ struct XenaOrb: View {
     var body: some View {
         let canvas = size * Self.canvas
         let lively = mood != .idle || voice?.speaking == true
+        // 減少動態、或設定裡關掉「水珠會動」：停在同一個樣子
+        let still = reduceMotion || !AppSettings.shared.orbMotion
         // 靜靜呼吸的動作很慢，每秒 30 格就很順；說話、回答時 60 格
-        TimelineView(.animation(minimumInterval: lively ? 1.0 / 60 : 1.0 / 30, paused: reduceMotion)) { context in
-            let f = motion.step(context.date.timeIntervalSinceReferenceDate, target: mood.energy, voice: voice, reduced: reduceMotion)
+        TimelineView(.animation(minimumInterval: lively ? 1.0 / 60 : 1.0 / 30, paused: still)) { context in
+            let f = motion.step(context.date.timeIntervalSinceReferenceDate, target: mood.energy, voice: voice, reduced: still)
             Rectangle()
                 .colorEffect(ShaderLibrary.xenaOrb(
                     .float2(canvas, canvas),
@@ -215,9 +217,9 @@ struct XenaLight: View {
     var body: some View {
         RadialGradient(
             stops: [
-                .init(color: Color(red: 132 / 255, green: 92 / 255, blue: 1).opacity(0.2), location: 0),
-                .init(color: Color(red: 1, green: 107 / 255, blue: 209 / 255).opacity(0.07), location: 0.45),
-                .init(color: Color(red: 1, green: 107 / 255, blue: 209 / 255).opacity(0), location: 0.7),
+                .init(color: Theme.xenaViolet.opacity(0.2), location: 0),
+                .init(color: Theme.xenaPink.opacity(0.07), location: 0.45),
+                .init(color: Theme.xenaPink.opacity(0), location: 0.7),
             ],
             center: .center,
             startRadius: 0,

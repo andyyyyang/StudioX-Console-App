@@ -77,7 +77,7 @@ struct ConnectorCard: View {
                     }
                 }
                 .buttonStyle(.brand(.ghost, size: .sm))
-                .sensoryFeedback(.success, trigger: copied) { _, now in now }
+                .haptic(.success, trigger: copied) { _, now in now }
             }
         }
         .panel()

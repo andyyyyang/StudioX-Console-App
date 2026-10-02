@@ -90,8 +90,8 @@ struct ConfirmSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(busy)
-        .sensoryFeedback(.success, trigger: succeeded)
-        .sensoryFeedback(.error, trigger: failed)
+        .haptic(.success, trigger: succeeded)
+        .haptic(.error, trigger: failed)
         .onAppear { if proposal.typed != nil || needsOwner { focused = true } }
     }
 
