@@ -199,7 +199,7 @@ def bundle_resource():
 def ensure_capabilities(bundle_id):
     """回傳打開了的能力。打不開的（例如 Apple 改了名稱）跳過，entitlements 也不放，不會讓整個建置失敗"""
     have = {c["attributes"].get("capabilityType") for c in
-            call("GET", f"/bundleIds/{bundle_id}/bundleIdCapabilities", query={"limit": 200}).get("data", [])}
+            call("GET", f"/bundleIds/{bundle_id}/bundleIdCapabilities").get("data", [])}
     enabled = []
     for cap in CAPABILITIES:
         if cap in have:
@@ -343,7 +343,8 @@ def whats_new(app_id, build_id, text):
 
 def internal_groups(app_id):
     """內部測試群組；一個都沒有就建一個（拿到每一版）"""
-    groups = call("GET", f"/apps/{app_id}/betaGroups", query={"limit": 50}).get("data", [])
+    # 關聯的端點（/apps/{id}/betaGroups、/bundleIds/{id}/bundleIdCapabilities）不收 limit
+    groups = call("GET", f"/apps/{app_id}/betaGroups").get("data", [])
     internal = [g for g in groups if g["attributes"].get("isInternalGroup")]
     if internal:
         return internal
