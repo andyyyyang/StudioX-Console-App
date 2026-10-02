@@ -37,9 +37,7 @@ nonisolated final class XenaEar: @unchecked Sendable {
 
     /// 現在的音量（0…1）
     var level: Float {
-        lock.lock()
-        defer { lock.unlock() }
-        return _level
+        lock.withLock { _level }
     }
 
     static func requestMicrophone() async -> Bool {
@@ -89,21 +87,22 @@ nonisolated final class XenaEar: @unchecked Sendable {
             audio.stop()
             running = false
         }
-        lock.lock()
-        _level = 0
-        let (analyzer, legacy) = (self.analyzer, self.legacy)
-        self.analyzer = nil
-        self.legacy = nil
-        lock.unlock()
+        let (analyzer, legacy) = lock.withLock {
+            _level = 0
+            let engines = (self.analyzer, self.legacy)
+            self.analyzer = nil
+            self.legacy = nil
+            return engines
+        }
         await analyzer?.end()
         legacy?.end()
     }
 
     private func set(analyzer: AnalyzerEngine?, legacy: LegacyEngine?) {
-        lock.lock()
-        self.analyzer = analyzer
-        self.legacy = legacy
-        lock.unlock()
+        lock.withLock {
+            self.analyzer = analyzer
+            self.legacy = legacy
+        }
     }
 
     /// 錄音的執行緒：算音量、交給辨識
@@ -116,13 +115,9 @@ nonisolated final class XenaEar: @unchecked Sendable {
             let db = 20 * log10(max(rms, 0.000_001))
             // -50 dB（安靜）… -12 dB（大聲說話）→ 0…1
             let value = max(0, min(1, (db + 50) / 38))
-            lock.lock()
-            _level = value
-            lock.unlock()
+            lock.withLock { _level = value }
         }
-        lock.lock()
-        let (analyzer, legacy) = (self.analyzer, self.legacy)
-        lock.unlock()
+        let (analyzer, legacy) = lock.withLock { (self.analyzer, self.legacy) }
         analyzer?.feed(buffer)
         legacy?.feed(buffer)
     }
@@ -187,7 +182,7 @@ nonisolated final class AnalyzerEngine: @unchecked Sendable {
 
     func end() async {
         continuation.finish()
-        try? await analyzer.cancelAndFinishNow()
+        await analyzer.cancelAndFinishNow()
         results?.cancel()
     }
 
