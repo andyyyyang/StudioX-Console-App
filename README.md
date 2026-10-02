@@ -22,29 +22,38 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
 - **每次推上 GitHub 都會編一次**（`.github/workflows/ios.yml`）：GitHub 的 Mac（macos-26）用共用的 scheme 編模擬器版、不簽章
   （有 Xcode 27 用 27；GitHub 還沒裝的時候用最新的 Xcode 26，只有 iOS 27 才有的 API 以 Xcode 27 為準）；編不過時 Actions 的摘要列出每個錯誤與警告（檔案、行號）。只在 App 的檔案有改時跑，
   同一個分支連推只編最新的一次。私有 repo 的 Mac 分鐘數是一般的 10 倍，注意 GitHub 方案的額度。
-- **TestFlight／App Store 用 Xcode Cloud**：Apple 自己的建置服務，直接連 GitHub 這個 repo，簽章、上傳 TestFlight 都由 Apple 處理，
-  不用把憑證或金鑰放到 GitHub。開發者帳號每月含 25 小時。專案已經準備好：
-  - 共用的 scheme `StudioXConsole`（`StudioXConsole.xcodeproj/xcshareddata/`；Xcode Cloud 只看得到共用的 scheme）
-  - 自動簽章、`ITSAppUsesNonExemptEncryption = NO`（TestFlight 不會卡在出口合規的問題）、隱私清單 `PrivacyInfo.xcprivacy`
-  - `ci_scripts/ci_post_xcodebuild.sh`：每一版自動把最近的提交寫成 TestFlight 的「測試內容」
-  - 版號（build number）由 Xcode Cloud 自動遞增，版本（1.0）改 `MARKETING_VERSION`
+- **推上來就出一版 TestFlight**（`.github/workflows/testflight.yml`）：GitHub 的 Mac 用 App Store Connect API 金鑰自己處理簽章，
+  不用打開 Xcode、不用接 iPhone、不用匯出憑證：
+  1. 便宜的 Linux 先檢查：Secrets 設好了沒、App ID `tw.studiox.console` 註冊了沒（沒有就註冊）、App Store Connect 上有沒有這個 App
+  2. Mac：打開 App ID 的推播能力，建一張**這一次專用**的 Apple Distribution 憑證（私鑰只在那台 Mac 的暫時鑰匙圈）與 App Store 描述檔，
+     封存、上傳；結束就撤銷憑證、刪掉描述檔（已經上傳的版本不受影響，憑證也不會越積越多）
+  3. Linux：等 Apple 處理好，把最近的提交寫成「測試內容」，交給內部測試群組
+  - 推到 `main` 或 `claude/ios-app-prototype-4492mf`（App 的檔案有改）就跑，也可以在 Actions → TestFlight → Run workflow 手動跑
+  - 版號用 UTC 時間（`2610021405`＝26/10/02 14:05），版本改 `MARKETING_VERSION`
+  - GitHub 還沒裝 Xcode 27 的時候用最新的 Xcode 建置，最低系統先設成那個 SDK 的版本（摘要會寫用了哪一版）
+  - Secrets 還沒設定時整個流程跳過，不會失敗；Mac 的部分大約 10 分鐘（私有 repo 的 Mac 分鐘數是一般的 10 倍）
 
-  第一次設定（要在 Mac 上的 Xcode 做一次）：
-  1. **App Store Connect**（appstoreconnect.apple.com）→ 我的 App →「＋」新增 App：平台 iOS、名稱 StudioX、主要語言 繁體中文（台灣）、
-     套件 ID 選 `tw.studiox.console`（清單裡沒有就先在 Xcode 用自己的 Team 跑一次實機，自動簽章會註冊）、SKU 隨便填（例如 studiox-console）。
-  2. **TestFlight** → 內部測試 →「＋」建一個群組（例如「StudioX 團隊」），把自己和同事加進去。
-  3. **Xcode**：打開專案、切到這個分支，Signing & Capabilities 選自己的 Team，提交並推上 GitHub（Team 會寫進專案檔，Xcode Cloud 要看得到）。
-  4. Xcode 選單 **Integrate → Create Workflow…** → 選 StudioXConsole → 授權 Xcode Cloud 存取 GitHub（會開瀏覽器，
-     在 GitHub 上安裝 Apple 的「Xcode Cloud」App，只選 `StudioX-Console-App` 這個 repo）。
-  5. 編輯 workflow：
-     - **Environment**：Xcode 選 Latest Release（要 Xcode 27）、macOS 選 Latest
-     - **Start Conditions**：Branch Changes，分支填 `claude/ios-app-prototype-4492mf`（合併到 main 之後改成 main）；
-       Files and Folders 可以只看 `StudioXConsole/`、`StudioXConsole.xcodeproj/`
-     - **Actions**：Archive → 平台 iOS、scheme StudioXConsole、Deployment Preparation 選 **TestFlight (Internal Testing Only)** 或 TestFlight and App Store
-     - **Post-Actions**：TestFlight Internal Testing → 選第 2 步的群組
-  6. 存檔、按 **Start Build**。十幾分鐘後 TestFlight App 會出現新版；之後每次推到那個分支都會自動出一版。
+  **第一次設定（只有這幾步要在網頁上做）**：
+  1. App Store Connect → 使用者與存取權 → 整合 → App Store Connect API → 團隊金鑰「＋」：名稱 `GitHub TestFlight`、存取權 **Admin**
+     （要能建憑證與描述檔）→ 下載 `.p8`（只能下載一次），記下金鑰 ID 與上面的 Issuer ID
+  2. GitHub 這個 repo → Settings → Secrets and variables → Actions → New repository secret，新增四個：
+     | 名稱 | 內容 |
+     |---|---|
+     | `ASC_KEY_ID` | 金鑰 ID（10 個字） |
+     | `ASC_ISSUER_ID` | Issuer ID（一串有 `-` 的 UUID） |
+     | `ASC_PRIVATE_KEY` | 用文字編輯器打開 `.p8`，整段貼上（含 `-----BEGIN PRIVATE KEY-----` 那兩行） |
+     | `APPLE_TEAM_ID` | developer.apple.com → Account → Membership 的 Team ID（10 個字） |
+  3. Actions → TestFlight → Run workflow 跑一次：它會註冊 App ID，然後停下來說「App Store Connect 上還沒有這個 App」
+  4. App Store Connect → App →「＋」新增 App：平台 iOS、名稱 StudioX、主要語言 繁體中文、套件 ID 選 `tw.studiox.console`、SKU `studiox-console`
+     （Apple 不讓 API 建 App，這一步只能在網頁上做）
+  5. TestFlight → 內部測試「＋」建一個群組，把自己和同事加進去
+  6. 回 Actions 重跑。之後每次推上來，十幾分鐘後 iPhone 上的 TestFlight 就有新版
 
-  TestFlight 和 App Store 的版本是正式環境的推播（App 自己判斷），console 的 APNs 金鑰兩種都能送。
+  `.p8` 只放在 GitHub 的 Secrets；不要貼在對話、程式或 issue 裡。要換金鑰就在 App Store Connect 撤銷舊的、更新三個 Secrets。
+- **也可以用 Xcode Cloud**（Apple 的建置服務）：專案已經有共用的 scheme 與 `ci_scripts/`（測試內容），在 Xcode 的 Integrate → Create Workflow 設定即可。
+  兩個都開會各出一版，選一個用就好。
+- 上架需要的都準備好了：`ITSAppUsesNonExemptEncryption = NO`（TestFlight 不會卡在出口合規）、隱私清單 `PrivacyInfo.xcprivacy`、
+  沒有透明度的 App 圖示。TestFlight 和 App Store 的版本用正式環境的推播（App 自己判斷），console 的 APNs 金鑰兩種都能送。
 
 ## 功能
 
@@ -142,6 +151,11 @@ StudioXConsole/
 Web/
   welcome/     歡迎頁的打包（esbuild；logo3d.ts 複製自 studio_website）
   assets/      從後台原始碼產生的圖：icons.cjs（Heroicons）、xena-orb.mjs（Xena 的水滴）
+ci/asc.py      App Store Connect API（TestFlight 流程：App ID、這一次專用的憑證與描述檔、測試內容、內部測試）
+ci_scripts/    Xcode Cloud 用的（測試內容）
+.github/workflows/
+  ios.yml        每次推上來編一次（模擬器、不簽章）
+  testflight.yml 推上來就出一版 TestFlight
 ```
 
 Swift 6、預設 `@MainActor`、`@Observable`、SwiftUI＋Liquid Glass、Swift Charts，沒有第三方套件。

@@ -77,8 +77,10 @@ final class AppLock {
 
     /// 現在鎖著（主畫面蓋著解鎖畫面）
     private(set) var locked: Bool
-    /// 正在跳 Face ID（這時候 App 會變成 inactive，不要當成離開）
+    /// 正在跳 Face ID（這時候 App 會變成 inactive，不要蓋遮罩）
     private(set) var authenticating = false
+    /// 剛鎖上、還沒自動跳過 Face ID（打開 App、離開太久回來時各跳一次；取消了就等他按「解鎖」，不會一直跳）
+    @ObservationIgnored private var promptPending = false
     private(set) var method: Method = .unavailable
     @ObservationIgnored private var leftAt: Date?
 
@@ -91,6 +93,7 @@ final class AppLock {
         method = Self.availableMethod()
         // 打開 App：設定要鎖、裝置也能鎖，就先鎖著
         locked = enabled && method != .unavailable
+        promptPending = locked
     }
 
     /// 能不能鎖（裝置有設密碼）
@@ -111,9 +114,8 @@ final class AppLock {
 
     // MARK: 進出 App
 
-    /// 離開 App（進背景）
+    /// 離開 App（進背景）。跳 Face ID 時只會 inactive、不會進背景；跳到一半滑回主畫面也算離開
     func didLeave() {
-        guard !authenticating else { return }
         if leftAt == nil { leftAt = .now }
     }
 
@@ -124,12 +126,21 @@ final class AppLock {
         guard enabled, available, !locked, let leftAt else { return }
         if Date.now.timeIntervalSince(leftAt) >= Double(timeout.rawValue) {
             locked = true
+            promptPending = true
         }
+    }
+
+    /// 剛鎖上：自動跳一次 Face ID（回 true 一次）。取消之後回到 App 不會再自動跳
+    func takePrompt() -> Bool {
+        guard locked, promptPending else { return false }
+        promptPending = false
+        return true
     }
 
     /// 登入、登出：登入的人剛驗證過，不用再鎖
     func reset() {
         locked = false
+        promptPending = false
         leftAt = nil
     }
 
@@ -157,6 +168,17 @@ final class AppLock {
         return ok
     }
 
+    /// 放寬「離開多久要解鎖」也要驗證；改短不用
+    func setTimeout(_ value: Timeout) async {
+        guard value.rawValue > timeout.rawValue, available else {
+            timeout = value
+            return
+        }
+        if await authenticate(reason: "放寬 StudioX 的鎖定時間") {
+            timeout = value
+        }
+    }
+
     /// 關掉保護之前也要驗證（借手機的人不能自己關掉）
     func turnOff(_ setting: ReferenceWritableKeyPath<AppLock, Bool>) async {
         guard available else {
@@ -175,14 +197,13 @@ final class AppLock {
         let context = LAContext()
         context.localizedCancelTitle = "取消"
         let ok = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
+            // 系統在背景執行緒回呼：明確標成 @Sendable，不會被當成主執行緒的程式
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { @Sendable ok, _ in
                 continuation.resume(returning: ok)
             }
         }
         // 驗證完才放掉 context（放掉會取消驗證）
         context.invalidate()
-        // 驗證的系統畫面會讓 App 短暫變成 inactive：不要算成離開
-        leftAt = nil
         return ok
     }
 }

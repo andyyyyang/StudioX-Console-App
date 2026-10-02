@@ -64,7 +64,7 @@ final class PushCenter {
     @discardableResult
     func requestPermission() async -> Bool {
         let granted = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { ok, _ in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { @Sendable ok, _ in
                 continuation.resume(returning: ok)
             }
         }
@@ -74,7 +74,8 @@ final class PushCenter {
 
     private static func currentPermission() async -> Permission {
         let status = await withCheckedContinuation { (continuation: CheckedContinuation<UNAuthorizationStatus, Never>) in
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
+            // 系統在背景執行緒回呼：明確標成 @Sendable，只把狀態（enum）帶回來
+            UNUserNotificationCenter.current().getNotificationSettings { @Sendable settings in
                 continuation.resume(returning: settings.authorizationStatus)
             }
         }
@@ -108,11 +109,17 @@ final class PushCenter {
         }
     }
 
-    /// 登出前：這台裝置不要再收到這個帳號的通知
+    /// 登出（或登入過期）：這台裝置不要再收到這個帳號的通知。
+    /// 還登入著就請 console 移除；另外一律向 Apple 取消這台的通知代碼——
+    /// 登入已經過期、或還沒拿到代碼就登出時沒辦法叫 console，之後 console 送過來 Apple 會回「已失效」，console 就刪掉這台。
+    /// 鎖定畫面上已經跳出來的通知也清掉。下次登入會重新拿代碼、重新登記
     func unregister() async {
         if let token, let api, api.isSignedIn {
             await api.removeDevice(token: token)
         }
+        UIApplication.shared.unregisterForRemoteNotifications()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        token = nil
         device = nil
         configured = nil
         pending = nil

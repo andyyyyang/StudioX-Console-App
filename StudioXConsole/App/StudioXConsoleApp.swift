@@ -50,10 +50,10 @@ struct RootView: View {
     /// Face ID 的鎖定畫面、切換 App 的遮罩（自己的視窗，蓋得住 sheet）
     @State private var cover = LockWindow()
 
-    /// 要不要蓋住：鎖著，或切到別的 App／拉下通知中心（跳 Face ID 的時候不算）
+    /// 要不要蓋住：鎖著、在背景，或切到別的 App／拉下通知中心（跳 Face ID 的那一下不算，但跳到一半進背景還是要蓋）
     private var covered: Bool {
         guard model.phase != .welcome else { return false }
-        return model.lock.locked || (scenePhase != .active && !model.lock.authenticating)
+        return model.lock.locked || scenePhase == .background || (scenePhase == .inactive && !model.lock.authenticating)
     }
 
     var body: some View {
@@ -100,7 +100,8 @@ struct RootView: View {
                 model.lock.didLeave()
             case .active:
                 model.lock.didReturn()
-                if model.lock.locked { Task { await model.lock.unlock() } }
+                // 剛鎖上才自動跳 Face ID；取消了就停在鎖定畫面，等他按「解鎖」或登出
+                if model.lock.takePrompt() { Task { await model.lock.unlock() } }
                 // 回到 App：重拿通知的 token（可能換了）、在設定裡打開了通知
                 if model.phase == .ready { Task { await model.push.refresh() } }
             default:

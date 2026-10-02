@@ -1,6 +1,7 @@
 import AuthenticationServices
 import Observation
 import SwiftUI
+import UIKit
 
 enum AppTab: Hashable {
     case xena, sites, orders, inbox, account, search
@@ -174,7 +175,7 @@ final class AppModel {
         briefing.reset()
         inboxSegment = "support"
         lock.reset()
-        // 登入過期：token 已經沒了，只清掉這邊的狀態（console 那邊的裝置會因為 App 沒登入而不再收到通知）
+        // 登入過期：token 已經沒了、叫不了 console；unregister 會向 Apple 取消這台的通知代碼，console 下次送就知道它失效了
         Task { await push.unregister() }
     }
 
@@ -273,6 +274,8 @@ final class AppModel {
         case orders(site: String)
         /// 收件匣的某個分段
         case inbox(String)
+        /// App 裡還沒有的頁面：在瀏覽器打開網站後台的那一頁（網站自己的登入）
+        case web(site: String, path: String)
         case home
     }
 
@@ -290,8 +293,8 @@ final class AppModel {
         let sub = parts.count > 2 ? parts[2] : nil
         switch section {
         case "support":
-            // yellowgirl 的 Xena 對話（/admin/support/xena?c=）：收件匣的「轉給專人」
-            if sub == "xena" { return .inbox("handoffs") }
+            // yellowgirl 的 Xena 對話（/admin/support/xena?c=）：App 裡還沒有這種對話，在瀏覽器打開後台的那一段
+            if sub == "xena" { return .web(site: site, path: url) }
             if let id = q["thread"] { return .route(.thread(site: site, id: id)) }
             return .inbox("support")
         case "orders":
@@ -337,6 +340,15 @@ final class AppModel {
             inboxSegment = segment
             inboxPath = []
             tab = .inbox
+        case .web(let site, let path):
+            // 後台在 adminURL 的同一個網域（/login?sso=studiox 的那個）
+            if let admin = self.site(site)?.adminURL,
+               var c = URLComponents(url: admin, resolvingAgainstBaseURL: false),
+               let target = URLComponents(string: path) {
+                c.path = target.path
+                c.query = target.query
+                if let url = c.url { UIApplication.shared.open(url) }
+            }
         case .home:
             showXena = false
             showAccount = false

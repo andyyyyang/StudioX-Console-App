@@ -13,3 +13,4 @@ build/
 
 # Xcode Cloud 建置時產生的 TestFlight 測試內容
 TestFlight/
+__pycache__/

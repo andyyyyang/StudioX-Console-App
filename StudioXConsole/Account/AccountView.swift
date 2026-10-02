@@ -185,7 +185,7 @@ private struct SecuritySection: View {
                             .textRole(.body)
                             .foregroundStyle(Theme.ink)
                         Spacer()
-                        Picker("離開多久要解鎖", selection: Binding(get: { lock.timeout }, set: { lock.timeout = $0 })) {
+                        Picker("離開多久要解鎖", selection: Binding(get: { lock.timeout }, set: { value in Task { await lock.setTimeout(value) } })) {
                             ForEach(AppLock.Timeout.allCases) { option in
                                 Text(option.label).tag(option)
                             }
