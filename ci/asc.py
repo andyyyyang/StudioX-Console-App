@@ -181,11 +181,11 @@ def prepare():
 
 # ── signing ──────────────────────────────────────────────────────────────────
 
-# App 用到的能力（StudioXConsole.entitlements）：App ID 要打開，描述檔裡才會有
-CAPABILITIES = {
-    "PUSH_NOTIFICATIONS": ("aps-environment", "production"),
-    "USERNOTIFICATIONS_TIMESENSITIVE": ("com.apple.developer.usernotifications.time-sensitive", True),
-}
+# API 打得開的能力（Apple 的 CapabilityType）：App ID 要打開，描述檔裡才會有
+CAPABILITIES = ["PUSH_NOTIFICATIONS"]
+# App 想要的 entitlements（StudioXConsole.entitlements）。實際放哪些看 Apple 發的描述檔裡有什麼：
+# Time Sensitive 通知 API 打不開，要在 developer.apple.com 的 App ID 勾選，勾了之後下一版自動包含
+WANTED_ENTITLEMENTS = ["aps-environment", "com.apple.developer.usernotifications.time-sensitive"]
 
 
 def bundle_resource():
@@ -197,34 +197,45 @@ def bundle_resource():
 
 
 def ensure_capabilities(bundle_id):
-    """回傳打開了的能力。打不開的（例如 Apple 改了名稱）跳過，entitlements 也不放，不會讓整個建置失敗"""
+    """App ID 打開 App 要的能力（已經打開的不動）。打不開的寫在摘要，不讓建置失敗——描述檔裡沒有的 entitlement 不會放進 App"""
     have = {c["attributes"].get("capabilityType") for c in
             call("GET", f"/bundleIds/{bundle_id}/bundleIdCapabilities").get("data", [])}
-    enabled = []
     for cap in CAPABILITIES:
         if cap in have:
-            enabled.append(cap)
             continue
         try:
             call("POST", "/bundleIdCapabilities", {"data": {
                 "type": "bundleIdCapabilities",
                 "attributes": {"capabilityType": cap},
                 "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle_id}}}}})
-            enabled.append(cap)
             summary(f"- App ID 打開了 {cap}")
         except ApiError as e:
-            if e.status == 409:
-                enabled.append(cap)
-            else:
-                summary(f"- ⚠️ App ID 沒辦法打開 {cap}，這一版不含這項能力：{e}")
-    return enabled
+            # 注意：App Store Connect 的 409 是「資料不對」，不一定是「已經有了」
+            summary(f"- ⚠️ App ID 沒辦法打開 {cap}：{apple_error(e)}")
 
 
-def write_entitlements(path, enabled):
+def profile_entitlements(profile_bytes):
+    """描述檔（CMS 簽章包著的 plist）裡 Apple 允許的 entitlements"""
     import plistlib
-    ent = {CAPABILITIES[c][0]: CAPABILITIES[c][1] for c in enabled}
+    start = profile_bytes.find(b"<?xml")
+    end = profile_bytes.find(b"</plist>")
+    if start < 0 or end < 0:
+        return {}
+    return plistlib.loads(profile_bytes[start:end + len(b"</plist>")]).get("Entitlements", {})
+
+
+def write_entitlements(path, allowed):
+    """App 要的 entitlements，只放描述檔允許的（值用描述檔的，例如 aps-environment＝production）"""
+    import plistlib
+    ent = {k: allowed[k] for k in WANTED_ENTITLEMENTS if k in allowed}
     with open(path, "wb") as f:
         plistlib.dump(ent, f)
+    missing = [k for k in WANTED_ENTITLEMENTS if k not in allowed]
+    if "com.apple.developer.usernotifications.time-sensitive" in missing:
+        summary("- 這一版沒有 Time Sensitive 通知（緊急的通知照樣送，只是專注模式下不會穿透）。"
+                "要的話到 developer.apple.com → Identifiers → `" + BUNDLE_ID + "` 勾 Time Sensitive Notifications，下一版就會有")
+    if "aps-environment" in missing:
+        summary("- ⚠️ 描述檔裡沒有推播（aps-environment），這一版收不到通知")
 
 
 def signing(args):
@@ -238,7 +249,7 @@ def signing(args):
 
     os.makedirs(args.dir, exist_ok=True)
     bundle = bundle_resource()
-    enabled = ensure_capabilities(bundle["id"])
+    ensure_capabilities(bundle["id"])
 
     # 憑證：私鑰在這台 Mac 產生、只存在暫時的鑰匙圈，建置完就撤銷
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -283,10 +294,11 @@ def signing(args):
         }}})["data"]
     output("profile_id", profile["id"])
     output("profile_uuid", profile["attributes"]["uuid"])
+    profile_bytes = base64.b64decode(profile["attributes"]["profileContent"])
     with open(os.path.join(args.dir, "profile.mobileprovision"), "wb") as f:
-        f.write(base64.b64decode(profile["attributes"]["profileContent"]))
+        f.write(profile_bytes)
 
-    write_entitlements(os.path.join(args.dir, "appstore.entitlements"), enabled)
+    write_entitlements(os.path.join(args.dir, "appstore.entitlements"), profile_entitlements(profile_bytes))
     summary(f"- 這一次的簽章：憑證與描述檔「{args.name}」（建置完就撤銷）")
 
 
