@@ -61,6 +61,7 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: python3 ci/asc.py prepare
 
   # Mac：這一次專用的憑證與描述檔、封存、上傳，結束就撤銷
@@ -221,7 +222,7 @@ jobs:
             ${{ runner.temp }}/export.log
           retention-days: 7
 
-  # 回到 Linux：等 Apple 處理好、寫「測試內容」、交給內部測試群組（等待的時間不花 Mac 的分鐘數）
+  # 回到 Linux：等 Apple 處理好、寫「測試內容」、交給內部測試群組、寄 TestFlight 邀請（等待的時間不花 Mac 的分鐘數）
   finish:
     needs: [prepare, build]
     if: needs.build.result == 'success'
@@ -231,6 +232,8 @@ jobs:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      # 選填：除了帳號持有人，還要寄邀請給誰（逗號隔開的 Email）
+      TESTFLIGHT_TESTERS: ${{ secrets.TESTFLIGHT_TESTERS }}
     steps:
       - uses: actions/checkout@v5
         with:

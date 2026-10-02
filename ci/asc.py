@@ -11,7 +11,8 @@ App Store Connect API（GitHub Actions 的 TestFlight 流程用，.github/workfl
   python3 ci/asc.py cleanup --cert <id> --profile <id>
       用完就撤銷憑證、刪掉描述檔（已經上傳的版本不受影響；不會越積越多）
   python3 ci/asc.py finish --app <id> --version 1.0 --build 2610021405 --notes notes.txt
-      等 Apple 處理好這一版、寫「測試內容」、交給內部測試群組
+      等 Apple 處理好這一版、寫「測試內容」、交給內部測試群組，寄 TestFlight 邀請給帳號持有人
+      （和 Secrets 的 TESTFLIGHT_TESTERS，選填，逗號隔開的 Email）
 
 金鑰從環境變數讀（GitHub 的 Secrets）：ASC_KEY_ID、ASC_ISSUER_ID、ASC_PRIVATE_KEY（.p8 的內容）。
 只用標準函式庫＋PyJWT（pip install pyjwt cryptography）。
@@ -36,17 +37,26 @@ class ApiError(Exception):
     def __init__(self, status, method, path, detail):
         super().__init__(f"App Store Connect API {method} {path} → {status}: {detail[:1500]}")
         self.status = status
+        self.detail = detail
+
+
+def private_key():
+    return os.environ["ASC_PRIVATE_KEY"].strip().replace("\\n", "\n")
+
+
+# 團隊金鑰（Team key）用 iss＝Issuer ID；個人金鑰（Individual key）用 sub＝"user"。先試團隊的，401 再試個人的
+KEY_MODE = {"mode": "team", "switched": False}
 
 
 def token():
-    key = os.environ["ASC_PRIVATE_KEY"].strip().replace("\\n", "\n")
     now = int(time.time())
-    return jwt.encode(
-        {"iss": os.environ["ASC_ISSUER_ID"].strip(), "iat": now, "exp": now + 15 * 60, "aud": "appstoreconnect-v1"},
-        key,
-        algorithm="ES256",
-        headers={"kid": os.environ["ASC_KEY_ID"].strip(), "typ": "JWT"},
-    )
+    claims = {"iat": now, "exp": now + 15 * 60, "aud": "appstoreconnect-v1"}
+    if KEY_MODE["mode"] == "team":
+        claims["iss"] = os.environ["ASC_ISSUER_ID"].strip()
+    else:
+        claims["sub"] = "user"
+    return jwt.encode(claims, private_key(), algorithm="ES256",
+                      headers={"kid": os.environ["ASC_KEY_ID"].strip(), "typ": "JWT"})
 
 
 def call(method, path, body=None, query=None):
@@ -61,7 +71,52 @@ def call(method, path, body=None, query=None):
             raw = r.read()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
-        raise ApiError(e.code, method, path, e.read().decode(errors="replace")) from None
+        detail = e.read().decode(errors="replace")
+        if e.code == 401 and not KEY_MODE["switched"]:
+            KEY_MODE["switched"] = True
+            KEY_MODE["mode"] = "individual"
+            try:
+                result = call(method, path, body, query)
+                summary("- 這把是個人金鑰（Individual key）")
+                return result
+            except ApiError:
+                KEY_MODE["mode"] = "team"
+        raise ApiError(e.code, method, path, detail) from None
+
+
+def apple_error(e):
+    """Apple 回的錯誤代碼與說明（不含任何金鑰內容）"""
+    try:
+        errs = json.loads(e.detail).get("errors", [])
+        return "；".join(f"{x.get('code')}：{x.get('detail') or x.get('title')}" for x in errs) or str(e)
+    except Exception:
+        return str(e)
+
+
+def diagnose():
+    """金鑰被拒時：只檢查格式（不印出任何值），告訴他哪一個 Secret 可能貼錯"""
+    import re
+    lines = []
+    kid = os.environ.get("ASC_KEY_ID", "").strip()
+    iss = os.environ.get("ASC_ISSUER_ID", "").strip()
+    team = os.environ.get("APPLE_TEAM_ID", "").strip()
+    uuid = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+    lines.append(f"- `ASC_KEY_ID`：{'✅ 10 個英數字' if re.fullmatch(r'[A-Z0-9]{10}', kid) else f'❌ 應該是 10 個大寫英數字（現在 {len(kid)} 個字）'}")
+    if uuid.match(kid):
+        lines.append("  - 看起來貼成了 Issuer ID，兩個可能對調了")
+    lines.append(f"- `ASC_ISSUER_ID`：{'✅ UUID 格式' if uuid.match(iss) else f'❌ 應該是有 4 個「-」的 UUID（現在 {len(iss)} 個字）'}")
+    try:
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+        from cryptography.hazmat.primitives.asymmetric import ec
+        k = load_pem_private_key(private_key().encode(), password=None)
+        ok = isinstance(k, ec.EllipticCurvePrivateKey) and k.curve.name == "secp256r1"
+        lines.append(f"- `ASC_PRIVATE_KEY`：{'✅ 讀得懂（EC P-256）' if ok else '❌ 不是 App Store Connect 的金鑰（要 EC P-256）'}")
+    except Exception:
+        pk = private_key()
+        hint = "少了 `-----BEGIN PRIVATE KEY-----` 那一行" if "BEGIN PRIVATE KEY" not in pk else "內容不完整或多了字"
+        lines.append(f"- `ASC_PRIVATE_KEY`：❌ 讀不懂（{hint}）；用文字編輯器打開 .p8，從第一行到最後一行整段貼上")
+    lines.append(f"- `APPLE_TEAM_ID`：{'✅ 10 個英數字' if re.fullmatch(r'[A-Z0-9]{10}', team) else '❌ 應該是 10 個大寫英數字（developer.apple.com → Membership）'}")
+    return "\n".join(lines)
 
 
 def summary(text):
@@ -85,10 +140,15 @@ def prepare():
     try:
         found = call("GET", "/bundleIds", query={"filter[identifier]": BUNDLE_ID, "limit": 200})
     except ApiError as e:
-        if e.status in (401, 403):
-            summary("### ❌ App Store Connect 不接受這把 API 金鑰\n"
-                    "確認 GitHub Secrets 的 `ASC_KEY_ID`、`ASC_ISSUER_ID`、`ASC_PRIVATE_KEY`（整個 .p8 的內容）沒貼錯，"
-                    "而且金鑰的角色是 **Admin**（要能建憑證與描述檔）。")
+        if e.status == 401:
+            summary(f"### ❌ App Store Connect 不接受這把 API 金鑰（401）\nApple 說：{apple_error(e)}\n\n"
+                    f"各個 Secret 的格式檢查：\n{diagnose()}\n\n"
+                    "格式都對的話：金鑰可能已經撤銷，或 Key ID 與 .p8 不是同一把（重新產生一把、三個 Secrets 一起換）。")
+            sys.exit(1)
+        if e.status == 403:
+            summary(f"### ❌ 這把 API 金鑰的權限不夠（403）\nApple 說：{apple_error(e)}\n\n"
+                    "App Store Connect → 使用者與存取權 → 整合 → 團隊金鑰：重新產生一把、存取權選 **Admin**"
+                    "（要能註冊 App ID、建憑證與描述檔），然後更新 `ASC_KEY_ID` 與 `ASC_PRIVATE_KEY`。")
             sys.exit(1)
         raise
     bundle = next((b for b in found.get("data", []) if b["attributes"]["identifier"] == BUNDLE_ID), None)
@@ -275,12 +335,86 @@ def whats_new(app_id, build_id, text):
     summary("- 寫好了 TestFlight 的「測試內容」")
 
 
-def give_to_internal_groups(app_id, build_id):
+def internal_groups(app_id):
+    """內部測試群組；一個都沒有就建一個（拿到每一版）"""
     groups = call("GET", f"/apps/{app_id}/betaGroups", query={"limit": 50}).get("data", [])
     internal = [g for g in groups if g["attributes"].get("isInternalGroup")]
+    if internal:
+        return internal
+    try:
+        g = call("POST", "/betaGroups", {"data": {
+            "type": "betaGroups",
+            "attributes": {"name": "StudioX 團隊", "isInternalGroup": True, "hasAccessToAllBuilds": True},
+            "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})["data"]
+        summary("- 建了內部測試群組「StudioX 團隊」")
+        return [g]
+    except ApiError as e:
+        summary(f"- ⚠️ 沒辦法建內部測試群組（到 App Store Connect → TestFlight → 內部測試「＋」建一個）：{apple_error(e)}")
+        return []
+
+
+def mask(email):
+    name, _, domain = email.partition("@")
+    return f"{name[:2]}***@{domain}" if domain else "***"
+
+
+def testers():
+    """要收到邀請的人：App Store Connect 的帳號持有人，加上 Secrets 的 TESTFLIGHT_TESTERS（逗號隔開的 Email，選填）。
+    Email 不寫在程式裡，從 App Store Connect 或 Secrets 讀"""
+    people = {}
+    try:
+        for u in call("GET", "/users", query={"filter[roles]": "ACCOUNT_HOLDER", "limit": 10}).get("data", []):
+            a = u["attributes"]
+            if a.get("username"):
+                people[a["username"].lower()] = (a.get("firstName") or "", a.get("lastName") or "")
+    except ApiError as e:
+        summary(f"- ⚠️ 讀不到帳號持有人（金鑰要 Admin）：{apple_error(e)}")
+    for email in os.environ.get("TESTFLIGHT_TESTERS", "").split(","):
+        email = email.strip().lower()
+        if "@" in email:
+            people.setdefault(email, ("", ""))
+    return people
+
+
+def invite(app_id, group):
+    """把人加進內部測試群組，並寄 TestFlight 邀請（已經接受過的不會重複打擾）"""
+    gid, gname = group["id"], group["attributes"].get("name")
+    for email, (first, last) in testers().items():
+        try:
+            found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
+            if found:
+                tester = found[0]
+                try:
+                    call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": tester["id"]}]})
+                except ApiError as e:
+                    if e.status not in (409, 422):
+                        raise
+            else:
+                tester = call("POST", "/betaTesters", {"data": {
+                    "type": "betaTesters",
+                    "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
+                    "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})["data"]
+            state = (tester.get("attributes") or {}).get("state")
+            if state == "ACCEPTED" or state == "INSTALLED":
+                summary(f"- {mask(email)} 已經在「{gname}」，打開 iPhone 的 TestFlight 就有新版")
+                continue
+            try:
+                call("POST", "/betaTesterInvitations", {"data": {
+                    "type": "betaTesterInvitations",
+                    "relationships": {
+                        "app": {"data": {"type": "apps", "id": app_id}},
+                        "betaTester": {"data": {"type": "betaTesters", "id": tester["id"]}}}}})
+                summary(f"- 寄了 TestFlight 邀請給 {mask(email)}（「{gname}」）")
+            except ApiError as e:
+                summary(f"- {mask(email)} 加進了「{gname}」；邀請信：{apple_error(e)}")
+        except ApiError as e:
+            summary(f"- ⚠️ 沒辦法邀請 {mask(email)}：{apple_error(e)}")
+
+
+def give_to_internal_groups(app_id, build_id):
+    internal = internal_groups(app_id)
     if not internal:
-        summary("- ⚠️ 還沒有內部測試群組：App Store Connect → TestFlight → 內部測試「＋」建一個、把自己加進去，之後每一版都會自動出現")
-        return
+        return []
     for g in internal:
         name = g["attributes"].get("name")
         if g["attributes"].get("hasAccessToAllBuilds"):
@@ -290,7 +424,8 @@ def give_to_internal_groups(app_id, build_id):
             call("POST", f"/betaGroups/{g['id']}/relationships/builds", {"data": [{"type": "builds", "id": build_id}]})
             summary(f"- 交給內部群組「{name}」")
         except ApiError as e:
-            summary(f"- ⚠️ 沒有交給「{name}」：{e}")
+            summary(f"- ⚠️ 沒有交給「{name}」：{apple_error(e)}")
+    return internal
 
 
 def finish(args):
@@ -302,7 +437,9 @@ def finish(args):
             whats_new(args.app, build["id"], text)
         except ApiError as e:
             summary(f"- ⚠️ 「測試內容」沒有寫上去：{e}")
-    give_to_internal_groups(args.app, build["id"])
+    groups = give_to_internal_groups(args.app, build["id"])
+    if groups:
+        invite(args.app, groups[0])
 
 
 def main():

@@ -27,7 +27,8 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
   1. 便宜的 Linux 先檢查：Secrets 設好了沒、App ID `tw.studiox.console` 註冊了沒（沒有就註冊）、App Store Connect 上有沒有這個 App
   2. Mac：打開 App ID 的推播能力，建一張**這一次專用**的 Apple Distribution 憑證（私鑰只在那台 Mac 的暫時鑰匙圈）與 App Store 描述檔，
      封存、上傳；結束就撤銷憑證、刪掉描述檔（已經上傳的版本不受影響，憑證也不會越積越多）
-  3. Linux：等 Apple 處理好，把最近的提交寫成「測試內容」，交給內部測試群組
+  3. Linux：等 Apple 處理好，把最近的提交寫成「測試內容」，交給內部測試群組（沒有就建一個「StudioX 團隊」），
+     把 App Store Connect 的帳號持有人加進去、直接寄 TestFlight 邀請；要多邀幾個人就加 Secret `TESTFLIGHT_TESTERS`（逗號隔開的 Email，選填）
   - 推到 `main` 或 `claude/ios-app-prototype-4492mf`（App 的檔案有改）就跑，也可以在 Actions → TestFlight → Run workflow 手動跑
   - 版號用 UTC 時間（`2610021405`＝26/10/02 14:05），版本改 `MARKETING_VERSION`
   - GitHub 還沒裝 Xcode 27 的時候用最新的 Xcode 建置，最低系統先設成那個 SDK 的版本（摘要會寫用了哪一版）
@@ -48,6 +49,9 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
      （Apple 不讓 API 建 App，這一步只能在網頁上做）
   5. TestFlight → 內部測試「＋」建一個群組，把自己和同事加進去
   6. 回 Actions 重跑。之後每次推上來，十幾分鐘後 iPhone 上的 TestFlight 就有新版
+
+  金鑰被拒時，Actions 的摘要會列出 Apple 回的錯誤，和每個 Secret 的格式檢查（只檢查格式、不會印出內容）。
+  團隊金鑰與個人金鑰（Individual key）都可以，流程會自己判斷。
 
   `.p8` 只放在 GitHub 的 Secrets；不要貼在對話、程式或 issue 裡。要換金鑰就在 App Store Connect 撤銷舊的、更新三個 Secrets。
 - **也可以用 Xcode Cloud**（Apple 的建置服務）：專案已經有共用的 scheme 與 `ci_scripts/`（測試內容），在 Xcode 的 Integrate → Create Workflow 設定即可。
