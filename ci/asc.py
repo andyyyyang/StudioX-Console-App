@@ -49,8 +49,9 @@ KEY_MODE = {"mode": "team", "switched": False}
 
 
 def token():
+    # iat 往前 30 秒：GitHub 機器的時間比 Apple 快一點也不會被當成「未來的 token」（有效期限一樣不超過 20 分鐘）
     now = int(time.time())
-    claims = {"iat": now, "exp": now + 15 * 60, "aud": "appstoreconnect-v1"}
+    claims = {"iat": now - 30, "exp": now + 15 * 60, "aud": "appstoreconnect-v1"}
     if KEY_MODE["mode"] == "team":
         claims["iss"] = os.environ["ASC_ISSUER_ID"].strip()
     else:
@@ -143,7 +144,12 @@ def prepare():
         if e.status == 401:
             summary(f"### ❌ App Store Connect 不接受這把 API 金鑰（401）\nApple 說：{apple_error(e)}\n\n"
                     f"各個 Secret 的格式檢查：\n{diagnose()}\n\n"
-                    "格式都對的話：金鑰可能已經撤銷，或 Key ID 與 .p8 不是同一把（重新產生一把、三個 Secrets 一起換）。")
+                    "格式都對的話，通常是這幾個：\n"
+                    "1. **Key ID 和 .p8 不是同一把**：.p8 的檔名是 `AuthKey_XXXXXXXXXX.p8`，XXXXXXXXXX 要和 `ASC_KEY_ID` 一模一樣。"
+                    "推播（APNs）或 Sign in with Apple 的金鑰也是 .p8、長得一樣，但不能用——要「使用者與存取權 → 整合 → App Store Connect API」那裡產生的\n"
+                    "2. **Issuer ID**：在同一頁「團隊金鑰」表格上方（不是金鑰那一列的 ID）\n"
+                    "3. 金鑰剛產生：等幾分鐘，在 Actions 這一頁按 Re-run jobs\n"
+                    "4. 金鑰被撤銷了：重新產生一把，`ASC_KEY_ID`、`ASC_PRIVATE_KEY` 一起換")
             sys.exit(1)
         if e.status == 403:
             summary(f"### ❌ 這把 API 金鑰的權限不夠（403）\nApple 說：{apple_error(e)}\n\n"
