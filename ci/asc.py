@@ -428,34 +428,19 @@ def send_invitation(app_id, tester_id, tries=4):
 
 
 def invite(app_id, group):
-    """確定帳號持有人（和 TESTFLIGHT_TESTERS）在測試群組裡，然後寄 TestFlight 邀請給群組裡每個還沒裝的人。
-    內部測試員在群組裡的 Email 可能是聯絡信箱、不是 Apple ID，所以不靠 Email 對，直接寄給群組成員"""
+    """寄 TestFlight 邀請給群組裡每個還沒裝的人。
+    內部群組只能放 App Store Connect 的使用者，而 Apple 的 API 不讓程式把使用者加進內部群組（STATE_ERROR：Tester(s) cannot be assigned），
+    所以第一次要在 App Store Connect 的網頁（或 iPhone 的 App Store Connect App）把自己加進去；之後每一版都自動給、這裡負責重寄邀請"""
     gid, gname = group["id"], group["attributes"].get("name")
     members = group_members(gid)
-    for email, (first, last) in testers().items():
-        if email in members:
-            continue
-        try:
-            found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
-            if found:
-                a = found[0].get("attributes") or {}
-                summary(f"- {mask(email)} 已經是測試員（{a.get('inviteType') or '?'}／{a.get('state') or '?'}），加進「{gname}」…")
-                call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": found[0]["id"]}]})
-                summary(f"- {mask(email)} 加進「{gname}」")
-            else:
-                call("POST", "/betaTesters", {"data": {
-                    "type": "betaTesters",
-                    "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
-                    "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})
-                summary(f"- {mask(email)} 加進「{gname}」")
-        except ApiError as e:
-            summary(f"- ⚠️ 沒辦法把 {mask(email)} 加進「{gname}」：{apple_error(e)}")
-    time.sleep(5)
-    members = group_members(gid)
-    summary(f"- 「{gname}」有 {len(members)} 位測試員：" +
-            ("、".join(f"{mask(m)}（{t['attributes'].get('state') or '?'}）" for m, t in members.items()) or "（沒有）"))
-    if not members:
-        summary(f"  Apple 沒有把人放進內部群組。到 App Store Connect → TestFlight →「{gname}」→ 測試人員「＋」把自己加進去（一次就好）")
+    summary(f"- 「{gname}」有 {len(members)} 位測試員" + ("：" + "、".join(
+        f"{mask(m)}（{t['attributes'].get('state') or '?'}）" for m, t in members.items()) if members else ""))
+    wanted = set(testers())
+    if not members or (group["attributes"].get("isInternalGroup") and not wanted & set(members)):
+        summary(f"### 👉 第一次要自己加進「{gname}」（Apple 不讓 API 加內部測試員）\n"
+                f"App Store Connect → App → TestFlight → 內部測試「{gname}」→ 測試人員旁的「＋」→ 勾自己 → 加入。"
+                "Apple 會馬上寄邀請信，之後每一版都會自動出現在 iPhone 的 TestFlight。"
+                "iPhone 上的 App Store Connect App 也可以加（TestFlight → 內部群組 → 新增測試人員）")
     for email, tester in members.items():
         if tester["attributes"].get("state") == "INSTALLED":
             summary(f"- {mask(email)} 已經裝了，打開 iPhone 的 TestFlight 就有新版")
