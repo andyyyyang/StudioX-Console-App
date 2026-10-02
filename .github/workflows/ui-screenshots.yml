@@ -1,11 +1,18 @@
-# UI 截圖：在 GitHub 的 Mac 上用模擬器打開 App 的每個畫面（示範模式的假資料，見 DemoServer.swift），
-# 截圖存到 docs/screenshots/（iPhone 淺色、深色，iPad 深色），提交回這個分支。
+# UI 截圖：在 GitHub 的 Mac 上用模擬器打開 App 的畫面（示範模式的假資料，見 DemoServer.swift），
+# 截圖存到 docs/screenshots/，提交回這個分支（也放在這次執行的 artifact）。
+# 平常只截 iPhone 深色的主要畫面；手動 Run workflow 選 full 才截全部畫面＋淺色＋iPad。
 # talk＝首頁 Xena 說到一半、home＝說完；account＝設定頁；voice＝用說的（示範的字幕）。
+# 截圖這一步有自己的時限：逾時也會把已經截到的提交回來（看得到卡在哪一張）。
 # 提交訊息有 [screenshots] 才跑（Mac 的分鐘數比較貴），也可以手動 Run workflow。
 name: UI 截圖
 
 on:
   workflow_dispatch:
+    inputs:
+      full:
+        description: "全部畫面＋淺色＋iPad（比較久）"
+        type: boolean
+        default: false
   push:
     paths:
       - "StudioXConsole/**"
@@ -71,27 +78,36 @@ jobs:
           PY
 
       - name: 截圖
+        timeout-minutes: 28
+        continue-on-error: true
+        env:
+          FULL: ${{ inputs.full && 'yes' || 'no' }}
         run: |
           app="build/Build/Products/Debug-iphonesimulator/StudioXConsole.app"
           mkdir -p shots
+          # 主要畫面（平常只截這些）
           scenes=(
-            "welcome|"
             "talk|-demo|5"
             "home|-demo|13"
-            "sites|-demo -demoTab sites"
             "site|-demo -demoRoute site"
-            "traffic|-demo -demoRoute traffic"
-            "products|-demo -demoRoute products"
-            "product|-demo -demoRoute product"
-            "orders|-demo -demoTab orders"
-            "order|-demo -demoRoute order"
-            "inbox|-demo -demoTab inbox"
-            "thread|-demo -demoRoute thread"
-            "account|-demo -demoTab account"
             "xena|-demo -demoRoute xena"
             "voice|-demo -demoVoice YES"
-            "lock|-demo -demoLock YES"
+            "account|-demo -demoTab account"
           )
+          if [ "$FULL" = "yes" ]; then
+            scenes+=(
+              "welcome|"
+              "sites|-demo -demoTab sites"
+              "traffic|-demo -demoRoute traffic"
+              "products|-demo -demoRoute products"
+              "product|-demo -demoRoute product"
+              "orders|-demo -demoTab orders"
+              "order|-demo -demoRoute order"
+              "inbox|-demo -demoTab inbox"
+              "thread|-demo -demoRoute thread"
+              "lock|-demo -demoLock YES"
+            )
+          fi
           # 每個指令都有時限（卡住就跳過，不會整個流程卡到逾時）；log 有時間，看得出慢在哪
           limit() { perl -e 'alarm shift; exec @ARGV' "$@"; }
           shoot() {
@@ -110,16 +126,29 @@ jobs:
               limit 60 xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null || echo "   啟動逾時"
               sleep "${wait:-8}"
               limit 30 xcrun simctl io "$dev" screenshot "shots/$label-$appearance-$name.png" >/dev/null 2>&1 || echo "   截圖逾時"
+              echo "   完成 $(date +%T)"
             done
             limit 60 xcrun simctl shutdown "$dev" || true
           }
           shoot "$IPHONE" iphone dark
-          shoot "$IPHONE" iphone light
-          shoot "$IPAD" ipad dark
+          if [ "$FULL" = "yes" ]; then
+            shoot "$IPHONE" iphone light
+            shoot "$IPAD" ipad dark
+          fi
           ls shots | wc -l
 
+      - name: 截圖放在這次執行（逾時也放）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots/
+          if-no-files-found: ignore
+
       - name: 縮小、提交回分支
+        if: always()
         run: |
+          ls shots/*.png >/dev/null 2>&1 || { echo "沒有截到"; exit 0; }
           mkdir -p docs/screenshots
           rm -f docs/screenshots/*.jpg
           for f in shots/*.png; do
