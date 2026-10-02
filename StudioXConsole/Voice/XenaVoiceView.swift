@@ -121,9 +121,9 @@ struct XenaVoiceView: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
-                if let full = c.readingCard {
-                    // 太長：整段放卡片，按一下或說「念給我聽」才全部念
-                    ReplyCard(text: full) { c.readAloud() }
+                if let card = c.readingCard {
+                    // 太長：整段放卡片（Apple Intelligence 寫的標題、重點），按一下或說「念給我聽」才全部念
+                    ReplyCard(card: card) { c.readAloud() }
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else if !c.reply.isEmpty {
                     Text(markdown(c.reply))
@@ -212,28 +212,71 @@ struct XenaVoiceView: View {
     }
 }
 
-/// 太長的回答：整段在卡片上，下面一顆「念給我聽」
+/// 太長的回答：標題、重點（Apple Intelligence 寫的），整段原文收在「全文」裡；下面一顆「念給我聽」
 private struct ReplyCard: View {
-    let text: String
+    let card: ReadingCard
     let onRead: () -> Void
+    @State private var full = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(markdown(text))
-                .font(.system(size: 15))
-                .lineSpacing(5)
-                .foregroundStyle(Theme.ink)
-                .tint(Theme.accent)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button(action: onRead) {
-                Label { Text("念給我聽") } icon: { HeroIcon("microphone", size: 15) }
-                    .font(.brand(14, .semibold))
+            if !card.title.isEmpty {
+                Text(card.title)
+                    .textRole(.h4)
+                    .foregroundStyle(Theme.ink)
             }
-            .buttonStyle(.brand(.ghost, size: .sm))
+            if card.points.isEmpty {
+                fullText
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(card.points.enumerated()), id: \.offset) { _, point in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Circle()
+                                .fill(Theme.accent)
+                                .frame(width: 6, height: 6)
+                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+                            Text(point)
+                                .font(.system(size: 15))
+                                .lineSpacing(4)
+                                .foregroundStyle(Theme.ink)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                if full {
+                    Divider().overlay(Theme.line)
+                    fullText
+                        .transition(.opacity)
+                }
+            }
+            HStack(spacing: 10) {
+                Button(action: onRead) {
+                    Label { Text("念給我聽") } icon: { HeroIcon("microphone", size: 15) }
+                        .font(.brand(14, .semibold))
+                }
+                .buttonStyle(.brand(.ghost, size: .sm))
+                if !card.points.isEmpty {
+                    Button(full ? "收起來" : "看全文") {
+                        withAnimation(Motion.ease) { full.toggle() }
+                    }
+                    .font(.brand(14, .medium))
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.press)
+                }
+            }
         }
         .padding(16)
         .background(Theme.surface, in: .rect(cornerRadius: Metric.xenaCard, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line) }
+    }
+
+    private var fullText: some View {
+        Text(markdown(card.text))
+            .font(.system(size: 15))
+            .lineSpacing(5)
+            .foregroundStyle(Theme.ink)
+            .tint(Theme.accent)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

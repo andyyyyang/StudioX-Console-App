@@ -157,7 +157,7 @@ StudioXConsole/
   Xena/        3D 水珠（XenaOrb.metal：studiox.tw Xena 介紹頁的 orb3d.ts 搬到 Metal）、對話（XenaSession）、對話畫面
   Voice/       用說的跟 Xena 聊：XenaSpeech（耳朵：iOS 26 SpeechAnalyzer，不支援就 SFSpeechRecognizer；嘴巴：AVSpeechSynthesizer 中文（台灣）聲音）、
                XenaConversation（一來一往、停一下就當說完、她回一句說一句、點水珠打斷）、XenaVoiceView（整個畫面）、
-               XenaLocal（Apple Intelligence／Foundation Models：「打開訂單」這類指令在手機上馬上做；首頁開場白，數字核對過才用）
+               XenaLocal（Apple Intelligence／Foundation Models，語音先經過它再跟雲端 Xena 配合：你說的每一句先聽懂——切頁、念卡片、再說一次、確認／取消、選選項、閒聊、結束在手機上馬上做；其他的整理好交給 Xena，她針對內容馬上先回一句（串流，一寫好就說）；查資料時說在查什麼、等太久說一聲；回答太長濃縮成重點＋卡片；首頁開場白。寫出來的數字都核對過才用）
   Model/       資料（照網站工具回的 JSON）、欄位定義（Schema）、Xena 的事件
   Services/    Auth（OAuth＋PKCE＋Keychain）、ConsoleAPI（token 自動換新、MCP、欄位定義、上傳、通知、Xena 的 SSE）、SiteData（各工具）、
                PushCenter（通知）、AppLock（Face ID）、AppSettings（設定頁可以微調的偏好）

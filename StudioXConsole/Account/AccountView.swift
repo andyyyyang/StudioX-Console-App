@@ -111,7 +111,7 @@ struct AccountView: View {
                             RuledList {
                                 ToggleRow(label: "寫首頁的開場白", help: "用手機上的模型把今天的狀況寫成她會說的話；數字會一個一個核對，對不上就用原本的句子。", isOn: $settings.aiGreeting)
                                     .padding(.vertical, 10)
-                                ToggleRow(label: "聽懂「打開訂單」這類指令", help: "用說的時，「打開訂單」「看黃毛丫頭」在手機上馬上切過去，不用等雲端；問問題還是交給 Xena。", isOn: $settings.aiCommands)
+                                ToggleRow(label: "用說的時先在手機上聽懂", help: "切頁、念卡片、再說一次、確認、選選項、閒聊，手機上馬上處理；其他的整理好再交給 Xena。太長的回答濃縮成重點、放卡片。", isOn: $settings.aiCommands)
                                     .padding(.vertical, 10)
                             }
                             .disabled(!XenaLocal.shared.available)

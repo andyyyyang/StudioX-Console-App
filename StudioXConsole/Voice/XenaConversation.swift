@@ -1,11 +1,12 @@
 import AVFoundation
 import SwiftUI
 
-/// 跟 Xena 用說的，一來一往：
+/// 跟 Xena 用說的，一來一往（手機上的 Apple Intelligence 先處理，再跟雲端的 Xena 配合）：
 ///   你說（水珠跟著你的音量起伏、字幕邊說邊出字）→ 停一下就當作說完 →
-///   「打開訂單」這類 App 裡的指令：手機上的 Apple Intelligence 聽懂就直接切過去（沒有它就看關鍵字）；
-///   其他的交給 Xena（和打字同一個 Xena、同一份對話紀錄）→ 她回一句就用 iPhone 的聲音說一句（不等整段），
-///   水珠跟著她說的每個字 → 說完換你說。
+///   Apple Intelligence 先聽懂：切頁、念卡片、再說一次、確認／取消、選選項、閒聊、結束，手機上馬上處理；
+///   其他的整理好交給雲端的 Xena（和打字同一個 Xena、同一份對話紀錄），她先回一句「好，我看一下…」→
+///   回答的第一句馬上說；短的就說完，太長的由 Apple Intelligence 濃縮成兩三句重點，整段放卡片（標題＋重點）→
+///   水珠跟著她說的每個字 → 說完換你說。沒有 Apple Intelligence：看關鍵字、照順序念到上限。
 /// 點一下水珠：她在說就停下來換你說；你在說就當作說完了。
 /// 她丟出來的東西（問你的問題＋選項、資料卡片、要你確認的事）照樣出現在畫面上：可以按，也可以用說的回答
 /// （一般的確認說「確認／取消」就好；退款、刪除這類危險的一定要在畫面上按，會再驗證 Face ID）。
@@ -34,7 +35,7 @@ final class XenaConversation {
     /// 還沒決定的確認卡片
     private(set) var pendingCard: ConfirmCard?
     /// 回答太長：整段放在卡片上給你看（她只說開頭和重點；說「念給我聽」才全部念）
-    private(set) var readingCard: String?
+    private(set) var readingCard: ReadingCard?
     /// 這次聽你說話用的是 iOS 26 的 SpeechAnalyzer（不然是舊的語音辨識）
     private(set) var usesAnalyzer = false
     /// 麥克風被拒絕：畫面上給「打開設定」
@@ -60,12 +61,22 @@ final class XenaConversation {
     @ObservationIgnored private var watchedCard: String?
     /// 用說的確認、正在送出的那張（沒送成功要說一聲，不要卡在「想一下」）
     @ObservationIgnored private var votedCard: String?
-    /// 這一輪已經說了幾個字；超過就不再往下念，整段改放卡片
-    @ObservationIgnored private var spokenChars = 0
-    @ObservationIgnored private var overflow = false
+    /// 這一輪馬上說出口的第一句（通常就是答案）；後面的先留著，等整段回來看長短再決定
+    @ObservationIgnored private var firstSaid = ""
+    @ObservationIgnored private var held: [String] = []
+    /// 這一輪已經先回過「好，我看一下…」（她自己的「我查一下」就不再說）
+    @ObservationIgnored private var ackSaid = false
+    /// 她上一次說出口的每一句（「再說一次」）
+    @ObservationIgnored private var spokenLines: [String] = []
+    /// Apple Intelligence 正在聽懂你說的話（她可能已經先回了一句）
+    @ObservationIgnored private var routing = false
+    /// 這一輪已經說過「我在查…」的工具
+    @ObservationIgnored private var toldTools: Set<String> = []
+    /// 等太久就說一聲「還在查」
+    @ObservationIgnored private var waitTalk: Task<Void, Never>?
     /// 長的回答收尾中（請 Apple Intelligence 濃縮重點）
     @ObservationIgnored private var wrappingUp = false
-    /// 一次最多念多少字（大約 15 秒）
+    /// 一次最多念多少字（大約 15 秒），再長就放卡片
     static let speechBudget = 90
     /// 指令：說完「好，打開訂單」就關掉語音、切過去
     @ObservationIgnored private var afterSpeaking: (() -> Void)?
@@ -144,6 +155,11 @@ final class XenaConversation {
         watchedCard = nil
         readingCard = nil
         wrappingUp = false
+        firstSaid = ""
+        held = []
+        spokenLines = []
+        routing = false
+        waitTalk?.cancel()
         let ear = ear
         Task {
             await ear.stop()
@@ -161,6 +177,9 @@ final class XenaConversation {
             state = .preparing
             awaitingReply = false
             wrappingUp = false
+            held = []
+            routing = false
+            waitTalk?.cancel()
             afterSpeaking = nil
             mouth.stop()
             await listen()
@@ -238,7 +257,7 @@ final class XenaConversation {
         await ear.stop()
     }
 
-    /// 你說完了：App 裡的指令就直接做，其他的交給 Xena
+    /// 你說完了：先讓手機上的 Apple Intelligence 聽懂這一句；它能處理的馬上做，其他的整理好交給雲端的 Xena
     private func doneTalking() async {
         guard state == .listening else { return }
         state = .thinking
@@ -248,17 +267,84 @@ final class XenaConversation {
             state = .paused
             return
         }
-        guard let model else { return }
-        // 長的回答放在卡片上：「念給我聽」就全部念
+        let previous = spokenLines
+        spokenLines = []
+        // 要交給 Xena 的：她針對內容先回的那一句一好就說（「好，我查一下昨天的訂單。」），不等後面
+        var reacted = false
+        routing = true
+        let intent = await XenaLocal.shared.understand(text, context: context(previous: previous)) { [weak self] line in
+            guard let self, self.state == .thinking, Self.isAck(line, for: text) else { return }
+            reacted = true
+            self.say(line)
+        }
+        routing = false
+        // 等它的時候被打斷、關掉了
+        guard state == .thinking || (reacted && state == .speaking) else { return }
+        if let intent {
+            handle(intent, text: text, previous: previous, reacted: reacted)
+        } else {
+            fallback(text)
+        }
+    }
+
+    /// 聽懂一句話時要一起看的：網站、畫面上等你確認的事、她問你的問題、有沒有長回答的卡片、她剛剛說的
+    private func context(previous: [String]) -> VoiceContext {
+        var c = VoiceContext()
+        c.sites = model?.sites.map(\.name) ?? []
+        if let card = pendingCard { c.card = card.title }
+        if let ask = pendingAsk {
+            c.question = ask.question
+            c.options = ask.options
+        }
+        c.hasReadingCard = readingCard != nil
+        c.lastReply = previous.isEmpty ? reply : previous.joined()
+        return c
+    }
+
+    /// Apple Intelligence 聽懂了：手機上能做的馬上做，其他的交給 Xena
+    private func handle(_ intent: VoiceIntent, text: String, previous: [String], reacted: Bool) {
+        switch intent.action {
+        case .open:
+            go(Command(place: intent.place, site: intent.site))
+        case .read where readingCard != nil:
+            readAloud()
+        case .again where !previous.isEmpty:
+            for line in previous { say(line) }
+            if !mouth.speaking { replyDone() }
+        case .approve where pendingCard != nil, .reject where pendingCard != nil:
+            let card = pendingCard!
+            if card.danger || card.typed != nil {
+                speakLocally("「\(card.title)」比較重要，請在畫面上按確認。")
+                return
+            }
+            // 同意一定要很明確（「好」「確認」「做吧」這類短短一句）；取消要短；不明確就當成一般的話交給 Xena
+            let approve = intent.action == .approve
+            if approve ? Self.decision(in: text) == true : (Self.decision(in: text) == false || text.count <= 10) {
+                decide(card, approve: approve)
+            } else {
+                forward(intent, text: text, reacted: reacted)
+            }
+        case .answer where pendingAsk != nil:
+            let ask = pendingAsk!
+            send(Self.pick(intent.answer, from: ask, original: text), answering: ask.id)
+        case .chat where Self.casual(intent.say):
+            speakLocally(intent.say)
+        case .done:
+            close(after: "好，有需要再叫我。")
+        default:
+            forward(intent, text: text, reacted: reacted)
+        }
+    }
+
+    /// 沒有 Apple Intelligence：看關鍵字
+    private func fallback(_ text: String) {
         if readingCard != nil, Self.wantsReading(text) {
             readAloud()
             return
         }
         // 等你決定的確認卡片：「確認」「取消」（危險的不行，要在畫面上按）
         if let card = pendingCard, !card.danger, card.typed == nil, let approve = Self.decision(in: text) {
-            watchedCard = card.id
-            votedCard = card.id
-            model.xena.decide(card.id, approve: approve)
+            decide(card, approve: approve)
             return
         }
         // 她問你的問題：這句就是答案
@@ -266,11 +352,94 @@ final class XenaConversation {
             send(text, answering: ask.id)
             return
         }
-        if let command = await command(for: text) {
+        if let command = Self.keyword(text) {
             go(command)
             return
         }
         send(text, answering: nil)
+        ackSaid = true
+        say("好，我看一下。")
+    }
+
+    /// 交給雲端的 Xena：Apple Intelligence 整理過的話（只修正聽錯的字，數字對得上才用）。
+    /// 她針對內容先回的一句（已經說了就不再說；沒有就說「好，我看一下。」），雲端的回答接在後面
+    private func forward(_ intent: VoiceIntent?, text: String, reacted: Bool) {
+        var message = text
+        if let intent, intent.action == .ask, Self.faithful(intent.message, to: text) {
+            message = intent.message
+        }
+        // 她問了問題還沒回答：這句就當作回答
+        send(message, answering: pendingAsk?.id)
+        ackSaid = true
+        if reacted {
+            // 先回的那一句還在說（送出時被設成「想一下」）
+            if mouth.speaking { state = .speaking }
+            return
+        }
+        if let line = intent?.say, intent?.action == .ask, Self.isAck(line, for: text) {
+            say(line)
+        } else {
+            say("好，我看一下。")
+        }
+    }
+
+    /// 用說的決定確認卡片（結果出來會再說一聲）
+    private func decide(_ card: ConfirmCard, approve: Bool) {
+        watchedCard = card.id
+        votedCard = card.id
+        model?.xena.decide(card.id, approve: approve)
+    }
+
+    /// 手機上直接回一句（閒聊、提醒），說完換你說
+    private func speakLocally(_ line: String) {
+        reply = line
+        if AppSettings.shared.speakReplies {
+            say(line)
+        } else {
+            replyDone()
+        }
+    }
+
+    /// 說一句就關掉語音的畫面
+    private func close(after line: String) {
+        guard let model else { return }
+        reply = line
+        let leave = { [weak self] in
+            self?.end()
+            model.showVoice = false
+        }
+        if AppSettings.shared.speakReplies {
+            afterSpeaking = leave
+            say(line)
+        } else {
+            leave()
+        }
+    }
+
+    /// 她問的問題：Apple Intelligence 聽出來選的是哪一個（「第二個」也算）；對不上選項就用你說的原話
+    static func pick(_ said: String, from ask: AskItem, original: String) -> String {
+        let a = said.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !a.isEmpty else { return original }
+        if let exact = ask.options.first(where: { $0 == a }) { return exact }
+        if let near = ask.options.first(where: { $0.contains(a) || a.contains($0) }) { return near }
+        return original
+    }
+
+    /// 整理過的話還是原本的意思：不是空的、數字都是你說過的、沒有多出一大段
+    static func faithful(_ message: String, to text: String) -> Bool {
+        let m = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return m.count >= 2 && m.count <= text.count * 2 + 12
+            && XenaLocal.numbers(in: m).isSubset(of: XenaLocal.numbers(in: text))
+    }
+
+    /// 「好，我查一下昨天的訂單。」：短、數字只能是你說過的（還沒查，不能先講答案）
+    static func isAck(_ line: String, for text: String) -> Bool {
+        (2...24).contains(line.count) && XenaLocal.numbers(in: line).isSubset(of: XenaLocal.numbers(in: text))
+    }
+
+    /// 閒聊的一句：短、沒有數字（不能講到店裡的資料）
+    static func casual(_ line: String) -> Bool {
+        (1...30).contains(line.count) && XenaLocal.numbers(in: line).isEmpty
     }
 
     private func send(_ text: String, answering: String?) {
@@ -286,10 +455,22 @@ final class XenaConversation {
         lastUserID = session.items.last(where: { if case .user = $0 { true } else { false } })?.id
         reply = ""
         spokenUpTo = 0
-        spokenChars = 0
-        overflow = false
+        firstSaid = ""
+        held = []
+        ackSaid = false
+        toldTools = []
         wrappingUp = false
         readingCard = nil
+        // 等太久（雲端在查比較多的資料）：像真人一樣說一聲，不要一直沒聲音
+        waitTalk?.cancel()
+        waitTalk = Task { [weak self] in
+            for line in ["還在查，再等我一下。", "資料比較多，快好了。"] {
+                try? await Task.sleep(for: .seconds(line.hasPrefix("還在") ? 7 : 9))
+                guard !Task.isCancelled, let self, self.awaitingReply, self.firstSaid.isEmpty,
+                      self.state == .thinking, !self.mouth.speaking else { return }
+                self.say(line)
+            }
+        }
         awaitingReply = true
         turnItems = []
         pendingAsk = nil
@@ -302,7 +483,7 @@ final class XenaConversation {
         guard t.count <= 8 else { return nil }
         let no = ["取消", "不要", "先不要", "不用", "算了", "不行", "等一下"]
         if no.contains(where: t.contains) { return false }
-        let yes = ["確認", "確定", "好", "可以", "執行", "對", "沒問題", "同意", "OK", "ok", "要"]
+        let yes = ["確認", "確定", "好", "可以", "執行", "對", "沒問題", "同意", "OK", "ok", "要", "做吧", "照做", "送出", "沒錯", "就這樣"]
         if yes.contains(where: t.contains) { return true }
         return nil
     }
@@ -325,8 +506,11 @@ final class XenaConversation {
         var shown: [ChatItem] = []
         var ask: AskItem?
         var card: ConfirmCard?
+        var running: [ToolRecord] = []
         for item in items[start...] {
             switch item {
+            case .tool(let t):
+                if t.status == .running { running.append(t) }
             case .assistant(_, let t), .notice(_, let t):
                 text += text.isEmpty ? t : "\n" + t
             case .ask(let a):
@@ -374,6 +558,7 @@ final class XenaConversation {
         }
 
         guard awaitingReply else { return }
+        tellTools(running)
         let finished = !session.isBusy
         if text.count > spokenUpTo {
             let (sentences, used) = Self.sentences(in: String(text.dropFirst(spokenUpTo)), final: finished)
@@ -381,26 +566,45 @@ final class XenaConversation {
             for sentence in sentences { speakOrHold(sentence) }
         }
         guard finished else { return }
-        // 太長：整段放卡片，說重點（Apple Intelligence 濃縮）和「可以看卡片、要念就說」
-        if overflow {
-            guard !wrappingUp, readingCard == nil else { return }
-            wrappingUp = true
-            readingCard = text
-            Task { [weak self] in
-                let outline = await XenaLocal.shared.outline(of: text)
-                guard let self, self.wrappingUp else { return }
-                self.wrappingUp = false
-                self.awaitingReply = false
-                if let outline { self.say(outline) }
-                self.say("詳細的我放在卡片上了，你可以看一下；要我念給你聽，就說「念給我聽」。")
-                self.announce(ask: ask, card: card, text: text)
-                if !self.mouth.speaking { self.replyDone() }
-            }
+        // 短的：剩下的說完
+        if firstSaid.count + held.reduce(0, { $0 + $1.count }) <= Self.speechBudget && !Self.needsCard(text) {
+            let rest = held
+            held = []
+            awaitingReply = false
+            for sentence in rest { say(sentence) }
+            announce(ask: ask, card: card, text: text)
+            if !mouth.speaking { replyDone() }
             return
         }
-        awaitingReply = false
-        announce(ask: ask, card: card, text: text)
-        if !mouth.speaking { replyDone() }
+        // 太長（或是表格、一長串清單）：整段放卡片，Apple Intelligence 濃縮成用說的重點，再說「可以看卡片、要念就跟我說」
+        guard !wrappingUp, readingCard == nil else { return }
+        wrappingUp = true
+        readingCard = ReadingCard(text: text)
+        let rest = held
+        held = []
+        let opening = firstSaid
+        Task { [weak self] in
+            let digest = await XenaLocal.shared.digest(of: text, alreadySaid: opening)
+            guard let self, self.wrappingUp else { return }
+            self.wrappingUp = false
+            self.awaitingReply = false
+            if let digest {
+                self.readingCard?.title = digest.title
+                self.readingCard?.points = digest.points
+                if !digest.spoken.isEmpty { self.say(digest.spoken) }
+            } else {
+                // 沒有 Apple Intelligence：照順序念到上限
+                var budget = Self.speechBudget - opening.count
+                for sentence in rest {
+                    budget -= sentence.count
+                    guard budget >= 0 || opening.isEmpty && sentence == rest.first else { break }
+                    self.say(sentence)
+                }
+            }
+            self.say("詳細的我放在卡片上了，你可以看一下；要我念給你聽也可以跟我說。")
+            self.announce(ask: ask, card: card, text: text)
+            if !self.mouth.speaking { self.replyDone() }
+        }
     }
 
     /// 這一輪她問你的問題、要你確認的事：念出來（畫面上也有）
@@ -420,20 +624,50 @@ final class XenaConversation {
         }
     }
 
-    /// 這一輪還在預算內就念；超過了就停（整段等一下放卡片）
+    /// 她在查東西就說在查什麼（「我來查詢黃毛丫頭的訂單。」）：還沒開始回答、嘴巴空著的時候才說；
+    /// 第一個工具已經被「好，我查一下…」說過了就不重複
+    private func tellTools(_ running: [ToolRecord]) {
+        for tool in running where !toldTools.contains(tool.id) {
+            let first = toldTools.isEmpty
+            toldTools.insert(tool.id)
+            let label = tool.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty, firstSaid.isEmpty, !mouth.speaking, !(first && ackSaid) else { continue }
+            say(first ? "我來\(label)。" : "接著\(label)。")
+        }
+    }
+
+    /// 第一句馬上說（通常就是答案）；後面的先留著，等整段回來看長短：短的說完，長的濃縮成重點
     private func speakOrHold(_ sentence: String) {
-        guard !overflow else { return }
-        if spokenChars > 0 && spokenChars + sentence.count > Self.speechBudget {
-            overflow = true
+        if firstSaid.isEmpty && held.isEmpty && Self.isFiller(sentence) {
+            // 「我查一下。」：已經先回過「好，我看一下」就不再說；沒回過就說，但不算第一句
+            if !ackSaid { say(sentence) }
             return
         }
-        spokenChars += sentence.count
-        say(sentence)
+        if firstSaid.isEmpty && held.isEmpty {
+            firstSaid = sentence
+            say(sentence)
+        } else {
+            held.append(sentence)
+        }
+    }
+
+    /// 「我查一下」「稍等」這類沒有內容的開頭
+    static func isFiller(_ sentence: String) -> Bool {
+        let words = ["查一下", "看一下", "查查", "稍等", "等我", "我來", "馬上"]
+        return sentence.count <= 16 && XenaLocal.numbers(in: sentence).isEmpty && words.contains(where: sentence.contains)
+    }
+
+    /// 用聽的不好懂：表格、一長串清單
+    static func needsCard(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        if lines.contains(where: { $0.hasPrefix("|") }) { return true }
+        let items = lines.filter { $0.hasPrefix("- ") || $0.hasPrefix("• ") || $0.hasPrefix("* ") || $0.prefixMatch(of: /\d+[.、)]/) != nil }
+        return items.count >= 4
     }
 
     /// 把卡片上的整段念出來（說「念給我聽」或按卡片上的按鈕）
     func readAloud() {
-        guard let text = readingCard else { return }
+        guard let text = readingCard?.text else { return }
         state = .preparing
         mouth.stop()
         if micTurn != nil { Task { await stopListening() } }
@@ -450,6 +684,7 @@ final class XenaConversation {
 
     private func say(_ sentence: String) {
         guard AppSettings.shared.speakReplies else { return }
+        spokenLines.append(sentence)
         state = .speaking
         mouth.say(sentence)
     }
@@ -462,8 +697,8 @@ final class XenaConversation {
             next()
             return
         }
-        if awaitingReply {
-            // 後面還有字在來
+        if awaitingReply || routing {
+            // 後面還有字在來（或 Apple Intelligence 還在聽懂你說的話）
             state = .thinking
             return
         }
@@ -512,17 +747,9 @@ final class XenaConversation {
         var site: String
     }
 
-    /// 短短一句「打開…」才可能是指令。有 Apple Intelligence 就問它；沒有就看關鍵字
-    private func command(for text: String) async -> Command? {
-        guard text.count <= 18 else { return nil }
-        if XenaLocal.shared.available && AppSettings.shared.aiCommands {
-            guard let route = await XenaLocal.shared.route(text) else { return nil }
-            return Command(place: route.place, site: route.site)
-        }
-        return Self.keyword(text)
-    }
-
+    /// 沒有 Apple Intelligence：短短一句「打開…」才當作指令
     private static func keyword(_ text: String) -> Command? {
+        guard text.count <= 18 else { return nil }
         let asks = ["?", "？", "多少", "幾", "怎麼", "為什麼", "有沒有", "幫我", "回覆"]
         if asks.contains(where: text.contains) { return nil }
         let verbs = ["打開", "開啟", "回到", "切到", "去", "到", "看"]
@@ -549,7 +776,7 @@ final class XenaConversation {
             line = "好，回到今天。"
             action = { model.tab = .xena }
         case .orders:
-            guard !model.orderSites.isEmpty else { return refuse("你的網站沒有開商店，沒有訂單。") }
+            guard !model.orderSites.isEmpty else { return speakLocally("你的網站沒有開商店，沒有訂單。") }
             line = "好，打開\(target?.name ?? "")訂單。"
             action = {
                 if let target, target.hasOrders { model.ordersSite = target.id }
@@ -569,8 +796,6 @@ final class XenaConversation {
                 line = "好，打開網站。"
                 action = { model.goToSites() }
             }
-        case .ask:
-            return
         }
         reply = line
         // 先關掉語音的畫面，再切頁面（設定在手機上是一張卡片，要等語音的畫面收起來）
@@ -590,24 +815,26 @@ final class XenaConversation {
         }
     }
 
-    private func refuse(_ line: String) {
-        reply = line
-        state = .speaking
-        if AppSettings.shared.speakReplies {
-            say(line)
-        } else {
-            replyDone()
-        }
-    }
-
     // MARK: 示範（截圖）
 
     #if DEBUG
     private func showDemo() {
-        heard = "昨天黃毛丫頭賣得怎麼樣？"
-        reply = "昨天黃毛丫頭有 12 筆訂單、收款 18,400 元，比前天多兩成。手工蛋捲禮盒賣最好，庫存還剩 38 盒。"
+        heard = "這週黃毛丫頭整體怎麼樣？"
+        reply = "這週黃毛丫頭有 64 筆訂單、收款 102,300 元。"
+        readingCard = ReadingCard(
+            text: "這週黃毛丫頭有 64 筆訂單、收款 102,300 元，比上週多 18%。\n\n- 賣最好：手工蛋捲禮盒 41 盒、綜合堅果罐 27 罐\n- 訪客 3,820 人，從 Instagram 來的最多\n- 還有 5 筆等出貨，2 位客人在等回覆\n- 蛋捲禮盒庫存剩 38 盒，照這週的速度大約 6 天賣完",
+            title: "黃毛丫頭這一週",
+            points: ["64 筆訂單、收款 102,300 元，比上週多 18%", "手工蛋捲禮盒賣最好，庫存剩 38 盒", "5 筆等出貨、2 位客人在等回覆"]
+        )
         state = .speaking
         _ = mouth.voice.begin()
     }
     #endif
+}
+
+/// 太長的回答放的卡片：整段原文＋Apple Intelligence 寫的標題和重點（沒有就只有原文）
+struct ReadingCard: Equatable {
+    var text: String
+    var title = ""
+    var points: [String] = []
 }
