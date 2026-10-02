@@ -1,0 +1,381 @@
+import AVFoundation
+import Speech
+
+// 跟 Xena 用說的：耳朵（麥克風 → 字）和嘴巴（字 → iPhone 的中文聲音）。全部在 iPhone 上處理，不經過第三方。
+
+// MARK: - 耳朵
+
+/// 麥克風 → 字。iOS 26 的 SpeechAnalyzer（裝置上的新模型，邊說邊出字）；
+/// 這台 iPhone 不支援這個語言時改用 SFSpeechRecognizer（能在裝置上辨識就在裝置上）。
+/// 音訊在錄音的執行緒上處理（不在主執行緒），所以這個類別不屬於 MainActor
+nonisolated final class XenaEar: @unchecked Sendable {
+    nonisolated enum Failure: LocalizedError {
+        case microphoneDenied
+        case speechDenied
+        case unsupported
+        case noMicrophone
+
+        var errorDescription: String? {
+            switch self {
+            case .microphoneDenied: "沒有麥克風的權限：到 iPhone 的「設定 → StudioX」打開麥克風。"
+            case .speechDenied: "沒有語音辨識的權限：到 iPhone 的「設定 → StudioX」打開語音辨識。"
+            case .unsupported: "這台 iPhone 不支援中文語音辨識。"
+            case .noMicrophone: "找不到麥克風。"
+            }
+        }
+    }
+
+    private let audio = AVAudioEngine()
+    private let lock = NSLock()
+    private var _level: Float = 0
+    private var analyzer: AnalyzerEngine?
+    private var legacy: LegacyEngine?
+    private var running = false
+
+    /// 這一次用的是不是新的 SpeechAnalyzer（設定頁顯示用）
+    private(set) var usesAnalyzer = false
+
+    /// 現在的音量（0…1）
+    var level: Float {
+        lock.lock()
+        defer { lock.unlock() }
+        return _level
+    }
+
+    static func requestMicrophone() async -> Bool {
+        await AVAudioApplication.requestRecordPermission()
+    }
+
+    /// 開始聽：onText(到目前為止聽到的整句, 是不是已經確定)
+    func start(locale: Locale, onText: @escaping @Sendable (String, Bool) -> Void) async throws {
+        await stop()
+        if let engine = try? await AnalyzerEngine.make(locale: locale) {
+            try await engine.begin(onText: onText)
+            set(analyzer: engine, legacy: nil)
+            usesAnalyzer = true
+        } else if let engine = LegacyEngine(locale: locale) {
+            guard await LegacyEngine.authorize() else { throw Failure.speechDenied }
+            engine.begin(onText: onText)
+            set(analyzer: nil, legacy: engine)
+            usesAnalyzer = false
+        } else {
+            throw Failure.unsupported
+        }
+
+        let input = audio.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            await stop()
+            throw Failure.noMicrophone
+        }
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            self?.process(buffer)
+        }
+        audio.prepare()
+        do {
+            try audio.start()
+        } catch {
+            await stop()
+            throw error
+        }
+        running = true
+    }
+
+    /// 不聽了（已經聽到的字不會再變）
+    func stop() async {
+        if running {
+            audio.inputNode.removeTap(onBus: 0)
+            audio.stop()
+            running = false
+        }
+        lock.lock()
+        _level = 0
+        let (analyzer, legacy) = (self.analyzer, self.legacy)
+        self.analyzer = nil
+        self.legacy = nil
+        lock.unlock()
+        await analyzer?.end()
+        legacy?.end()
+    }
+
+    private func set(analyzer: AnalyzerEngine?, legacy: LegacyEngine?) {
+        lock.lock()
+        self.analyzer = analyzer
+        self.legacy = legacy
+        lock.unlock()
+    }
+
+    /// 錄音的執行緒：算音量、交給辨識
+    private func process(_ buffer: AVAudioPCMBuffer) {
+        if let samples = buffer.floatChannelData?[0] {
+            let count = Int(buffer.frameLength)
+            var sum: Float = 0
+            for i in 0..<count { sum += samples[i] * samples[i] }
+            let rms = (sum / Float(max(count, 1))).squareRoot()
+            let db = 20 * log10(max(rms, 0.000_001))
+            // -50 dB（安靜）… -12 dB（大聲說話）→ 0…1
+            let value = max(0, min(1, (db + 50) / 38))
+            lock.lock()
+            _level = value
+            lock.unlock()
+        }
+        lock.lock()
+        let (analyzer, legacy) = (self.analyzer, self.legacy)
+        lock.unlock()
+        analyzer?.feed(buffer)
+        legacy?.feed(buffer)
+    }
+}
+
+/// iOS 26 的 SpeechAnalyzer＋SpeechTranscriber（progressiveTranscription：邊說邊出字，確定了再定稿）
+nonisolated final class AnalyzerEngine: @unchecked Sendable {
+    private let transcriber: SpeechTranscriber
+    private let analyzer: SpeechAnalyzer
+    private let format: AVAudioFormat
+    private let inputs: AsyncStream<AnalyzerInput>
+    private let continuation: AsyncStream<AnalyzerInput>.Continuation
+    private var converter: AVAudioConverter?
+    private var results: Task<Void, Never>?
+
+    private init(transcriber: SpeechTranscriber, format: AVAudioFormat) {
+        self.transcriber = transcriber
+        self.format = format
+        self.analyzer = SpeechAnalyzer(modules: [transcriber])
+        let stream = AsyncStream.makeStream(of: AnalyzerInput.self)
+        inputs = stream.stream
+        continuation = stream.continuation
+    }
+
+    /// 這台 iPhone 支援這個語言才建；第一次用會下載語言模型（之後就在裝置上）
+    static func make(locale: Locale) async throws -> AnalyzerEngine? {
+        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
+        let transcriber = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            try await request.downloadAndInstall()
+        }
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else { return nil }
+        return AnalyzerEngine(transcriber: transcriber, format: format)
+    }
+
+    func begin(onText: @escaping @Sendable (String, Bool) -> Void) async throws {
+        let transcriber = transcriber
+        results = Task {
+            var settled = ""
+            do {
+                for try await result in transcriber.results {
+                    let text = String(result.text.characters)
+                    if result.isFinal {
+                        settled += text
+                        onText(settled, true)
+                    } else {
+                        onText(settled + text, false)
+                    }
+                }
+            } catch {
+                // 停止、取消：已經聽到的字照樣用
+            }
+        }
+        try await analyzer.start(inputSequence: inputs)
+    }
+
+    /// 錄音的執行緒：轉成模型要的格式送進去
+    func feed(_ buffer: AVAudioPCMBuffer) {
+        guard let converted = convert(buffer) else { return }
+        continuation.yield(AnalyzerInput(buffer: converted))
+    }
+
+    func end() async {
+        continuation.finish()
+        try? await analyzer.cancelAndFinishNow()
+        results?.cancel()
+    }
+
+    private func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if buffer.format == format { return buffer }
+        if converter == nil || converter?.inputFormat != buffer.format {
+            converter = AVAudioConverter(from: buffer.format, to: format)
+            converter?.primeMethod = .none
+        }
+        guard let converter else { return nil }
+        let ratio = format.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 32
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+        nonisolated(unsafe) let source = buffer
+        nonisolated(unsafe) var consumed = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, inputStatus in
+            if consumed {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            inputStatus.pointee = .haveData
+            return source
+        }
+        return status == .error || output.frameLength == 0 ? nil : output
+    }
+}
+
+/// 舊的 SFSpeechRecognizer（SpeechAnalyzer 不支援這個語言時）
+nonisolated final class LegacyEngine: @unchecked Sendable {
+    private let recognizer: SFSpeechRecognizer
+    private let request = SFSpeechAudioBufferRecognitionRequest()
+    private var task: SFSpeechRecognitionTask?
+
+    init?(locale: Locale) {
+        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else { return nil }
+        self.recognizer = recognizer
+        request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        request.taskHint = .dictation
+        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+    }
+
+    static func authorize() async -> Bool {
+        if SFSpeechRecognizer.authorizationStatus() == .authorized { return true }
+        return await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { @Sendable status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    func begin(onText: @escaping @Sendable (String, Bool) -> Void) {
+        task = recognizer.recognitionTask(with: request) { @Sendable result, _ in
+            guard let result else { return }
+            onText(result.bestTranscription.formattedString, result.isFinal)
+        }
+    }
+
+    func feed(_ buffer: AVAudioPCMBuffer) {
+        request.append(buffer)
+    }
+
+    func end() {
+        request.endAudio()
+        task?.cancel()
+        task = nil
+    }
+}
+
+// MARK: - 嘴巴
+
+/// 字 → iPhone 的中文聲音（AVSpeechSynthesizer）。一句一句排隊說（Xena 回一句就說一句，不用等整段），
+/// 每說到一個字讓水珠鼓一下（voice）。說完全部的句子叫 onIdle
+@Observable
+final class XenaMouth {
+    private(set) var speaking = false
+    /// 說到哪一句（字幕用）
+    private(set) var current = ""
+    @ObservationIgnored let voice = XenaVoice()
+    @ObservationIgnored var onIdle: (() -> Void)?
+
+    @ObservationIgnored private let synthesizer = AVSpeechSynthesizer()
+    @ObservationIgnored private let listener = MouthListener()
+    @ObservationIgnored private var queued = 0
+    @ObservationIgnored private var turn: Int?
+
+    init() {
+        synthesizer.delegate = listener
+        listener.mouth = self
+    }
+
+    /// iPhone 上可以用的中文（台灣）聲音，好的在前面（高品質 → 加強 → 一般）
+    static var voices: [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language == "zh-TW" }
+            .sorted { a, b in
+                a.quality.rawValue != b.quality.rawValue ? a.quality.rawValue > b.quality.rawValue : a.name < b.name
+            }
+    }
+
+    /// 設定裡選的聲音；沒選（或選的被刪了）就用最好的那個
+    static func chosenVoice() -> AVSpeechSynthesisVoice? {
+        let id = AppSettings.shared.voiceID
+        if !id.isEmpty, let voice = AVSpeechSynthesisVoice(identifier: id) { return voice }
+        return voices.first ?? AVSpeechSynthesisVoice(language: "zh-TW")
+    }
+
+    /// 排一句話（Markdown、網址、NT$ 先整理成說得出口的樣子）
+    func say(_ text: String) {
+        let spoken = Self.speakable(text)
+        guard !spoken.isEmpty else { return }
+        let utterance = AVSpeechUtterance(string: spoken)
+        utterance.voice = Self.chosenVoice()
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Float(AppSettings.shared.pace.speechRate)
+        utterance.pitchMultiplier = 1.04
+        utterance.postUtteranceDelay = 0.06
+        queued += 1
+        if !speaking {
+            speaking = true
+            turn = voice.begin()
+        }
+        synthesizer.speak(utterance)
+    }
+
+    /// 馬上停（你插話、關掉語音）
+    func stop() {
+        queued = 0
+        synthesizer.stopSpeaking(at: .immediate)
+        finish()
+    }
+
+    fileprivate func started(_ text: String) {
+        current = text
+    }
+
+    fileprivate func spoke(_ character: Character) {
+        voice.say(character)
+    }
+
+    fileprivate func finished() {
+        queued = max(0, queued - 1)
+        if queued == 0 { finish() }
+    }
+
+    private func finish() {
+        guard speaking else { return }
+        speaking = false
+        if let turn { voice.end(turn) }
+        turn = nil
+        onIdle?()
+    }
+
+    /// 說出口的樣子：拿掉 Markdown 符號、網址念「連結」、NT$1,200 念「1200 元」
+    static func speakable(_ text: String) -> String {
+        var s = text
+        s = s.replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"https?://\S+"#, with: "連結", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"NT\$\s?([\d,]+)"#, with: "$1 元", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(\d),(\d{3})"#, with: "$1$2", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"[*_`#>|]+"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"^\s*[-•]\s+"#, with: "", options: [.regularExpression])
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// AVSpeechSynthesizer 的回呼可能不在主執行緒：收到就交回主執行緒
+nonisolated private final class MouthListener: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    weak var mouth: XenaMouth?
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        let text = utterance.speechString
+        let mouth = mouth
+        Task { @MainActor in mouth?.started(text) }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
+        let text = utterance.speechString as NSString
+        guard characterRange.location < text.length else { return }
+        let piece = text.substring(with: NSRange(location: characterRange.location, length: min(1, text.length - characterRange.location)))
+        guard let character = piece.first else { return }
+        let mouth = mouth
+        Task { @MainActor in mouth?.spoke(character) }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        let mouth = mouth
+        Task { @MainActor in mouth?.finished() }
+    }
+}

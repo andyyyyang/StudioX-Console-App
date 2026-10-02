@@ -74,6 +74,8 @@ final class AppModel {
     /// iPad：每個網站自己的一疊頁面
     var sitePaths: [String: [Route]] = [:]
     var showXena = false
+    /// 用說的跟 Xena 聊（整個畫面）
+    var showVoice = false
     var toast: Toast?
     /// 觸覺回饋（RootView 的 sensoryFeedback 看這幾個數字）
     private(set) var successTick = 0
@@ -86,6 +88,8 @@ final class AppModel {
     var spokenReport: String?
     /// 現在在看的網站、訂單：按「問問Xena」時第一個建議就是問這個（.xenaFocus）
     var xenaFocus: XenaFocus?
+    /// Apple Intelligence 寫好的首頁開場白（照資料拼的那句 → 她會說的話；寫不出來或數字對不上就是原句）
+    var greetings: [String: String] = [:]
     /// 寬的畫面（iPad 的一般寬度）：網站直接放在側欄
     var regular = false
 
@@ -94,6 +98,8 @@ final class AppModel {
 
     @ObservationIgnored let api: ConsoleAPI
     let xena: XenaSession
+    /// 用說的（耳朵、嘴巴、一來一往）
+    let conversation = XenaConversation()
     let briefing: Briefing
     /// 通知（Apple 的 token、登記到 console、點通知打開的頁面）
     let push = PushCenter.shared
@@ -115,6 +121,7 @@ final class AppModel {
             await self?.lock.verify(reason) ?? false
         }
         push.api = api
+        conversation.attach(self)
         // 還沒登入：歡迎頁不用鎖
         if !api.isSignedIn { lock.reset() }
         #if DEBUG
@@ -171,6 +178,7 @@ final class AppModel {
         case "xena": showXena = true
         default: break
         }
+        if defaults.bool(forKey: "demoVoice") { showVoice = true }
     }
     #endif
 
@@ -189,6 +197,9 @@ final class AppModel {
     }
 
     private func didSignOut(message: String?) {
+        conversation.end()
+        showVoice = false
+        greetings = [:]
         me = nil
         phase = .welcome
         tab = .xena

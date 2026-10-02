@@ -28,14 +28,26 @@ enum XenaMood: Equatable {
     }
 }
 
-/// Xena 說話的聲音：一個字一個字跟著打字機（TypewriterText 的 voice），水珠跟著鼓起、亮一下；
-/// 標點、空白是換氣（停一下）。只有「在不在說話」會讓畫面重畫，每個字的大小直接給水珠讀（不經過 SwiftUI）
+/// 讓水珠跟著聲音動：一個字一個字（打字機、Xena 用 iPhone 的聲音說話時每個字），或連續的音量（你說話時的麥克風）。
+/// 標點、空白是換氣（停一下）。只有「在不在出聲」會讓畫面重畫，每一刻的大小直接給水珠讀（不經過 SwiftUI）
 @Observable
 final class XenaVoice {
     private(set) var speaking = false
+    /// 出聲時水珠的能量（Xena 說話 0.85；在聽你說話時低一點，只跟著你的音量起伏）
+    @ObservationIgnored let intensity: Double
     @ObservationIgnored private var level = 0.0
     @ObservationIgnored private var at: TimeInterval = 0
     @ObservationIgnored private var turn = 0
+
+    init(intensity: Double = 0.85) {
+        self.intensity = intensity
+    }
+
+    /// 連續的音量（0…1，麥克風）
+    func hear(_ value: Double) {
+        at = Date.timeIntervalSinceReferenceDate
+        level = max(0, min(1, value))
+    }
 
     /// 開始說一句話（回傳這一句的編號，說完用它 end）
     func begin() -> Int {
@@ -171,7 +183,7 @@ final class OrbMotion {
         let said = reduced ? 0 : speaker?.level(at: now) ?? 0
         voice += (said - voice) * (1 - exp(-dt * (said > voice ? 22 : 9)))
         let v = voice
-        let goal = max(target, speaker?.speaking == true ? 0.85 : 0)
+        let goal = max(target, speaker?.speaking == true ? speaker?.intensity ?? 0.85 : 0)
 
         if !reduced {
             // 能量平滑追向目標：加速快一點，減速慢一點（停下來比較有餘韻）

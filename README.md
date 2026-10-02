@@ -155,6 +155,9 @@ StudioXConsole/
   Inbox/       收件匣、客服信、Xena 的網站對話
   Account/     設定（首頁右上角的齒輪／iPad 側欄）：外觀、字的大小、Xena 怎麼說話、首頁放哪些、通知、安全
   Xena/        3D 水珠（XenaOrb.metal：studiox.tw Xena 介紹頁的 orb3d.ts 搬到 Metal）、對話（XenaSession）、對話畫面
+  Voice/       用說的跟 Xena 聊：XenaSpeech（耳朵：iOS 26 SpeechAnalyzer，不支援就 SFSpeechRecognizer；嘴巴：AVSpeechSynthesizer 中文（台灣）聲音）、
+               XenaConversation（一來一往、停一下就當說完、她回一句說一句、點水珠打斷）、XenaVoiceView（整個畫面）、
+               XenaLocal（Apple Intelligence／Foundation Models：「打開訂單」這類指令在手機上馬上做；首頁開場白，數字核對過才用）
   Model/       資料（照網站工具回的 JSON）、欄位定義（Schema）、Xena 的事件
   Services/    Auth（OAuth＋PKCE＋Keychain）、ConsoleAPI（token 自動換新、MCP、欄位定義、上傳、通知、Xena 的 SSE）、SiteData（各工具）、
                PushCenter（通知）、AppLock（Face ID）、AppSettings（設定頁可以微調的偏好）

@@ -92,6 +92,22 @@ struct XenaHomeView: View {
         return text
     }
 
+    /// 要不要請 Apple Intelligence 寫開場白（資料到了、設定打開、這台 iPhone 可以用）
+    private var wantsWrittenGreeting: Bool {
+        model.briefing.updatedAt != nil && settings.aiGreeting && XenaLocal.shared.available
+    }
+
+    /// 她要說的話：資料還沒到是「我在看…」；Apple Intelligence 在寫的時候先說「我整理一下」
+    private var speech: String {
+        guard wantsWrittenGreeting else { return report }
+        return model.greetings[report] ?? "我整理一下今天的狀況…"
+    }
+
+    /// 是今天真正的狀況（不是過場的那一句）
+    private var speechIsFinal: Bool {
+        model.briefing.updatedAt != nil && (!wantsWrittenGreeting || model.greetings[report] != nil)
+    }
+
     /// Xena 說話時水珠跟著每個字鼓起來
     private var heroMood: XenaMood {
         voice.speaking ? .speaking : model.xena.mood
@@ -144,23 +160,40 @@ struct XenaHomeView: View {
                     iridescent: true
                 )
                 TypewriterText(
-                    text: report,
-                    animate: settings.shouldSpeak(report, spoken: model.spokenReport),
+                    text: speech,
+                    animate: settings.shouldSpeak(speech, spoken: model.spokenReport),
                     speed: settings.pace.perCharacter,
                     delay: .milliseconds(model.spokenReport == nil ? 900 : 250),
                     voice: voice
                 ) {
-                    model.spokenReport = report
-                    // 「每天一次」：說完今天的狀況（不是「我在看…」那句）就算說過了
-                    if model.briefing.updatedAt != nil { settings.greetedDay = AppSettings.today }
+                    model.spokenReport = speech
+                    // 「每天一次」：說完今天的狀況（不是「我在看…」「我整理一下…」）就算說過了
+                    if speechIsFinal { settings.greetedDay = AppSettings.today }
+                }
+                // Apple Intelligence 把今天的狀況寫成她會說的話（核對過數字；寫不出來就用照資料拼的那句）
+                .task(id: report) {
+                    guard wantsWrittenGreeting, model.greetings[report] == nil else { return }
+                    let written = await XenaLocal.shared.greeting(from: report, name: model.me?.name ?? "")
+                    model.greetings[report] = written ?? report
                 }
                 .textRole(.lead)
                 .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
-                Button("問問Xena") { model.showXena = true }
-                    .buttonStyle(.brand(.primary, size: .md, arrow: true))
-                    .padding(.top, regular ? 12 : 6)
+                HStack(spacing: 10) {
+                    Button("問問Xena") { model.showXena = true }
+                        .buttonStyle(.brand(.primary, size: .md, arrow: true))
+                    // 用說的：她用 iPhone 的聲音回答
+                    Button { model.showVoice = true } label: {
+                        HeroIcon("microphone", size: 20)
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 46, height: 46)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .buttonStyle(.press)
+                    .accessibilityLabel("用說的問Xena")
+                }
+                .padding(.top, regular ? 12 : 6)
             }
             .frame(maxWidth: .infinity)
             .pageWidth()

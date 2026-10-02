@@ -113,6 +113,21 @@ struct XenaChatView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            Button {
+                model.showXena = false
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    model.showVoice = true
+                }
+            } label: {
+                HeroIcon("microphone", size: 20)
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 40, height: 40)
+                    .background(Theme.surface, in: .circle)
+                    .overlay { Circle().strokeBorder(Theme.line) }
+            }
+            .buttonStyle(PressScale(scale: 0.92))
+            .accessibilityLabel("改用說的")
             TextField("跟 Xena 說…", text: $draft, axis: .vertical)
                 .font(.system(size: 16))
                 .lineLimit(1...6)
@@ -623,29 +638,43 @@ struct XenaAccessory: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Button {
-            model.showXena = true
-        } label: {
-            HStack(spacing: 8) {
-                HeroIcon("sparkles", size: 17)
-                    .foregroundStyle(Theme.accent)
-                Text("問問Xena")
-                    .font(.brand(15, .semibold))
-                    .foregroundStyle(Theme.ink)
-                Spacer(minLength: 8)
-                if model.xena.isBusy {
-                    Text(model.xena.mood.label)
-                        .font(.brand(13, .regular))
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
-                        .transition(.opacity)
+        HStack(spacing: 0) {
+            Button {
+                model.showXena = true
+            } label: {
+                HStack(spacing: 8) {
+                    HeroIcon("sparkles", size: 17)
+                        .foregroundStyle(Theme.accent)
+                    Text("問問Xena")
+                        .font(.brand(15, .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Spacer(minLength: 8)
+                    if model.xena.isBusy {
+                        Text(model.xena.mood.label)
+                            .font(.brand(13, .regular))
+                            .foregroundStyle(Theme.muted)
+                            .lineLimit(1)
+                            .transition(.opacity)
+                    }
                 }
+                .padding(.leading, 16)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .animation(.smooth, value: model.xena.isBusy)
             }
-            .padding(.horizontal, 16)
-            .contentShape(Rectangle())
-            .animation(.smooth, value: model.xena.isBusy)
+            .buttonStyle(.plain)
+            .accessibilityLabel("問問Xena")
+            // 用說的
+            Button { model.showVoice = true } label: {
+                HeroIcon("microphone", size: 18)
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 44)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
+            .accessibilityLabel("用說的問Xena")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("問問Xena")
     }
 }

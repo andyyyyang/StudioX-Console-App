@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// 設定（手機：首頁右上角的齒輪；iPad：側欄）：帳號、外觀、Xena、首頁、通知、安全、各網站的職能、console、登出。
@@ -63,6 +64,49 @@ struct AccountView: View {
                                 row("動手改東西之前", value: "一律先問你", action: nil)
                                 row("退款、刪除", value: "要打字確認", action: nil)
                             }
+                        }
+
+                        // 聲音：用說的時 Xena 用哪個聲音回答
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Voice*", aside: "用說的時，Xena 用 iPhone 上的中文（台灣）聲音回答；聽你說話也在 iPhone 上處理。", role: .h3)
+                            RuledList {
+                                ToggleRow(label: "用說的時，Xena 開口回答", help: "關掉就只顯示字幕。", isOn: $settings.speakReplies)
+                                    .padding(.vertical, 10)
+                                HStack(spacing: 12) {
+                                    Text("聲音")
+                                        .textRole(.body)
+                                        .foregroundStyle(Theme.ink)
+                                    Spacer()
+                                    Picker("聲音", selection: $settings.voiceID) {
+                                        Text("自動（最好的）").tag("")
+                                        ForEach(XenaMouth.voices, id: \.identifier) { voice in
+                                            Text(voiceLabel(voice)).tag(voice.identifier)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .tint(Theme.ink2)
+                                }
+                                .padding(.vertical, 12)
+                                row("試聽") { preview() }
+                                Text("想要更自然的聲音：到 iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文（台灣）」下載「美佳（高品質）」，回來這裡選它。")
+                                    .textRole(.xs)
+                                    .foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.vertical, 12)
+                            }
+                        }
+
+                        // Apple Intelligence：手機上的模型（離線、資料不出手機）
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("Apple *Intelligence*", aside: XenaLocal.shared.status, role: .h3)
+                            RuledList {
+                                ToggleRow(label: "寫首頁的開場白", help: "用手機上的模型把今天的狀況寫成她會說的話；數字會一個一個核對，對不上就用原本的句子。", isOn: $settings.aiGreeting)
+                                    .padding(.vertical, 10)
+                                ToggleRow(label: "聽懂「打開訂單」這類指令", help: "用說的時，「打開訂單」「看黃毛丫頭」在手機上馬上切過去，不用等雲端；問問題還是交給 Xena。", isOn: $settings.aiCommands)
+                                    .padding(.vertical, 10)
+                            }
+                            .disabled(!XenaLocal.shared.available)
+                            .opacity(XenaLocal.shared.available ? 1 : 0.45)
                         }
 
                         // 首頁：打開 App 先看哪一頁、首頁放哪些
@@ -169,6 +213,23 @@ struct AccountView: View {
                 Text("這台裝置的登入會撤銷、不再收到通知，其他裝置與 AI 連接器不受影響。")
             }
         }
+    }
+
+    private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
+        switch voice.quality {
+        case .premium: "\(voice.name)（高品質）"
+        case .enhanced: "\(voice.name)（加強）"
+        default: voice.name
+        }
+    }
+
+    /// 試聽：用選好的聲音、語速說一句
+    private func preview() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let mouth = model.conversation.mouth
+        mouth.stop()
+        mouth.say("嗨，我是 Xena。今天有 3 件事等你決定，我們一件一件來。")
     }
 
     /// 沒有商店的帳號不給選「訂單」

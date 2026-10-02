@@ -35,8 +35,10 @@ struct StudioXConsoleApp: App {
                 Button("搜尋") { model.tab = .search }
                     .keyboardShortcut("f")
                 Divider()
-                Button("和 Xena 說話") { model.showXena = true }
+                Button("問問Xena") { model.showXena = true }
                     .keyboardShortcut("k")
+                Button("用說的問Xena") { model.showVoice = true }
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("重新整理") { Task { await model.refreshAll() } }
                     .keyboardShortcut("r")
             }
@@ -206,6 +208,10 @@ struct MainView: View {
         .sheet(isPresented: $model.showXena) {
             XenaChatView()
                 .presentationDragIndicator(.visible)
+        }
+        // 用說的：整個畫面
+        .fullScreenCover(isPresented: $model.showVoice) {
+            XenaVoiceView()
         }
         .sheet(isPresented: $model.showAccount) {
             AccountView()

@@ -78,6 +78,14 @@ final class AppSettings {
             case .fast: "快"
             }
         }
+        /// iPhone 的聲音說話時的速度（乘在系統預設的語速上）
+        var speechRate: Double {
+            switch self {
+            case .slow: 0.86
+            case .normal: 1.0
+            case .fast: 1.14
+            }
+        }
         /// 一個字多久
         var perCharacter: Duration {
             switch self {
@@ -129,6 +137,14 @@ final class AppSettings {
     var hiddenSections: Set<HomeSection> { didSet { save(hiddenSections.map(\.rawValue).sorted(), "home.hidden") } }
     /// 「每天一次」：今天說過了沒（yyyy-MM-dd，台北時間）
     var greetedDay: String { didSet { save(greetedDay, "xena.greetedDay") } }
+    /// 用說的時，Xena 用 iPhone 的聲音開口回答
+    var speakReplies: Bool { didSet { save(speakReplies, "voice.speakReplies") } }
+    /// Xena 的聲音（AVSpeechSynthesisVoice 的 identifier；空的＝自動挑最好的中文（台灣）聲音）
+    var voiceID: String { didSet { save(voiceID, "voice.id") } }
+    /// Apple Intelligence（手機上的模型）寫首頁的開場白
+    var aiGreeting: Bool { didSet { save(aiGreeting, "ai.greeting") } }
+    /// Apple Intelligence 聽懂「打開訂單」這類指令，馬上在手機上做，不用等雲端的 Xena
+    var aiCommands: Bool { didSet { save(aiCommands, "ai.commands") } }
 
     private let defaults: UserDefaults
 
@@ -146,6 +162,10 @@ final class AppSettings {
         startTab = value("startTab", StartTab.today)
         hiddenSections = Set((defaults.stringArray(forKey: "settings.home.hidden") ?? []).compactMap(HomeSection.init(rawValue:)))
         greetedDay = defaults.string(forKey: "settings.xena.greetedDay") ?? ""
+        speakReplies = defaults.object(forKey: "settings.voice.speakReplies") as? Bool ?? true
+        voiceID = defaults.string(forKey: "settings.voice.id") ?? ""
+        aiGreeting = defaults.object(forKey: "settings.ai.greeting") as? Bool ?? true
+        aiCommands = defaults.object(forKey: "settings.ai.commands") as? Bool ?? true
     }
 
     private func save(_ value: Any, _ key: String) {
@@ -189,11 +209,16 @@ final class AppSettings {
         haptics = true
         startTab = .today
         hiddenSections = []
+        speakReplies = true
+        voiceID = ""
+        aiGreeting = true
+        aiCommands = true
     }
 
     var isDefault: Bool {
         appearance == .system && textSize == .standard && greeting == .launch && pace == .normal
             && orbMotion && haptics && startTab == .today && hiddenSections.isEmpty
+            && speakReplies && voiceID.isEmpty && aiGreeting && aiCommands
     }
 }
 

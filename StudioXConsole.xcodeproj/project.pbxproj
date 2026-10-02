@@ -261,6 +261,8 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "用 Face ID 解鎖 StudioX，並在退款、刪除這類動作之前再確認一次是你。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用說的跟 Xena 聊：聽你說的話轉成文字（在 iPhone 上處理）。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "把你對 Xena 說的話轉成文字（能在 iPhone 上處理就在 iPhone 上）。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -297,6 +299,8 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "用 Face ID 解鎖 StudioX，並在退款、刪除這類動作之前再確認一次是你。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用說的跟 Xena 聊：聽你說的話轉成文字（在 iPhone 上處理）。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "把你對 Xena 說的話轉成文字（能在 iPhone 上處理就在 iPhone 上）。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

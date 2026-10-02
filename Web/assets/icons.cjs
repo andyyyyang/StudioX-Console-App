@@ -12,7 +12,7 @@ MapPin CreditCard Tag Plus XMark EllipsisHorizontal ArrowsRightLeft Link Key Shi
 PresentationChartLine Eye PaperAirplane Check Moon Sun PuzzlePiece Bolt ArrowTrendingUp ArrowTrendingDown Cube Printer
 DevicePhoneMobile ComputerDesktop ReceiptRefund Bars3 AdjustmentsHorizontal LockClosed Calendar Funnel ChatBubbleBottomCenterText
 Photo Ticket Megaphone Trash Gift QuestionMarkCircle QueueList RectangleStack BookOpen Language ChartPie Star Swatch ListBullet
-CalendarDays Briefcase Flag DocumentDuplicate ArrowDownTray Identification Window Trophy ArrowsUpDown`.split(/\s+/).filter(Boolean)
+CalendarDays Briefcase Flag DocumentDuplicate ArrowDownTray Identification Window Trophy ArrowsUpDown Microphone`.split(/\s+/).filter(Boolean)
 // Heroicons 的檔名：Bars3 → bars-3、Squares2X2 → squares-2x2、Cog6Tooth → cog-6-tooth
 const kebab = (s) => s.replace(/([a-z])([A-Z0-9])/g, '$1-$2').replace(/([0-9])([A-Z])(?![0-9])/g, '$1-$2').replace(/([A-Z])([A-Z][a-z])/g, '$1-$2').toLowerCase()
 fs.mkdirSync(out, { recursive: true })
