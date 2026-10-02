@@ -160,22 +160,6 @@ private struct OrbLayers: View {
     }
 }
 
-/// 小小的 Xena（對話裡的頭像、清單）：後台側欄的 OrbIcon（Assets 的 XenaOrb）
-struct OrbIcon: View {
-    var size: CGFloat = 20
-
-    var body: some View {
-        Image("XenaOrb")
-            .resizable()
-            .interpolation(.high)
-            .scaledToFit()
-            // 圖的畫布 100、水珠 76：放大到水珠剛好是 size
-            .frame(width: size * 100 / 76, height: size * 100 / 76)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-    }
-}
-
 nonisolated func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
     a + (b - a) * t
 }
@@ -185,7 +169,7 @@ nonisolated func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
         XenaOrb(mood: .idle, size: 132)
         HStack(spacing: 24) {
             XenaOrb(mood: .thinking, size: 64)
-            OrbIcon(size: 28)
+            XenaOrb(mood: .speaking, size: 20)
         }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)

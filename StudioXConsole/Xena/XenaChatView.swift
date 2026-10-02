@@ -53,8 +53,11 @@ struct XenaChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        OrbIcon(size: 24)
+                    HStack(spacing: 6) {
+                        if !session.items.isEmpty {
+                            XenaOrb(mood: session.mood, size: 18, pulse: session.pulse)
+                                .padding(.vertical, -6)
+                        }
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Xena")
                                 .font(.system(size: 15, weight: .semibold))
@@ -535,7 +538,6 @@ private struct AskView: View {
 private struct ThinkingRow: View {
     var body: some View {
         HStack(spacing: 8) {
-            OrbIcon(size: 16)
             TimelineView(.periodic(from: .now, by: 0.15)) { context in
                 let step = Int(context.date.timeIntervalSinceReferenceDate / 0.15) % 8
                 HStack(spacing: 3) {
@@ -625,8 +627,9 @@ struct XenaAccessory: View {
         Button {
             model.showXena = true
         } label: {
-            HStack(spacing: 10) {
-                OrbIcon(size: 24)
+            HStack(spacing: 6) {
+                XenaOrb(mood: model.xena.mood, size: 20, pulse: model.xena.pulse)
+                    .padding(.vertical, -6)
                 TimelineView(.periodic(from: .now, by: 4)) { context in
                     let all = lines
                     let index = Int(context.date.timeIntervalSinceReferenceDate / 4) % max(all.count, 1)
@@ -641,7 +644,8 @@ struct XenaAccessory: View {
                 HeroIcon("sparkles", size: 16)
                     .foregroundStyle(Theme.accent)
             }
-            .padding(.horizontal, 14)
+            .padding(.leading, 8)
+            .padding(.trailing, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

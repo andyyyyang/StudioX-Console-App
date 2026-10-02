@@ -151,7 +151,7 @@ struct MainView: View {
         @Bindable var model = model
         let regular = sizeClass == .regular
         TabView(selection: $model.tab) {
-            Tab("Xena", image: "XenaTab", value: AppTab.xena) {
+            Tab("今天", image: "hi-home", value: AppTab.xena) {
                 XenaHomeView()
             }
             Tab("網站", image: "hi-globe-alt", value: AppTab.sites) {
@@ -198,7 +198,8 @@ struct MainView: View {
             .accessibilityElement()
             .accessibilityLabel("StudioX")
         }
-        .tabViewBottomAccessory {
+        // tab bar 上面的 Xena：首頁本身就有會動的水滴，那一頁不重複出現
+        .tabViewBottomAccessory(isEnabled: model.tab != .xena) {
             XenaAccessory()
         }
         .sheet(isPresented: $model.showXena) {

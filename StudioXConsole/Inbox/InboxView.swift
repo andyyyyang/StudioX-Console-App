@@ -618,8 +618,10 @@ struct XenaConversationView: View {
                             .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line) }
                             .frame(maxWidth: .infinity, alignment: .leading)
                     default:
-                        HStack(alignment: .top, spacing: 10) {
-                            if m.role == "assistant" { OrbIcon(size: 20).padding(.top, 2) } else { Avatar(name: m.author ?? "專人", size: 22) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(m.role == "assistant" ? "Xena" : (m.author ?? "專人"))
+                                .textRole(.xs)
+                                .foregroundStyle(m.role == "assistant" ? Theme.accent : Theme.muted)
                             Text(markdown(m.content))
                                 .textRole(.body)
                                 .foregroundStyle(Theme.ink)

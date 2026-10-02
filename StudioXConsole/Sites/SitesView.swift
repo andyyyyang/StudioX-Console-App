@@ -264,7 +264,7 @@ struct SiteToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button { model.askXena("幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣") } label: {
-                Image("XenaOrb").resizable().scaledToFit().frame(width: 22, height: 22)
+                HeroIcon("sparkles")
             }
             .accessibilityLabel("問 Xena 這個網站")
         }

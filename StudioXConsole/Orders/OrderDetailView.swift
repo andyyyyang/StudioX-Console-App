@@ -56,7 +56,7 @@ struct OrderDetailView: View {
                 Button {
                     model.askXena("幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
                 } label: {
-                    Image("XenaOrb").resizable().scaledToFit().frame(width: 22, height: 22)
+                    HeroIcon("sparkles")
                 }
                 .accessibilityLabel("問 Xena")
             }

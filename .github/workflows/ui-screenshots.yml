@@ -14,13 +14,13 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: ui-screenshots-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   shots:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screenshots]')
+    # 放在 job 上：沒有 [screenshots] 的提交（job 跳過）不會取消正在截的那一次
+    concurrency:
+      group: ui-screenshots-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: macos-26
     timeout-minutes: 45
     steps:
