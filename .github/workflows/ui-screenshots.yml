@@ -1,5 +1,6 @@
 # UI 截圖：在 GitHub 的 Mac 上用模擬器打開 App 的每個畫面（示範模式的假資料，見 DemoServer.swift），
 # 截圖存到 docs/screenshots/（iPhone 淺色、深色，iPad 深色），提交回這個分支。
+# talk＝首頁 Xena 說到一半、home＝說完；account＝設定頁。
 # 提交訊息有 [screenshots] 才跑（Mac 的分鐘數比較貴），也可以手動 Run workflow。
 name: UI 截圖
 
