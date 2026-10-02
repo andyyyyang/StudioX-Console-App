@@ -203,8 +203,13 @@ final class AppModel {
         default: break
         }
         if defaults.bool(forKey: "demoVoice") { showVoice = true }
-        // 首頁卡片打開的 sheet：today 或網站代號
-        if let sheet = defaults.string(forKey: "demoSheet") { deckSheet = DeckSheet(id: sheet) }
+        // 首頁卡片打開的 sheet：today 或網站代號（等首頁出現在畫面上才開得起來）
+        if let sheet = defaults.string(forKey: "demoSheet") {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1.2))
+                self?.deckSheet = DeckSheet(id: sheet)
+            }
+        }
     }
     #endif
 
