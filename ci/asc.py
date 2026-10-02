@@ -414,18 +414,22 @@ def invite(app_id, group):
                     "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
                     "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})["data"]
             state = (tester.get("attributes") or {}).get("state")
-            if state == "ACCEPTED" or state == "INSTALLED":
+            if state in ("ACCEPTED", "INSTALLED"):
                 summary(f"- {mask(email)} 已經在「{gname}」，打開 iPhone 的 TestFlight 就有新版")
-                continue
-            try:
-                call("POST", "/betaTesterInvitations", {"data": {
-                    "type": "betaTesterInvitations",
-                    "relationships": {
-                        "app": {"data": {"type": "apps", "id": app_id}},
-                        "betaTester": {"data": {"type": "betaTesters", "id": tester["id"]}}}}})
-                summary(f"- 寄了 TestFlight 邀請給 {mask(email)}（「{gname}」）")
-            except ApiError as e:
-                summary(f"- {mask(email)} 加進了「{gname}」；邀請信：{apple_error(e)}")
+            elif group["attributes"].get("isInternalGroup"):
+                # 內部測試：加進群組時 Apple 自己寄邀請信（betaTesterInvitations 只給外部測試員用）
+                summary(f"- {mask(email)} 在「{gname}」：Apple 會寄 TestFlight 邀請信；"
+                        "或直接打開 iPhone 的 TestFlight（用同一個 Apple ID 登入）就看得到")
+            else:
+                try:
+                    call("POST", "/betaTesterInvitations", {"data": {
+                        "type": "betaTesterInvitations",
+                        "relationships": {
+                            "app": {"data": {"type": "apps", "id": app_id}},
+                            "betaTester": {"data": {"type": "betaTesters", "id": tester["id"]}}}}})
+                    summary(f"- 寄了 TestFlight 邀請給 {mask(email)}（「{gname}」）")
+                except ApiError as e:
+                    summary(f"- {mask(email)} 加進了「{gname}」；邀請信：{apple_error(e)}")
         except ApiError as e:
             summary(f"- ⚠️ 沒辦法邀請 {mask(email)}：{apple_error(e)}")
 
