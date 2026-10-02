@@ -127,6 +127,7 @@ final class AppModel {
         #if DEBUG
         if DemoServer.enabled {
             if UserDefaults.standard.bool(forKey: "demoLock") { lock.showDemoLock() } else { lock.reset() }
+            XenaOrb.frozen = true
         }
         #endif
     }

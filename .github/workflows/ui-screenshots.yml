@@ -92,22 +92,26 @@ jobs:
             "voice|-demo -demoVoice YES"
             "lock|-demo -demoLock YES"
           )
+          # 每個指令都有時限（卡住就跳過，不會整個流程卡到逾時）；log 有時間，看得出慢在哪
+          limit() { perl -e 'alarm shift; exec @ARGV' "$@"; }
           shoot() {
             dev=$1; label=$2; appearance=$3
-            xcrun simctl boot "$dev" || true
-            xcrun simctl bootstatus "$dev" -b
-            xcrun simctl status_bar "$dev" override --time "9:41" --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4 || true
-            xcrun simctl install "$dev" "$app"
-            xcrun simctl ui "$dev" appearance "$appearance"
+            echo "== $label $appearance 開機 $(date +%T)"
+            limit 60 xcrun simctl boot "$dev" || true
+            limit 300 xcrun simctl bootstatus "$dev" -b || true
+            limit 30 xcrun simctl status_bar "$dev" override --time "9:41" --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4 || true
+            limit 180 xcrun simctl install "$dev" "$app" || true
+            limit 30 xcrun simctl ui "$dev" appearance "$appearance" || true
             for scene in "${scenes[@]}"; do
               # 名稱|啟動參數|等幾秒（預設 8；talk 是 Xena 說到一半、home 是說完）
               IFS='|' read -r name args wait <<< "$scene"
-              xcrun simctl terminate "$dev" tw.studiox.console 2>/dev/null || true
-              xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null
+              echo "-- $label $appearance $name $(date +%T)"
+              limit 20 xcrun simctl terminate "$dev" tw.studiox.console 2>/dev/null || true
+              limit 60 xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null || echo "   啟動逾時"
               sleep "${wait:-8}"
-              xcrun simctl io "$dev" screenshot "shots/$label-$appearance-$name.png" >/dev/null 2>&1 || true
+              limit 30 xcrun simctl io "$dev" screenshot "shots/$label-$appearance-$name.png" >/dev/null 2>&1 || echo "   截圖逾時"
             done
-            xcrun simctl shutdown "$dev" || true
+            limit 60 xcrun simctl shutdown "$dev" || true
           }
           shoot "$IPHONE" iphone dark
           shoot "$IPHONE" iphone light

@@ -92,6 +92,8 @@ struct XenaOrb: View {
     var light: CGFloat = 0
 
     static let canvas: CGFloat = 1.8
+    /// 只畫一格（示範模式的截圖：CI 的 Mac 沒有顯示卡，著色器一直跑會把模擬器拖慢）
+    static var frozen = false
 
     @State private var motion = OrbMotion()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -101,7 +103,7 @@ struct XenaOrb: View {
         let canvas = size * Self.canvas
         let lively = mood != .idle || voice?.speaking == true
         // 減少動態、或設定裡關掉「水珠會動」：停在同一個樣子
-        let still = reduceMotion || !AppSettings.shared.orbMotion
+        let still = reduceMotion || !AppSettings.shared.orbMotion || Self.frozen
         // 靜靜呼吸的動作很慢，每秒 30 格就很順；說話、回答時 60 格
         TimelineView(.animation(minimumInterval: lively ? 1.0 / 60 : 1.0 / 30, paused: still)) { context in
             let f = motion.step(context.date.timeIntervalSinceReferenceDate, target: mood.energy, voice: voice, reduced: still)
