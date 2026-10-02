@@ -16,6 +16,8 @@ struct CollectionView: View {
     @State private var filter = "all"
     @State private var loading = true
     @State private var error: String?
+    /// 上一次用來讀清單的搜尋字（一樣就不用再讀）
+    @State private var loadedQuery = ""
 
     var body: some View {
         ScrollView {
@@ -49,7 +51,7 @@ struct CollectionView: View {
         .task(id: filter) { await load() }
         .task(id: query) {
             // 打字停一下才去網站搜（網站支援搜尋的資料）
-            guard serverSearch else { return }
+            guard serverSearch, query != loadedQuery else { return }
             try? await Task.sleep(for: .milliseconds(400))
             if !Task.isCancelled { await load() }
         }
@@ -90,7 +92,9 @@ struct CollectionView: View {
         default: args["status"] = .string(filter)
         }
         do {
-            let r = try await model.api.list(site: site, entity: entity, query: serverSearch ? query : nil, filters: args)
+            let sent = query
+            let r = try await model.api.list(site: site, entity: entity, query: serverSearch ? sent : nil, filters: args)
+            loadedQuery = sent
             withAnimation(Motion.ease) {
                 rows = r.rows
                 raw = r.raw

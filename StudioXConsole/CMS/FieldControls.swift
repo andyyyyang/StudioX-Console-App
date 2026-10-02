@@ -621,7 +621,7 @@ struct StringListField: View {
                 TextField("新增…", text: $draft)
                     .focused($focused)
                     .fieldText()
-                    .onSubmit(add)
+                    .onSubmit { add() }
                     .submitLabel(.done)
                 Button("加入", action: add)
                     .buttonStyle(.brand(.ghost, size: .sm))
@@ -882,6 +882,14 @@ struct JSONField: View {
                 .focused($focused)
         }
         .onAppear { text = Self.pretty(value) }
+        .onChange(of: value) { _, v in
+            // 外面改了值（復原、換圖後重新讀）：畫面上的字跟著換
+            let shown = (try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))) ?? (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? JSONValue.null : nil)
+            if shown != v {
+                text = Self.pretty(v)
+                invalid = false
+            }
+        }
         .onChange(of: text) { _, t in
             if t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 invalid = false

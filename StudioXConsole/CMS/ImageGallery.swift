@@ -129,6 +129,7 @@ struct ImageGallery: View {
                 return
             }
         }
+        guard uploaded > 0 else { return }
         model.show(uploaded == 1 ? "已上傳 1 張圖片" : "已上傳 \(uploaded) 張圖片")
         onChanged()
     }

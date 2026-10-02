@@ -66,9 +66,11 @@ struct RecordEditor: View {
     @State private var busy = false
     @State private var showAdvanced = false
     @State private var translationLocale: String?
+    /// 第一次打開才讀；切換分頁回來不要把還沒儲存的修改蓋掉（儲存、重試時另外重新讀）
+    @State private var didLoad = false
 
     /// 等確認的是哪一種動作（確認成功之後要做的事不一樣）
-    enum Pending { case save, create, delete, images }
+    enum Pending { case save, create, delete }
 
     /// 通用畫面不顯示的欄位：
     ///   - 只能寫、不能讀的一次性操作（addItems、removeItemIds…）
@@ -108,7 +110,11 @@ struct RecordEditor: View {
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             Task { await finished(result) }
         }
-        .task { await load() }
+        .task {
+            guard !didLoad else { return }
+            didLoad = true
+            await load()
+        }
     }
 
     private var navigationTitle: String {
@@ -187,9 +193,11 @@ struct RecordEditor: View {
         }
         var next = values
         for (key, edited) in draft where edited != (original[key] ?? .null) {
-            if case .object(var mine) = edited, case .object(let before) = original[key] ?? .null, case .object(let after) = values[key] ?? .null {
+            if case .object(var mine) = edited, case .object(let after) = values[key] ?? .null {
+                var before: [String: JSONValue] = [:]
+                if case .object(let o) = original[key] ?? .null { before = o }
                 for (sub, value) in mine where value == (before[sub] ?? .null) {
-                    mine[sub] = after[sub] ?? .null
+                    mine[sub] = after[sub]
                 }
                 for (sub, value) in after where mine[sub] == nil { mine[sub] = value }
                 next[key] = .object(mine)
@@ -417,7 +425,7 @@ struct RecordEditor: View {
         case .null: true
         case .string(let s): s.isEmpty
         case .array(let a): a.isEmpty
-        case .object(let o): o.values.allSatisfy(isEmpty)
+        case .object(let o): o.values.allSatisfy { isEmpty($0) }
         default: false
         }
     }
@@ -440,7 +448,7 @@ struct RecordEditor: View {
             }
             return .object(out)
         case .array(let a):
-            return .array(a.map(compact))
+            return .array(a.map { compact($0) })
         default:
             return v
         }
@@ -499,14 +507,15 @@ struct RecordEditor: View {
         busy = true
         defer { busy = false }
         do {
+            let kind: Pending = mode == .create ? .create : .save
             let outcome: ConsoleAPI.WriteOutcome
-            if mode == .create {
-                pending = .create
+            if kind == .create {
                 outcome = try await model.api.proposeCreate(site: site, entity: entity, fields: changes)
             } else {
-                pending = .save
                 outcome = try await model.api.proposeUpdate(site: site, entity: entity, id: mode.id, fields: changes)
             }
+            // 等確認的是哪一種動作，和提案一起記下（不會被另一個按鈕的請求蓋掉）
+            pending = kind
             switch outcome {
             case .needsConfirmation(let p): proposal = p
             case .done(let r): await finished(r)
@@ -527,7 +536,7 @@ struct RecordEditor: View {
         case .save:
             model.show("已更新「\(displayTitle ?? schema?.label ?? "")」")
             await load()
-        case .images, nil:
+        case nil:
             await load()
         }
         pending = nil
@@ -538,18 +547,27 @@ struct RecordEditor: View {
     @ViewBuilder
     private var extras: some View {
         if let variants = detail["variants"]?.array, !variants.isEmpty {
-            InfoList(title: "規格（在後台修改）", rows: variants.map { v in
-                (v["name"]?.string ?? "規格", [v["sku"]?.string, v["price"]?.int.map { ntd(cents: $0) }, v["stock"]?.int.map { "庫存 \($0)" }].compactMap { $0 }.joined(separator: "・"))
+            InfoList(title: "規格（在後台修改）", rows: variants.map { v -> (String, String) in
+                var parts: [String] = []
+                if let sku = v["sku"]?.string { parts.append(sku) }
+                if let price = v["price"]?.int { parts.append(ntd(cents: price)) }
+                if let stock = v["stock"]?.int { parts.append("庫存 \(stock)") }
+                return (v["name"]?.string ?? "規格", parts.joined(separator: "・"))
             })
         }
         if let usages = detail["usages"]?.array, !usages.isEmpty {
-            InfoList(title: "使用紀錄", rows: usages.map { u in
-                (u["orderNumber"]?.string ?? "—", [u["userEmail"]?.string, u["usedAt"]?.date?.shortText].compactMap { $0 }.joined(separator: "・"))
+            InfoList(title: "使用紀錄", rows: usages.map { u -> (String, String) in
+                var parts: [String] = []
+                if let email = u["userEmail"]?.string { parts.append(email) }
+                if let at = u["usedAt"]?.date { parts.append(at.shortText) }
+                return (u["orderNumber"]?.string ?? "—", parts.joined(separator: "・"))
             })
         }
         if entity == "bundle", let items = detail["items"]?.array, !items.isEmpty {
-            InfoList(title: "組合內容", rows: items.map { i in
-                (i["productNameZh"]?.string ?? "商品", "× \(i["quantity"]?.int ?? 1)" + (i["productPrice"]?.int.map { "・單買 \(ntd(cents: $0))" } ?? ""))
+            InfoList(title: "組合內容", rows: items.map { i -> (String, String) in
+                let quantity = "× \(i["quantity"]?.int ?? 1)"
+                let single = i["productPrice"]?.int.map { "・單買 \(ntd(cents: $0))" } ?? ""
+                return (i["productNameZh"]?.string ?? "商品", quantity + single)
             })
         }
         if let restricted = detail["products"]?.array, entity == "coupon", !restricted.isEmpty {
@@ -575,9 +593,11 @@ struct RecordEditor: View {
                 if s.canDelete, let id = mode.id {
                     Button("刪除") {
                         Task {
-                            pending = .delete
+                            busy = true
+                            defer { busy = false }
                             do {
                                 let outcome = try await model.api.proposeDelete(site: site, entity: entity, id: id)
+                                pending = .delete
                                 switch outcome {
                                 case .needsConfirmation(let p): proposal = p
                                 case .done(let r): await finished(r)
@@ -588,6 +608,7 @@ struct RecordEditor: View {
                         }
                     }
                     .buttonStyle(.brand(.danger, size: .sm))
+                    .disabled(busy)
                 }
             }
         }

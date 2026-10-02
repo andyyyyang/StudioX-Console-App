@@ -270,8 +270,8 @@ struct RecordSummary: Identifiable, Hashable {
     init(_ json: JSONValue, entity: String) {
         let s = { (k: String) in json[k]?.string.flatMap { $0.isEmpty ? nil : $0 } }
         id = s("id") ?? s("pageKey") ?? s("slug") ?? s("code") ?? UUID().uuidString
-        let heading = s("title") ?? s("titleZh") ?? s("nameZh") ?? s("name") ?? s("subject") ?? s("page") ?? s("q_zh") ?? s("code")
-            ?? s("orderNumber") ?? s("label") ?? s("email") ?? s("pageKey") ?? s("slug") ?? "（沒有標題）"
+        let titleKeys = ["title", "titleZh", "nameZh", "name", "subject", "page", "q_zh", "code", "orderNumber", "label", "email", "pageKey", "slug"]
+        let heading: String = titleKeys.lazy.compactMap { s($0) }.first ?? "（沒有標題）"
         title = heading
         // 第二行：價格、折扣、網址、寄件人
         let money = s("priceLabel") ?? s("discountLabel") ?? s("totalLabel") ?? s("lifetimeSpendLabel") ?? s("requiredSpendLabel")
