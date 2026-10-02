@@ -1,5 +1,6 @@
 # 每次推上來都在 GitHub 的 Mac 上用 Xcode 27 編一次 App（模擬器版、不簽章），
-# 編不過就在 Actions 頁面看得到是哪一行。上架 TestFlight 用 Xcode Cloud（見 README「建置與上架」）。
+# 編不過就在 Actions 頁面看得到是哪一行。用的是和 Xcode Cloud 同一個共用 scheme（StudioXConsole）。
+# 上架 TestFlight 用 Xcode Cloud（見 README「建置與上架」）。
 name: iOS build
 
 on:
@@ -8,6 +9,7 @@ on:
       - "StudioXConsole/**"
       - "StudioXConsole.xcodeproj/**"
       - "StudioXConsole.entitlements"
+      - "ci_scripts/**"
       - ".github/workflows/ios.yml"
   pull_request:
     paths:
@@ -49,8 +51,8 @@ jobs:
           set -o pipefail
           xcodebuild build \
             -project StudioXConsole.xcodeproj \
-            -target StudioXConsole \
-            -sdk iphonesimulator \
+            -scheme StudioXConsole \
+            -destination "generic/platform=iOS Simulator" \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true

@@ -10,3 +10,6 @@ build/
 *.dSYM
 .swiftpm/
 .DS_Store
+
+# Xcode Cloud 建置時產生的 TestFlight 測試內容
+TestFlight/

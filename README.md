@@ -19,53 +19,32 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
 
 ### 建置與上架
 
-- **每次推上 GitHub 都會編一次**（`.github/workflows/ios.yml`）：GitHub 的 Mac（macos-26）選 Xcode 27，
-  編模擬器版、不簽章；編不過時 Actions 的摘要列出每個錯誤與警告（檔案、行號）。只在 App 的檔案有改時跑，
+- **每次推上 GitHub 都會編一次**（`.github/workflows/ios.yml`）：GitHub 的 Mac（macos-26）用共用的 scheme 編模擬器版、不簽章
+  （有 Xcode 27 用 27；GitHub 還沒裝的時候用最新的 Xcode 26，只有 iOS 27 才有的 API 以 Xcode 27 為準）；編不過時 Actions 的摘要列出每個錯誤與警告（檔案、行號）。只在 App 的檔案有改時跑，
   同一個分支連推只編最新的一次。私有 repo 的 Mac 分鐘數是一般的 10 倍，注意 GitHub 方案的額度。
 - **TestFlight／App Store 用 Xcode Cloud**：Apple 自己的建置服務，直接連 GitHub 這個 repo，簽章、上傳 TestFlight 都由 Apple 處理，
-  不用把憑證或金鑰放到 GitHub。第一次在 Xcode：Product → Xcode Cloud → Create Workflow → 選這個 App、授權 GitHub、
-  動作選 Archive（iOS）＋ TestFlight（Internal Testing），之後推到指定的分支就會出新版。App Store Connect 要先建好 bundle id
-  `tw.studiox.console` 的 App。開發者帳號每月含 25 小時的 Xcode Cloud。
+  不用把憑證或金鑰放到 GitHub。開發者帳號每月含 25 小時。專案已經準備好：
+  - 共用的 scheme `StudioXConsole`（`StudioXConsole.xcodeproj/xcshareddata/`；Xcode Cloud 只看得到共用的 scheme）
+  - 自動簽章、`ITSAppUsesNonExemptEncryption = NO`（TestFlight 不會卡在出口合規的問題）、隱私清單 `PrivacyInfo.xcprivacy`
+  - `ci_scripts/ci_post_xcodebuild.sh`：每一版自動把最近的提交寫成 TestFlight 的「測試內容」
+  - 版號（build number）由 Xcode Cloud 自動遞增，版本（1.0）改 `MARKETING_VERSION`
 
-**console 與各網站要先部署 `claude/ios-app-prototype-4492mf`**：atelier-cms（console、studiox.tw、博信）與 yellowgirl-website（黃毛丫頭）。
-App 的登入 client、API 與欄位定義在那裡（見下面「伺服器」）；網站還沒更新的話，內容的編輯畫面會說明「網站還沒更新到支援 App 編輯的版本」。
+  第一次設定（要在 Mac 上的 Xcode 做一次）：
+  1. **App Store Connect**（appstoreconnect.apple.com）→ 我的 App →「＋」新增 App：平台 iOS、名稱 StudioX、主要語言 繁體中文（台灣）、
+     套件 ID 選 `tw.studiox.console`（清單裡沒有就先在 Xcode 用自己的 Team 跑一次實機，自動簽章會註冊）、SKU 隨便填（例如 studiox-console）。
+  2. **TestFlight** → 內部測試 →「＋」建一個群組（例如「StudioX 團隊」），把自己和同事加進去。
+  3. **Xcode**：打開專案、切到這個分支，Signing & Capabilities 選自己的 Team，提交並推上 GitHub（Team 會寫進專案檔，Xcode Cloud 要看得到）。
+  4. Xcode 選單 **Integrate → Create Workflow…** → 選 StudioXConsole → 授權 Xcode Cloud 存取 GitHub（會開瀏覽器，
+     在 GitHub 上安裝 Apple 的「Xcode Cloud」App，只選 `StudioX-Console-App` 這個 repo）。
+  5. 編輯 workflow：
+     - **Environment**：Xcode 選 Latest Release（要 Xcode 27）、macOS 選 Latest
+     - **Start Conditions**：Branch Changes，分支填 `claude/ios-app-prototype-4492mf`（合併到 main 之後改成 main）；
+       Files and Folders 可以只看 `StudioXConsole/`、`StudioXConsole.xcodeproj/`
+     - **Actions**：Archive → 平台 iOS、scheme StudioXConsole、Deployment Preparation 選 **TestFlight (Internal Testing Only)** 或 TestFlight and App Store
+     - **Post-Actions**：TestFlight Internal Testing → 選第 2 步的群組
+  6. 存檔、按 **Start Build**。十幾分鐘後 TestFlight App 會出現新版；之後每次推到那個分支都會自動出一版。
 
-## 品牌與設計
-
-App 的版面照 **studiox.tw**（studio_website 的 `src/styles/global.css`），狀態色、圖表色、系統控制項照後台（atelier-cms 的 `src/app/admin/_ui/theme.ts`）：
-
-| App | 來源 |
-|---|---|
-| `Brand/Theme.swift` | 網站的 `:root`：暖紙色的底 `#f2f0eb`／`#0d0d0c`、墨色的字、`--line` 細線、品牌橘 `#ff5a1f`／`#ff6a33` 只點在重點；反白的帶（跑馬燈、頁尾）；狀態與圖表 5 色照 `theme.ts` |
-| `Brand/Typography.swift` | Inter Tight（標題、數字、介面；中文跟著系統的蘋方）＋ Instrument Serif（標題裡的強調詞，品牌橘、正體不斜）。字級照 `--fs-*`：手機用 767px 以下那組、iPad 大一號；標題字重 500、字距 −0.035～−0.05em；字型檔在 `Brand/Fonts`（OFL），從網站用的同一份變體字型產生 |
-| `Brand/Motion.swift` | 所有動態共用 `--ease`（cubic-bezier(0.22, 1, 0.36, 1)）與 0.3／0.6／1.1 秒；進場從下方 28pt 淡入、同一批晚 80ms；標題一行一行從遮罩下升起；「減少動態效果」時全部關掉 |
-| `Components/` | `.btn`（墨色實心、方角 5、按下時品牌橘從下往上填滿、→ 轉 −45°）、篩選標籤、`.panel`、細線清單、`SectionHead`（英文大字＋襯線強調詞＋中文說明）、`Stats`（細線隔開的大數字，數字滾動跑上去）、只有底線的輸入框 |
-| `Components/Signature.swift` | 網站的招牌元件：跑馬燈（反白、✳ 隔開）、點陣底紋、柔光、裁切記號、超大字標 `studiox.`、載入動畫（兩塊標誌轉 180° 卡上去、000→100、橘色的條）、閱讀進度 |
-| 圖示 | 後台側欄同一套 Heroicons（24 outline），`Web/assets/icons.cjs` 從 `@heroicons/react` 直接輸出成向量圖；網站本身的 →、↗、✳、— 當字用 |
-| App 圖示 | studiox.tw 的 apple-touch-icon（黑底、紙色標誌、品牌橘摺角） |
-| Xena 的水滴與對話 | 後台的 `copilot/styles.ts`：五層圖的水滴（`Web/assets/xena-orb.mjs` 從 `ORB_BALL_CSS` 畫出來，照網頁的節奏動）；對話照 `CHAT_CSS`（自己的訊息是主色泡泡、確認卡片 16 圓角＋膠囊按鈕） |
-
-### iPad
-
-- 側欄（`TabView` 的 `.sidebarAdaptable`）：Xena、訂單、收件匣、我，**每個網站直接列在側欄**（`TabSection`）；
-  手機與分割畫面變窄時自動收成底部分頁，網站收進「網站」分頁（`AppModel.setRegular` 把頁面搬過去）
-- 網站是一個工作區（`NavigationSplitView`）：左邊是這個網站可以管理的東西，右邊是內容；訂單、收件匣是左邊清單、右邊內容
-- 版面在寬的畫面放大字級、改多欄（數字 4 欄、商品 4 欄、報表兩欄），內容置中不貼滿
-- 鍵盤：⌘1–⌘5 切換、⌘F 搜尋、⌘K 找 Xena、⌘R 重新整理、⌘N 新增、⌘S 儲存、⌘↩ 確認執行；指標停在列與按鈕上會亮起來
-
-### 歡迎頁（3D 玻璃標誌）
-
-和 console 的網頁登入同一個上半部：大字 StudioX ＋ studiox.tw 首頁那個 3D 玻璃 Logo ——
-三塊積木各自轉著散開漂浮、又組合起來，攝影棚柔光箱的反光、邊緣的彩虹色散，可以用手指抓著玩。
-用的就是首頁那份 `logo3d.ts`（three.js），打包在 App 裡（`Web/welcome` → `StudioXConsole/Welcome/`，不連網路），
-在 `WKWebView` 裡跑；不能畫 3D 或「減少動態」時改顯示平面標誌（和網頁一樣）。
-下方是透明的玻璃面板（Liquid Glass），Xena 打招呼、「用 StudioX 帳號登入」。
-
-改了 `logo3d.ts`（studio_website 的 `src/scripts/logo3d.ts`，兩邊要一起改）之後重新打包：
-
-```bash
-cd Web/welcome && npm install && npm run build
-```
+  TestFlight 和 App Store 的版本是正式環境的推播（App 自己判斷），console 的 APNs 金鑰兩種都能送。
 
 ## 功能
 
