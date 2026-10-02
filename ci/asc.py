@@ -477,15 +477,53 @@ def split_name(name):
     return (name, "")
 
 
+# 可以當內部測試員的角色（Apple 的規定）
+TESTER_ROLES = {"ACCOUNT_HOLDER", "ADMIN", "APP_MANAGER", "DEVELOPER", "MARKETING"}
+
+
 def team_status(email):
-    """App Store Connect 團隊裡有沒有這個人：("user", …)、("invited", …)（還沒接受團隊邀請）或 (None, None)"""
-    users = call("GET", "/users", query={"filter[username]": email, "limit": 1}).get("data", [])
-    if users:
-        return "user", users[0]
-    pending = call("GET", "/userInvitations", query={"filter[email]": email, "limit": 1}).get("data", [])
-    if pending:
-        return "invited", pending[0]
+    """App Store Connect 團隊裡有沒有這個人：("user", …)、("invited", …)（還沒接受團隊邀請）或 (None, None)。
+    回來的資料要 Email 完全一樣才算（篩選沒生效時會回別人）"""
+    try:
+        users = call("GET", "/users", query={"filter[username]": email, "limit": 10}).get("data", [])
+    except ApiError:
+        # 篩選不能用：整個團隊拿回來自己找（團隊不大）
+        users = call("GET", "/users", query={"limit": 200}).get("data", [])
+    for u in users:
+        if (u["attributes"].get("username") or "").lower() == email:
+            return "user", u
+    pending = call("GET", "/userInvitations", query={"filter[email]": email, "limit": 10}).get("data", [])
+    for invitation in pending:
+        if (invitation["attributes"].get("email") or "").lower() == email:
+            return "invited", invitation
     return None, None
+
+
+def can_test(app_id, user, email):
+    """團隊成員能不能當這個 App 的內部測試員：角色要對、要看得到這個 App（看不到就打開這一個 App 給他）"""
+    a = user["attributes"]
+    roles = set(a.get("roles") or [])
+    if not roles & TESTER_ROLES:
+        summary(f"- ⚠️ {mask(email)} 是團隊成員，但角色（{'、'.join(sorted(roles)) or '?'}）不能當內部測試員：\n"
+                f"  App Store Connect → 使用者和存取權限 → 他 → 角色加上 Developer")
+        return False
+    if a.get("allAppsVisible"):
+        return True
+    try:
+        visible = {x["id"] for x in call("GET", f"/users/{user['id']}/relationships/visibleApps").get("data", [])}
+    except ApiError as e:
+        summary(f"- ⚠️ 讀不到 {mask(email)} 看得到哪些 App：{apple_error(e)}")
+        return True
+    if app_id in visible:
+        return True
+    try:
+        call("POST", f"/users/{user['id']}/relationships/visibleApps", {"data": [{"type": "apps", "id": app_id}]})
+        summary(f"- {mask(email)} 原本看不到這個 App：打開給他（只有這一個）")
+        return True
+    except ApiError as e:
+        summary(f"- ⚠️ 沒辦法讓 {mask(email)} 看到這個 App：{apple_error(e)}\n"
+                f"  App Store Connect → 使用者和存取權限 → 他 → App 加上這一個")
+        return False
 
 
 def invite_to_team(app_id, email, first, last):
@@ -581,15 +619,16 @@ def invite(app_id, group):
         if email in members:
             continue
         try:
-            status, _ = team_status(email)
+            status, user = team_status(email)
         except ApiError as e:
             summary(f"- ⚠️ 查不到 {mask(email)} 是不是團隊成員：{apple_error(e)}")
             status = "user"
+            user = None
         if status is None:
             invite_to_team(app_id, email, first, last)
         elif status == "invited":
             summary(f"- ⏳ {mask(email)} 還沒接受 App Store Connect 的團隊邀請（Apple 寄的信），接受後再跑一次就會寄 TestFlight 邀請")
-        else:
+        elif user is None or can_test(app_id, user, email):
             add_to_group(gid, gname, email, first, last)
             missing[email] = (first, last)
     if missing:
