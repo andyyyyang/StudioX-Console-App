@@ -9,12 +9,13 @@ App Store Connect API（GitHub Actions 的 TestFlight 流程用，.github/workfl
       建 App Store 描述檔，寫出 signing.p12（密碼在 signing.pass）、profile.mobileprovision、appstore.entitlements，
       輸出 cert_id、profile_id、profile_uuid
   python3 ci/asc.py invite
-      只寄 TestFlight 邀請（帳號持有人＋TESTFLIGHT_TESTERS），不建置；.github/workflows/testflight-invite.yml
+      只寄 TestFlight 邀請（帳號持有人＋TESTFLIGHT_TESTERS），不建置；.github/workflows/testflight-invite.yml。
+      TESTFLIGHT_TESTERS 裡還不是 App Store Connect 團隊成員的人，先寄團隊邀請（內部測試員一定要是成員）
   python3 ci/asc.py cleanup --cert <id> --profile <id>
       用完就撤銷憑證、刪掉描述檔（已經上傳的版本不受影響；不會越積越多）
   python3 ci/asc.py finish --app <id> --version 1.0 --build 2610021405 --notes notes.txt
       等 Apple 處理好這一版、寫「測試內容」、交給內部測試群組，寄 TestFlight 邀請給帳號持有人
-      （和 Secrets 的 TESTFLIGHT_TESTERS，選填，逗號隔開的 Email）
+      （和 Secrets 的 TESTFLIGHT_TESTERS，選填，逗號隔開，每一筆「email」或「姓名 <email>」）
 
 金鑰從環境變數讀（GitHub 的 Secrets）：ASC_KEY_ID、ASC_ISSUER_ID、ASC_PRIVATE_KEY（.p8 的內容）。
 只用標準函式庫＋PyJWT（pip install pyjwt cryptography）。
@@ -390,11 +391,66 @@ def testers():
                 people[a["username"].lower()] = (a.get("firstName") or "", a.get("lastName") or "")
     except ApiError as e:
         summary(f"- ⚠️ 讀不到帳號持有人（金鑰要 Admin）：{apple_error(e)}")
-    for email in os.environ.get("TESTFLIGHT_TESTERS", "").split(","):
-        email = email.strip().lower()
-        if "@" in email:
-            people.setdefault(email, ("", ""))
+    for email, name in parse_testers(os.environ.get("TESTFLIGHT_TESTERS", "")).items():
+        people.setdefault(email, name)
     return people
+
+
+def parse_testers(raw):
+    """TESTFLIGHT_TESTERS：逗號或換行隔開，每一筆是「email」或「姓名 <email>」→ {email: (名, 姓)}"""
+    out = {}
+    for part in raw.replace("\n", ",").split(","):
+        part = part.strip()
+        name, email = "", part
+        if "<" in part and part.endswith(">"):
+            name, email = part[:part.index("<")].strip(), part[part.index("<") + 1:-1].strip()
+        email = email.lower()
+        if "@" in email:
+            out[email] = split_name(name)
+    return out
+
+
+def split_name(name):
+    """（名, 姓）：英文名最後一個字是姓；中文名第一個字是姓（複姓請寫成「歐陽 娜娜」）"""
+    name = " ".join(name.split())
+    if " " in name:
+        if all(ord(c) >= 0x2E80 for c in name.replace(" ", "")):
+            last, _, first = name.partition(" ")
+        else:
+            first, _, last = name.rpartition(" ")
+        return (first, last)
+    if len(name) >= 2 and all(ord(c) >= 0x2E80 for c in name):
+        return (name[1:], name[:1])
+    return (name, "")
+
+
+def team_status(email):
+    """App Store Connect 團隊裡有沒有這個人：("user", …)、("invited", …)（還沒接受團隊邀請）或 (None, None)"""
+    users = call("GET", "/users", query={"filter[username]": email, "limit": 1}).get("data", [])
+    if users:
+        return "user", users[0]
+    pending = call("GET", "/userInvitations", query={"filter[email]": email, "limit": 1}).get("data", [])
+    if pending:
+        return "invited", pending[0]
+    return None, None
+
+
+def invite_to_team(app_id, email, first, last):
+    """TestFlight 的內部測試員一定要是 App Store Connect 團隊的成員（Apple 的規定）。
+    還不是的人先寄團隊邀請：Developer 角色、只看得到這個 App、不能動憑證和描述檔；
+    對方按信裡的連結接受後，下一次邀請（或下一版 TestFlight）就會把他加進測試群組、寄 TestFlight 邀請"""
+    local = email.split("@")[0]
+    try:
+        call("POST", "/userInvitations", {"data": {
+            "type": "userInvitations",
+            "attributes": {"email": email, "firstName": first or local, "lastName": last or local,
+                           "roles": ["DEVELOPER"], "allAppsVisible": False, "provisioningAllowed": False},
+            "relationships": {"visibleApps": {"data": [{"type": "apps", "id": app_id}]}}}})
+        summary(f"- ✉️ {mask(email)} 還不是 App Store Connect 團隊的成員：寄了團隊邀請（Developer、只看得到這個 App）。"
+                f"對方接受後再跑一次「TestFlight 邀請」就會寄 TestFlight 邀請")
+    except ApiError as e:
+        summary(f"- ⚠️ 沒辦法邀請 {mask(email)} 加入 App Store Connect 團隊：{apple_error(e)}\n"
+                f"  可以在 App Store Connect → 使用者和存取權限 →「＋」手動邀請（角色 Developer）")
 
 
 def group_members(gid):
@@ -467,9 +523,22 @@ def invite(app_id, group):
     """確定帳號持有人（和 TESTFLIGHT_TESTERS）在測試群組裡，寄 TestFlight 邀請給群組裡每個還沒裝的人"""
     gid, gname = group["id"], group["attributes"].get("name")
     members = group_members(gid)
-    missing = {e: n for e, n in testers().items() if e not in members}
-    for email, (first, last) in missing.items():
-        add_to_group(gid, gname, email, first, last)
+    missing = {}
+    for email, (first, last) in testers().items():
+        if email in members:
+            continue
+        try:
+            status, _ = team_status(email)
+        except ApiError as e:
+            summary(f"- ⚠️ 查不到 {mask(email)} 是不是團隊成員：{apple_error(e)}")
+            status = "user"
+        if status is None:
+            invite_to_team(app_id, email, first, last)
+        elif status == "invited":
+            summary(f"- ⏳ {mask(email)} 還沒接受 App Store Connect 的團隊邀請（Apple 寄的信），接受後再跑一次就會寄 TestFlight 邀請")
+        else:
+            add_to_group(gid, gname, email, first, last)
+            missing[email] = (first, last)
     if missing:
         # Apple 把人放進群組要一點時間
         for _ in range(6):

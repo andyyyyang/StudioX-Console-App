@@ -28,8 +28,10 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
   2. Mac：打開 App ID 的推播能力，建一張**這一次專用**的 Apple Distribution 憑證（私鑰只在那台 Mac 的暫時鑰匙圈）與 App Store 描述檔，
      封存、上傳；結束就撤銷憑證、刪掉描述檔（已經上傳的版本不受影響，憑證也不會越積越多）
   3. Linux：等 Apple 處理好，把最近的提交寫成「測試內容」，交給內部測試群組（沒有就建一個「StudioX 團隊」），
-     寄 TestFlight 邀請給群組裡還沒裝的人。Apple 不讓 API 把人加進內部群組，所以**第一次**要在 App Store Connect →
-     TestFlight → 內部測試「StudioX 團隊」→ 測試人員「＋」把自己（和同事）加進去；之後每一版都自動出現在 TestFlight
+     把帳號持有人和 Secrets 的 `TESTFLIGHT_TESTERS` 加進群組，寄 TestFlight 邀請給群組裡還沒裝的人
+  - 邀請別人：Secrets 加 `TESTFLIGHT_TESTERS`，逗號隔開，每一筆 `email` 或 `姓名 <email>`（例如 `王小明 <ming@example.com>`），
+    再到 Actions → TestFlight 邀請 → Run workflow。內部測試員一定要是 App Store Connect 團隊的成員（Apple 的規定），
+    還不是的人會先收到 Apple 的團隊邀請（Developer、只看得到這個 App、不能動憑證）；接受後再跑一次，就會收到 TestFlight 邀請
   - 推到 `main` 或 `claude/ios-app-prototype-4492mf`（App 的檔案有改）就跑，也可以在 Actions → TestFlight → Run workflow 手動跑
   - 版號用 UTC 時間（`2610021405`＝26/10/02 14:05），版本改 `MARKETING_VERSION`
   - GitHub 還沒裝 Xcode 27 的時候用最新的 Xcode 建置，最低系統先設成那個 SDK 的版本（摘要會寫用了哪一版）
