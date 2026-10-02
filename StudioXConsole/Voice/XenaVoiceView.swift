@@ -152,7 +152,7 @@ struct XenaVoiceView: View {
                 model.goToAccount()
             }
         } label: {
-            Text("聲音太機械？到設定換免費的「加強」聲音 →")
+            Text("聲音太機械？免費換 Han 或 Lilian →")
                 .font(.brand(13, .medium))
                 .foregroundStyle(Theme.accent)
         }

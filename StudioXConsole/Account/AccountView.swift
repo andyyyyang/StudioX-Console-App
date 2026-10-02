@@ -93,8 +93,8 @@ struct AccountView: View {
                                     }
                                     .padding(.vertical, 12)
                                     Text(XenaMouth.usingCompactVoice
-                                         ? "現在用的是「精簡」版，聽起來比較機械。免費換自然一點的：iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文」，下載「美佳（加強）」或標「高品質」的聲音，回來這裡選它（自動也會挑到）。"
-                                         : "想換別的聲音：iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文」可以免費下載更多。")
+                                         ? "現在用的是「精簡」版，聽起來比較機械。免費換自然一點的：iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文」，推薦下載 Han 或 Lilian（挑「加強」或「高品質」），回來這裡選「自動」就會用它。"
+                                         : "想換別的聲音：iPhone 的「設定 → 輔助使用 → 朗讀內容 → 聲音 → 中文」可以免費下載更多（推薦 Han、Lilian）。")
                                         .textRole(.xs)
                                         .foregroundStyle(XenaMouth.usingCompactVoice ? Theme.ink2 : Theme.muted)
                                         .fixedSize(horizontal: false, vertical: true)
