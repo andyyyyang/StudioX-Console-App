@@ -65,7 +65,7 @@ final class Briefing {
     }
 
     private func collect(_ sites: [SiteSummary]) async {
-        plan = Dictionary(uniqueKeysWithValues: sites.map { ($0.id, $0) })
+        plan = Dictionary(sites.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         collected = [:]
         // 一個網站一個請求序列；網站之間同時跑（結果各自寫回這裡）
         let ids = sites.map(\.id)
@@ -75,12 +75,12 @@ final class Briefing {
             }
         }
         let results = Array(collected.values)
-        ops = Dictionary(uniqueKeysWithValues: results.compactMap { r in r.ops.map { (r.site, $0) } })
-        toShip = Dictionary(uniqueKeysWithValues: results.map { ($0.site, $0.toShip) })
+        ops = Dictionary(results.compactMap { r in r.ops.map { (r.site, $0) } }, uniquingKeysWith: { first, _ in first })
+        toShip = Dictionary(results.map { ($0.site, $0.toShip) }, uniquingKeysWith: { first, _ in first })
         awaiting = results.flatMap(\.awaiting).sorted { ($0.waitingHours ?? 0) > ($1.waitingHours ?? 0) }
         handoffs = results.flatMap(\.handoffs).sorted { ($0.at ?? .distantPast) > ($1.at ?? .distantPast) }
         inquiries = results.flatMap(\.inquiries).sorted { ($0.at ?? .distantPast) > ($1.at ?? .distantPast) }
-        failures = Dictionary(uniqueKeysWithValues: results.compactMap { r in r.failure.map { (r.site, $0) } })
+        failures = Dictionary(results.compactMap { r in r.failure.map { (r.site, $0) } }, uniquingKeysWith: { first, _ in first })
         updatedAt = .now
     }
 

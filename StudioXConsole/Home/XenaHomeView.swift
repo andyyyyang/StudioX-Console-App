@@ -138,7 +138,7 @@ struct XenaHomeView: View {
 
     private var greeting: some View {
         VStack(alignment: .leading, spacing: 22) {
-            RisingHeadline(lines: greetingLines, role: .hero, replayKey: model.briefing.updatedAt == nil ? 0 : 1)
+            RisingHeadline(lines: greetingLines, role: .hero, replayKey: AnyHashable(model.briefing.updatedAt == nil))
             TypewriterText(text: report, animate: !model.greeted) {
                 if model.briefing.updatedAt != nil { model.greeted = true }
             }

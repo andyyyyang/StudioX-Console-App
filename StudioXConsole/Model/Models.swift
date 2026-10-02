@@ -301,6 +301,8 @@ struct OrderDetail {
 struct SupportThreadSummary: Identifiable, Hashable {
     let id: String
     var site: String
+    /// 好幾個網站放在一起的清單用（id 只在同一個網站裡不重複）
+    var key: String { "\(site)|\(id)" }
     var subject: String
     var categoryLabel: String
     var status: String
@@ -399,6 +401,7 @@ struct SupportThreadDetail {
 struct XenaConversationSummary: Identifiable, Hashable {
     let id: String
     var site: String
+    var key: String { "\(site)|\(id)" }
     var at: Date?
     /// ai（Xena 回答中）/ waiting（等專人）/ human（專人接手）/ closed
     var status: String
@@ -453,6 +456,7 @@ struct XenaConversationMessage: Identifiable {
 struct InquirySummary: Identifiable, Hashable {
     let id: String
     var site: String
+    var key: String { "\(site)|\(id)" }
     var at: Date?
     /// new / replied / archived
     var status: String
@@ -480,7 +484,9 @@ struct InquirySummary: Identifiable, Hashable {
 // MARK: - 報表
 
 struct TrafficPoint: Identifiable {
-    var id: String { label }
+    var id: String { key }
+    /// 網站給的原始標籤（2026-10-02、2026-10-02T14）：一年的走勢裡 M/d 會重複，用這個當 id 與圖上的位置
+    let key: String
     /// 10/2、14時
     let label: String
     let date: Date?
@@ -573,7 +579,7 @@ struct TrafficReport {
         pageviewsChange = json["change"]?["pageviews"]?.double
         trend = (json["trend"]?.array ?? []).map {
             let raw = $0["label"]?.string ?? ""
-            return TrafficPoint(label: TrafficReport.shortLabel(raw), date: TrafficReport.day(raw), visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0)
+            return TrafficPoint(key: raw, label: TrafficReport.shortLabel(raw), date: TrafficReport.day(raw), visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0)
         }
         pages = TrafficReport.tops(json["pages"])
         entries = TrafficReport.tops(json["entries"])
@@ -668,7 +674,8 @@ struct SearchReport {
     }
 
     struct Point: Identifiable {
-        var id: String { label }
+        var id: String { key }
+        let key: String
         let label: String
         let date: Date?
         let clicks: Int
@@ -714,7 +721,7 @@ struct SearchReport {
             let parts = raw.split(separator: "-").compactMap { Int($0) }
             let date = parts.count == 3 ? Calendar.taipei.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) : nil
             let label = parts.count == 3 ? "\(parts[1])/\(parts[2])" : raw
-            return Point(label: label, date: date, clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0)
+            return Point(key: raw, label: label, date: date, clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0)
         }
         let rows = { (v: JSONValue?) in
             (v?.array ?? []).map { Row(key: $0["key"]?.string ?? "", clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0, ctr: $0["ctr"]?.double, position: $0["position"]?.double) }

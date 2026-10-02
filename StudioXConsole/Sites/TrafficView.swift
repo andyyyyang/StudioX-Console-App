@@ -16,19 +16,21 @@ struct TrafficChart: View {
     var body: some View {
         let value = { (p: TrafficPoint) in metric == .visitors ? p.visitors : p.pageviews }
         let name = metric == .visitors ? "訪客" : "瀏覽"
-        let picked = points.first { $0.label == selected }
+        let picked = points.first { $0.key == selected }
+        // 圖上的位置用完整日期（一年的走勢 M/d 會重複），軸上顯示短的
+        let short = Dictionary(points.map { ($0.key, $0.label) }, uniquingKeysWith: { first, _ in first })
         Chart {
             ForEach(points) { p in
-                AreaMark(x: .value("時間", p.label), y: .value(name, value(p)))
+                AreaMark(x: .value("時間", p.key), y: .value(name, value(p)))
                     .foregroundStyle(LinearGradient(colors: [Theme.accent.opacity(0.22), Theme.accent.opacity(0)], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.monotone)
-                LineMark(x: .value("時間", p.label), y: .value(name, value(p)))
+                LineMark(x: .value("時間", p.key), y: .value(name, value(p)))
                     .foregroundStyle(Theme.accent)
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
             }
             if let picked {
-                RuleMark(x: .value("時間", picked.label))
+                RuleMark(x: .value("時間", picked.key))
                     .foregroundStyle(Theme.ink.opacity(0.25))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                     .annotation(position: .top, spacing: 6, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
@@ -44,7 +46,7 @@ struct TrafficChart: View {
                         .padding(.vertical, 7)
                         .background(Theme.inverse, in: .rect(cornerRadius: Metric.radiusSm))
                     }
-                PointMark(x: .value("時間", picked.label), y: .value(name, value(picked)))
+                PointMark(x: .value("時間", picked.key), y: .value(name, value(picked)))
                     .foregroundStyle(Theme.accent)
                     .symbolSize(60)
             }
@@ -57,8 +59,12 @@ struct TrafficChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { _ in
-                AxisValueLabel().foregroundStyle(Theme.muted).font(.brand(11, .regular))
+            AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                AxisValueLabel {
+                    Text(short[value.as(String.self) ?? ""] ?? "")
+                        .font(.brand(11, .regular))
+                        .foregroundStyle(Theme.muted)
+                }
             }
         }
         .sensoryFeedback(.selection, trigger: selected)
@@ -536,7 +542,7 @@ struct SearchConsoleView: View {
                     FilterChip(title: "曝光", selected: showImpressions) { showImpressions = true }
                 }
             }
-            TrafficChart(points: r.trend.map { TrafficPoint(label: $0.label, date: $0.date, visitors: showImpressions ? $0.impressions : $0.clicks, pageviews: 0) }, metric: .visitors)
+            TrafficChart(points: r.trend.map { TrafficPoint(key: $0.key, label: $0.label, date: $0.date, visitors: showImpressions ? $0.impressions : $0.clicks, pageviews: 0) }, metric: .visitors)
                 .frame(height: sizeClass == .regular ? 280 : 210)
         }
 

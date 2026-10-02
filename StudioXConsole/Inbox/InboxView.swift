@@ -153,7 +153,7 @@ struct InboxList: View {
             EmptyState(title: "客人都回覆過了", message: "有新的客服信會出現在這裡。")
         } else {
             RuledList {
-                ForEach(Array(threads.enumerated()), id: \.element.id) { index, t in
+                ForEach(Array(threads.enumerated()), id: \.element.key) { index, t in
                     open(.thread(site: t.site, id: t.id)) {
                         InboxRow(name: t.customer, title: t.subject, at: nil, badges: badges(for: t), site: model.site(t.site))
                     }
@@ -176,7 +176,7 @@ struct InboxList: View {
             EmptyState(title: "沒有轉給專人的對話", message: "Xena 判斷需要真人時，對話會出現在這裡。")
         } else {
             RuledList {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, c in
+                ForEach(Array(items.enumerated()), id: \.element.key) { index, c in
                     open(.xenaConversation(site: c.site, id: c.id)) {
                         InboxRow(
                             name: c.contactName ?? "訪客", title: c.firstQuestion ?? "（\(c.turns) 句對話）", at: c.at,
@@ -196,7 +196,7 @@ struct InboxList: View {
             EmptyState(title: "沒有新的專案詢問", message: "網站聯絡表單送出的詢問會出現在這裡。")
         } else {
             RuledList {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, q in
+                ForEach(Array(items.enumerated()), id: \.element.key) { index, q in
                     InquiryRow(inquiry: q, site: model.site(q.site))
                         .reveal(index)
                 }
@@ -212,7 +212,7 @@ struct InboxList: View {
             EmptyState(title: "信箱是空的", message: "寄到網站信箱、但不是客服對話的信會出現在這裡。")
         } else {
             RuledList {
-                ForEach(Array(mailbox.enumerated()), id: \.element.row.id) { index, item in
+                ForEach(Array(mailbox.enumerated()), id: \.offset) { index, item in
                     open(.record(site: item.site, entity: "mailbox", id: item.row.id)) {
                         InboxRow(
                             name: item.row.raw["from"]?.string ?? "寄件人",
@@ -435,12 +435,23 @@ struct SupportThreadView: View {
                 if !d.summary.categoryLabel.isEmpty { StatusBadge(d.summary.categoryLabel) }
                 if let n = d.summary.orderNumber { StatusBadge("#\(n)", tone: .gold) }
             }
-            Text([d.contactEmail, d.memberName.map { "會員 \($0)" + (d.memberTier.map { "（\($0)）" } ?? "") }, d.memberSpend.map { "累積 \($0)" }].compactMap { $0 }.joined(separator: "・"))
+            Text(contactLine(d))
                 .textRole(.xs)
                 .foregroundStyle(Theme.muted)
                 .lineLimit(2)
         }
         .padding(.bottom, 8)
+    }
+
+    /// email・會員（等級）・累積消費
+    private func contactLine(_ d: SupportThreadDetail) -> String {
+        var parts: [String] = [d.contactEmail]
+        if let name = d.memberName {
+            let tier = d.memberTier.map { "（\($0)）" } ?? ""
+            parts.append("會員 \(name)\(tier)")
+        }
+        if let spend = d.memberSpend { parts.append("累積 \(spend)") }
+        return parts.filter { !$0.isEmpty }.joined(separator: "・")
     }
 
     private func orders(_ d: SupportThreadDetail) -> some View {

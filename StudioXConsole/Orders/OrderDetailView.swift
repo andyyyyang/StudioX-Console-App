@@ -368,11 +368,32 @@ private struct RefundSheet: View {
 
     private var maxNtd: Int { Int((Double(totalCents) / 100).rounded()) }
 
+    /// 只收半形數字；空白＝全額退剩下的
+    private var typed: Int? {
+        let t = amount.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, t.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(t)
+    }
+
+    /// 金額有填就要在 1 到剩下的金額之間（填錯不會變成全額退款）
+    private var valid: Bool {
+        let t = amount.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return true }
+        guard let n = typed else { return false }
+        return n >= 1 && n <= maxNtd
+    }
+
+    /// 部分退款的金額；全額（空白或等於剩下的金額）送 nil
+    private var partial: Int? {
+        guard let n = typed, n < maxNtd else { return nil }
+        return n
+    }
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 22) {
                 Headline("*Refund*", role: .h2)
-                FieldBlock(label: "退多少（元）", hint: "空白＝全額退剩下的 NT$\(maxNtd.formatted())", focused: focused == 0) {
+                FieldBlock(label: "退多少（元）", hint: "空白＝全額退剩下的 NT$\(maxNtd.formatted())", error: valid ? nil : "請填 1 到 \(maxNtd) 之間的整數", focused: focused == 0) {
                     HStack(spacing: 6) {
                         Text("NT$").foregroundStyle(Theme.muted)
                         TextField("\(maxNtd)", text: $amount)
@@ -391,11 +412,11 @@ private struct RefundSheet: View {
                     .foregroundStyle(Theme.muted)
                 Spacer()
                 Button("下一步") {
-                    let value = Int(amount.filter(\.isNumber))
                     dismiss()
-                    onSubmit(value.flatMap { $0 > 0 && $0 < maxNtd ? $0 : nil }, note.trimmingCharacters(in: .whitespaces))
+                    onSubmit(partial, note.trimmingCharacters(in: .whitespaces))
                 }
                 .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
+                .disabled(!valid)
             }
             .padding(24)
             .background { Theme.sheet.ignoresSafeArea() }
