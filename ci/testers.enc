@@ -1,0 +1,2 @@
+# TestFlight 測試員（加密；只有 GitHub Actions 解得開）。加一筆：python3 ci/seal_tester.py <公鑰> "姓名 <email>" >> ci/testers.enc
+BHohL2Rf4q7XVM5mrk7/fluYlUng5hQMq4/fZRwK3M8Scpw/gMnH8nipqhpuzhEyS6hzrXrWEGG8hHMT+ImeFHNfNTqgc4SiEeU26VOUYpjzDYq5+Z20ewqXSJkzVdd/XzyS4k+fXdFWSe0R49AiteHYYQ==
