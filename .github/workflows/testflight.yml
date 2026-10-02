@@ -32,6 +32,8 @@ env:
 jobs:
   # 便宜的 Linux 先檢查：Secrets 設好了沒、App ID 註冊了沒、App Store Connect 上有沒有這個 App
   prepare:
+    # 提交訊息有 [invite only]：只重寄邀請（testflight-invite.yml），不建置
+    if: "!contains(github.event.head_commit.message, '[invite only]')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:

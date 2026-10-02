@@ -428,40 +428,43 @@ def send_invitation(app_id, tester_id, tries=4):
 
 
 def invite(app_id, group):
-    """把人加進測試群組，寄 TestFlight 邀請（已經裝好的不打擾）"""
+    """確定帳號持有人（和 TESTFLIGHT_TESTERS）在測試群組裡，然後寄 TestFlight 邀請給群組裡每個還沒裝的人。
+    內部測試員在群組裡的 Email 可能是聯絡信箱、不是 Apple ID，所以不靠 Email 對，直接寄給群組成員"""
     gid, gname = group["id"], group["attributes"].get("name")
     members = group_members(gid)
     for email, (first, last) in testers().items():
-        tester = members.get(email)
-        if tester is None:
-            try:
-                found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
-                if found:
-                    try:
-                        call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": found[0]["id"]}]})
-                    except ApiError as e:
-                        if e.status not in (409, 422):
-                            raise
-                else:
-                    call("POST", "/betaTesters", {"data": {
-                        "type": "betaTesters",
-                        "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
-                        "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})
-            except ApiError as e:
-                summary(f"- ⚠️ 沒辦法把 {mask(email)} 加進「{gname}」：{apple_error(e)}")
-                continue
-            time.sleep(5)
-            tester = group_members(gid).get(email)
-            if tester is None:
-                summary(f"- ⚠️ {mask(email)} 加進了「{gname}」，但 Apple 還查不到，下一次會再寄邀請")
-                continue
-        state = tester["attributes"].get("state")
-        if state == "INSTALLED":
+        if email in members:
+            continue
+        try:
+            found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
+            if found:
+                try:
+                    call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": found[0]["id"]}]})
+                    summary(f"- {mask(email)} 加進「{gname}」")
+                except ApiError as e:
+                    if e.status not in (409, 422):
+                        raise
+            else:
+                call("POST", "/betaTesters", {"data": {
+                    "type": "betaTesters",
+                    "attributes": {"email": email, "firstName": first or None, "lastName": last or None},
+                    "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}})
+                summary(f"- {mask(email)} 加進「{gname}」")
+        except ApiError as e:
+            summary(f"- ⚠️ 沒辦法把 {mask(email)} 加進「{gname}」：{apple_error(e)}")
+    time.sleep(5)
+    members = group_members(gid)
+    summary(f"- 「{gname}」有 {len(members)} 位測試員：" +
+            ("、".join(f"{mask(m)}（{t['attributes'].get('state') or '?'}）" for m, t in members.items()) or "（沒有）"))
+    if not members:
+        summary(f"  Apple 沒有把人放進內部群組。到 App Store Connect → TestFlight →「{gname}」→ 測試人員「＋」把自己加進去（一次就好）")
+    for email, tester in members.items():
+        if tester["attributes"].get("state") == "INSTALLED":
             summary(f"- {mask(email)} 已經裝了，打開 iPhone 的 TestFlight 就有新版")
             continue
         error = send_invitation(app_id, tester["id"])
         if error is None:
-            summary(f"- ✉️ 寄了 TestFlight 邀請給 {mask(email)}（「{gname}」）")
+            summary(f"- ✉️ 寄了 TestFlight 邀請給 {mask(email)}")
         else:
             summary(f"- ⚠️ 邀請信沒寄出（{mask(email)}）：{error}\n"
                     f"  可以在 App Store Connect → TestFlight →「{gname}」→ 測試人員，勾選後按「重新傳送邀請」")
