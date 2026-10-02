@@ -105,8 +105,14 @@ struct RootView: View {
                 model.lock.didReturn()
                 // 剛鎖上才自動跳 Face ID；取消了就停在鎖定畫面，等他按「解鎖」或登出
                 if model.lock.takePrompt() { Task { await model.lock.unlock() } }
-                // 回到 App：重拿通知的 token（可能換了）、在設定裡打開了通知
-                if model.phase == .ready { Task { await model.push.refresh() } }
+                // 回到 App：之後的請求開新的連線（舊的可能在背景時被網路斷了，不然第一個請求會等到逾時）；
+                // 重拿通知的 token（可能換了）、在設定裡打開了通知
+                if model.phase == .ready {
+                    Task {
+                        await model.api.freshConnections()
+                        await model.push.refresh()
+                    }
+                }
             default:
                 break
             }

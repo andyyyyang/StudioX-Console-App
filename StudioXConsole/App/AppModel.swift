@@ -291,6 +291,8 @@ final class AppModel {
 
     /// 下拉重新整理、Xena 動手改了東西之後
     func refreshAll() async {
+        // 下拉重新整理：用新的連線（App 放著一陣子後，舊的連線可能已經斷了，第一次會等到逾時）
+        await api.freshConnections()
         do {
             me = try await api.me()
         } catch {

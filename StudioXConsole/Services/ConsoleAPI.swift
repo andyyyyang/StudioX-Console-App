@@ -93,31 +93,55 @@ final class ConsoleAPI {
         onSignedOut?()
     }
 
-    /// 帶 token 送出；401 就換 token 再試一次
-    private func send(_ makeRequest: () throws -> URLRequest) async throws -> (Data, HTTPURLResponse) {
+    /// 帶 token 送出；401 就換 token 再試一次。
+    /// 讀資料的請求（GET、查詢的工具）連線斷了、逾時：多半是 App 放著一陣子、舊的連線已經死了（下拉重新整理第一次逾時、第二次才好）——
+    /// 第一次只等 15 秒，換一條新的連線馬上再試一次，不讓你看到錯誤。寫入的不重送（避免做兩次）。
+    private func send(retryable: Bool? = nil, _ makeRequest: () throws -> URLRequest) async throws -> (Data, HTTPURLResponse) {
         #if DEBUG
         if DemoServer.enabled { return DemoServer.respond(to: try makeRequest()) }
         #endif
-        for attempt in 0..<2 {
+        var refreshedToken = false
+        var reconnected = false
+        while true {
             var request = try makeRequest()
-            request.setValue("Bearer \(try await accessToken(forceRefresh: attempt > 0))", forHTTPHeaderField: "authorization")
+            let canRetry = retryable ?? ((request.httpMethod ?? "GET") == "GET")
+            if canRetry && !reconnected { request.timeoutInterval = min(request.timeoutInterval, 15) }
+            request.setValue("Bearer \(try await accessToken(forceRefresh: refreshedToken))", forHTTPHeaderField: "authorization")
             let data: Data
             let response: URLResponse
             do {
                 (data, response) = try await URLSession.shared.data(for: request)
-            } catch let error as URLError where error.code == .notConnectedToInternet || error.code == .networkConnectionLost || error.code == .timedOut {
+            } catch let error as URLError where Self.stale.contains(error.code) || error.code == .notConnectedToInternet {
+                if canRetry && !reconnected && Self.stale.contains(error.code) {
+                    reconnected = true
+                    await freshConnections()
+                    continue
+                }
                 throw APIError.offline
             }
             guard let http = response as? HTTPURLResponse else { throw APIError.http(0) }
             if http.statusCode == 401 {
-                if attempt == 0 { continue }
+                if !refreshedToken {
+                    refreshedToken = true
+                    continue
+                }
                 expire()
                 throw APIError.unauthorized
             }
             return (data, http)
         }
-        throw APIError.unauthorized
     }
+
+    /// 連線死掉的樣子（換一條新的連線通常就好）
+    private static let stale: Set<URLError.Code> = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .secureConnectionFailed]
+
+    /// 之後的請求都開新的連線（App 從背景回來、下拉重新整理：舊的連線可能已經被網路斷掉了）
+    func freshConnections() async {
+        await URLSession.shared.flush()
+    }
+
+    /// 只是查資料的工具：連線斷了可以放心重送（寫入一律要確認，不重送）
+    private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites"]
 
     private func json(_ data: Data) throws -> JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: data)
@@ -171,7 +195,7 @@ final class ConsoleAPI {
             "params": ["name": .string(name), "arguments": .object(args)],
         ]
         let payload = try JSONEncoder().encode(body)
-        let (data, http) = try await send {
+        let (data, http) = try await send(retryable: Self.readTools.contains(name)) {
             var r = URLRequest(url: URL(string: ConsoleConfig.mcpURL)!)
             r.httpMethod = "POST"
             r.timeoutInterval = 45
