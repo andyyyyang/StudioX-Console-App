@@ -292,10 +292,13 @@ final class XenaMouth {
 
     // MARK: 聲音的清單
 
-    /// iPhone 上可以用的中文（國語）聲音：台灣的加強／高品質最先，再來是中國的高品質、加強，最後才是精簡版
+    /// Xena 預設的聲音（「朗讀內容」裡下載得到，名字是 Han）：有就用它（同名的挑品質最好的）
+    static let preferredName = "Han"
+
+    /// iPhone 上可以用的中文聲音：台灣的加強／高品質最先，再來是其他地區的高品質、加強，最後才是精簡版
     static var voices: [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language == "zh-TW" || $0.language == "zh-CN" }
+            .filter { $0.language.hasPrefix("zh") }
             .sorted { a, b in
                 let (ra, rb) = (rank(a), rank(b))
                 return ra != rb ? ra > rb : a.name < b.name
@@ -311,11 +314,12 @@ final class XenaMouth {
         }
     }
 
-    /// 設定裡選的聲音；沒選（或選的被刪了）就用最好的那個
+    /// 設定裡選的聲音；沒選（或選的被刪了）：有 Han 就用 Han，沒有就用最好的那個
     static func chosenVoice() -> AVSpeechSynthesisVoice? {
         let id = AppSettings.shared.voiceID
         if !id.isEmpty, let voice = AVSpeechSynthesisVoice(identifier: id) { return voice }
-        return voices.first ?? AVSpeechSynthesisVoice(language: "zh-TW")
+        let all = voices
+        return all.first { $0.name.hasPrefix(preferredName) } ?? all.first ?? AVSpeechSynthesisVoice(language: "zh-TW")
     }
 
     /// 現在用的是不是精簡版（聽起來比較機械；設定頁、語音畫面提醒可以免費換）
@@ -324,7 +328,11 @@ final class XenaMouth {
     }
 
     static func label(_ voice: AVSpeechSynthesisVoice) -> String {
-        let region = voice.language == "zh-TW" ? "台灣" : "中國"
+        let region = switch voice.language {
+        case "zh-TW": "台灣"
+        case "zh-HK": "香港"
+        default: "中國"
+        }
         let quality = switch voice.quality {
         case .premium: "高品質"
         case .enhanced: "加強"
