@@ -197,7 +197,7 @@ struct IssueCouponSheet: View {
                 }
                 .padding(24)
             }
-            .background(Theme.sheet.ignoresSafeArea())
+            .background { Theme.sheet.ignoresSafeArea() }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Button {
                     Task { await send() }
@@ -438,7 +438,7 @@ private struct StallItemSheet: View {
                 }
                 .padding(24)
             }
-            .background(Theme.sheet.ignoresSafeArea())
+            .background { Theme.sheet.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
@@ -560,7 +560,7 @@ struct FaqPageView: View {
                         .rotationEffect(.degrees(isOpen ? 45 : 0))
                         .frame(width: 32, height: 32)
                         .background(isOpen ? Theme.accent : .clear, in: .rect(cornerRadius: Metric.radiusSm))
-                        .overlay(RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(isOpen ? .clear : Theme.line, lineWidth: 1))
+                        .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(isOpen ? .clear : Theme.line, lineWidth: 1) }
                 }
                 .padding(.vertical, 18)
                 .contentShape(.rect)

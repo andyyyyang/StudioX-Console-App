@@ -187,7 +187,7 @@ struct OrdersList: View {
                     Rectangle()
                         .fill(on ? Theme.accent : .clear)
                         .frame(width: 20, height: 20)
-                        .overlay(Rectangle().strokeBorder(on ? Theme.accent : Theme.line, lineWidth: 1.5))
+                        .overlay { Rectangle().strokeBorder(on ? Theme.accent : Theme.line, lineWidth: 1.5) }
                         .overlay { if on { Text("✓").font(.brand(13, .bold)).foregroundStyle(Theme.onAccent) } }
                     OrderRow(order: order)
                 }

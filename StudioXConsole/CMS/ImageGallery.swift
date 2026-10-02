@@ -50,7 +50,7 @@ struct ImageGallery: View {
                     }
                     .frame(maxWidth: .infinity)
                     .aspectRatio(emptyAspect, contentMode: .fit)
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                    .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(line, style: StrokeStyle(lineWidth: 1, dash: [4, 4])) }
                 }
                 .buttonStyle(.press)
                 .disabled(uploading > 0 || id.isEmpty)
@@ -187,7 +187,7 @@ struct ImageViewer: View {
                 ProgressView()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.ignoresSafeArea())
+            .background { Color.black.ignoresSafeArea() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }

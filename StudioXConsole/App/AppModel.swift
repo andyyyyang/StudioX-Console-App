@@ -74,6 +74,10 @@ final class AppModel {
     var sitePaths: [String: [Route]] = [:]
     var showXena = false
     var toast: Toast?
+    /// 觸覺回饋（RootView 的 sensoryFeedback 看這幾個數字）
+    private(set) var successTick = 0
+    private(set) var warningTick = 0
+    private(set) var errorTick = 0
     /// 訂單頁現在看的網站與狀態（首頁的「等出貨」點進去會設好）
     var ordersSite: String?
     var ordersStatus = "paid"
@@ -264,9 +268,9 @@ final class AppModel {
     func show(_ text: String, tone: Tone = .active) {
         toast = Toast(text: text, tone: tone)
         switch tone {
-        case .danger: Haptics.error()
-        case .warning: Haptics.warning()
-        default: Haptics.success()
+        case .danger: errorTick += 1
+        case .warning: warningTick += 1
+        default: successTick += 1
         }
     }
 

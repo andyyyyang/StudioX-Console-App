@@ -48,7 +48,7 @@ struct XenaChatView: View {
                 }
                 .onAppear { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
-            .background(Theme.sheet.ignoresSafeArea())
+            .background { Theme.sheet.ignoresSafeArea() }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -161,7 +161,7 @@ struct ChipFlow: View {
                         .multilineTextAlignment(.leading)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
-                        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                        .overlay { Capsule().strokeBorder(Theme.line, lineWidth: 1) }
                         .contentShape(Capsule())
                 }
                 .buttonStyle(PressScale(scale: 0.92))
@@ -331,7 +331,7 @@ struct XenaConfirmCard: View {
                         .padding(.horizontal, 12)
                         .frame(height: 38)
                         .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line) }
                 }
                 HStack(spacing: 8) {
                     Button("取消") { onDecide(false, nil) }
@@ -489,7 +489,7 @@ private struct EntityCardView: View {
         .frame(width: 230, alignment: .leading)
         .padding(12)
         .background(Theme.surface, in: .rect(cornerRadius: Metric.xenaCard, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+        .overlay { RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line, lineWidth: 1) }
     }
 }
 
@@ -517,7 +517,7 @@ private struct AskView: View {
                             .font(.system(size: 15))
                             .padding(.horizontal, 12)
                             .frame(height: 38)
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line) }
                         Button("送出") { onAnswer(text) }
                             .buttonStyle(.brand(.primary, size: .lg))
                             .disabled(disabled || text.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -527,7 +527,7 @@ private struct AskView: View {
         }
         .padding(14)
         .background(Theme.soft, in: .rect(cornerRadius: Metric.xenaCard, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line))
+        .overlay { RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line) }
     }
 }
 

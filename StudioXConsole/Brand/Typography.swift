@@ -242,7 +242,7 @@ struct RisingHeadline: View {
                     .opacity(up ? 1 : 0)
                     .animation(Motion.mask.delay(Double(index) * 0.11), value: up)
                     // 遮罩比行高多一點，中文的上下緣不會被切到
-                    .mask(Rectangle().padding(.vertical, -6))
+                    .mask { Rectangle().padding(.vertical, -6) }
             }
         }
         .accessibilityElement(children: .combine)

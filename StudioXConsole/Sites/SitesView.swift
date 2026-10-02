@@ -419,7 +419,7 @@ struct SiteSections: View {
                 HeroIcon(icon, size: 20)
                     .foregroundStyle(Theme.ink)
                     .frame(width: 36, height: 36)
-                    .overlay(RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(Theme.line, lineWidth: 1))
+                    .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(Theme.line, lineWidth: 1) }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .textRole(.h4)

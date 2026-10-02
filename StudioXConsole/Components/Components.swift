@@ -167,7 +167,7 @@ struct SquareIconButtonStyle: ButtonStyle {
             .foregroundStyle(Theme.ink)
             .frame(width: size, height: size)
             .background(configuration.isPressed ? Theme.press : .clear, in: .rect(cornerRadius: Metric.radiusSm))
-            .overlay(RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(Theme.line, lineWidth: 1))
+            .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(Theme.line, lineWidth: 1) }
             .contentShape(.rect)
             .animation(Motion.fast, value: configuration.isPressed)
     }
@@ -197,7 +197,7 @@ struct FilterChip: View {
             .padding(.horizontal, 14)
             .frame(height: 34)
             .background(selected ? Theme.ink : .clear, in: .rect(cornerRadius: Metric.radiusSm))
-            .overlay(RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(selected ? Theme.ink : Theme.line, lineWidth: 1))
+            .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(selected ? Theme.ink : Theme.line, lineWidth: 1) }
             .contentShape(.rect)
         }
         .buttonStyle(.press)
@@ -244,7 +244,7 @@ struct Chip: View {
             .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .overlay(RoundedRectangle(cornerRadius: Metric.chip).strokeBorder(Theme.line, lineWidth: 1))
+            .overlay { RoundedRectangle(cornerRadius: Metric.chip).strokeBorder(Theme.line, lineWidth: 1) }
     }
 }
 
@@ -663,7 +663,7 @@ struct StatGrid<Content: View>: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        let n = columns ?? (sizeClass == .regular ? 4 : 2)
+        let n = max(1, columns ?? (sizeClass == .regular ? 4 : 2))
         Group(subviews: content) { cells in
             let rows = stride(from: 0, to: cells.count, by: n).map { Array(cells[$0..<min($0 + n, cells.count)]) }
             VStack(spacing: 0) {
@@ -812,7 +812,7 @@ struct ErrorNote: View {
             }
         }
         .padding(14)
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Theme.dangerFG.opacity(0.28), lineWidth: 1))
+        .overlay { RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Theme.dangerFG.opacity(0.28), lineWidth: 1) }
     }
 }
 
@@ -996,7 +996,7 @@ struct RemoteImage: View {
                         image.resizable().aspectRatio(contentMode: contentMode)
                             .transition(.opacity)
                     case .failure:
-                        Theme.pageAlt.overlay(Text("✳").font(.brand(18)).foregroundStyle(Theme.faint))
+                        Theme.pageAlt.overlay { Text("✳").font(.brand(18)).foregroundStyle(Theme.faint) }
                     default:
                         Theme.pageAlt.shimmer()
                     }
@@ -1043,10 +1043,3 @@ func markdown(_ text: String) -> AttributedString {
     (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
 }
 
-/// 觸覺回饋（成功、失敗、輕點）
-enum Haptics {
-    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-    static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
-    static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
-    static func tap() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-}

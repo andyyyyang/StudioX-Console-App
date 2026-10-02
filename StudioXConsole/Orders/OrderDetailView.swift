@@ -349,7 +349,7 @@ private struct ShipSheet: View {
                 .buttonStyle(.brand(.accent, size: .lg, fullWidth: true, arrow: true))
             }
             .padding(24)
-            .background(Theme.sheet.ignoresSafeArea())
+            .background { Theme.sheet.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.height(380)])
@@ -398,7 +398,7 @@ private struct RefundSheet: View {
                 .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
             }
             .padding(24)
-            .background(Theme.sheet.ignoresSafeArea())
+            .background { Theme.sheet.ignoresSafeArea() }
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])

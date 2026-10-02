@@ -151,7 +151,7 @@ extension Color {
     }
 
     /// 網站橫幅的底色（#rrggbb 字串）
-    init?(hexString: String) {
+    nonisolated init?(hexString: String) {
         var s = hexString.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }

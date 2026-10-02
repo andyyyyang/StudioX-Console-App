@@ -23,8 +23,9 @@ struct Marquee: View {
         let size: CGFloat = sizeClass == .regular ? 40 : 24
         TimelineView(.animation(paused: reduceMotion || stripWidth == 0)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
-            let loop = stripWidth > 0 ? stripWidth / speed : 1
-            let x = stripWidth > 0 ? -CGFloat(t.truncatingRemainder(dividingBy: loop) / loop) * stripWidth : 0
+            let width = Double(stripWidth)
+            let loop: Double = width > 0 ? width / speed : 1
+            let x: CGFloat = width > 0 ? CGFloat(-(t.truncatingRemainder(dividingBy: loop) / loop) * width) : 0
             HStack(spacing: 0) {
                 strip(size: size)
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
@@ -217,7 +218,7 @@ struct BrandLoader: View {
                 .font(.brand(56, .semibold, relativeTo: .largeTitle))
                 .tracking(-0.06 * 56)
                 .foregroundStyle(Theme.ink)
-                .mask(Rectangle().padding(.vertical, -4))
+                .mask { Rectangle().padding(.vertical, -4) }
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -242,7 +243,7 @@ struct BrandLoader: View {
         .padding(.horizontal, 28)
         .padding(.bottom, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(Theme.page.ignoresSafeArea())
+        .background { Theme.page.ignoresSafeArea() }
         .accessibilityElement()
         .accessibilityLabel(caption ?? "載入中")
         .task {

@@ -76,6 +76,9 @@ struct RootView: View {
             }
         }
         .animation(Motion.spring, value: model.toast)
+        .sensoryFeedback(.success, trigger: model.successTick)
+        .sensoryFeedback(.warning, trigger: model.warningTick)
+        .sensoryFeedback(.error, trigger: model.errorTick)
         .task { await model.start() }
     }
 }
@@ -103,7 +106,7 @@ private struct LoadingScreen: View {
             }
             .padding(28)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background(Theme.page.ignoresSafeArea())
+            .background { Theme.page.ignoresSafeArea() }
         } else {
             BrandLoader(caption: "Xena 正在打開你的網站")
         }

@@ -15,6 +15,7 @@ struct ConfirmSheet: View {
     @State private var busy = false
     @State private var error: String?
     @State private var succeeded = false
+    @State private var failed = 0
     @FocusState private var focused: Bool
 
     private var needsOwner: Bool { proposal.ownerRequestID != nil }
@@ -60,7 +61,7 @@ struct ConfirmSheet: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.sheet.ignoresSafeArea())
+            .background { Theme.sheet.ignoresSafeArea() }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack(spacing: 10) {
                     Button("取消") { dismiss() }
@@ -90,6 +91,7 @@ struct ConfirmSheet: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(busy)
         .sensoryFeedback(.success, trigger: succeeded)
+        .sensoryFeedback(.error, trigger: failed)
         .onAppear { if proposal.typed != nil || needsOwner { focused = true } }
     }
 
@@ -109,7 +111,7 @@ struct ConfirmSheet: View {
                 focused = true
             }
         } catch {
-            Haptics.error()
+            failed += 1
             self.error = error.localizedDescription
         }
     }

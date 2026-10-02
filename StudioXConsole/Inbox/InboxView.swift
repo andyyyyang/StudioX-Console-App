@@ -481,7 +481,7 @@ struct SupportThreadView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.line))
+                    .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.line) }
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     Task { await propose { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
@@ -600,7 +600,7 @@ struct XenaConversationView: View {
                             .padding(.horizontal, 15)
                             .padding(.vertical, 11)
                             .background(Theme.surface, in: .rect(cornerRadius: 16, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line))
+                            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line) }
                             .frame(maxWidth: .infinity, alignment: .leading)
                     default:
                         HStack(alignment: .top, spacing: 10) {

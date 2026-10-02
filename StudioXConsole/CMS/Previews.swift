@@ -133,7 +133,7 @@ struct CouponTicket: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.surface)
         .clipShape(.rect(cornerRadius: Metric.radiusLg, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radiusLg, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+        .overlay { RoundedRectangle(cornerRadius: Metric.radiusLg, style: .continuous).strokeBorder(Theme.line, lineWidth: 1) }
         .opacity(active ? 1 : 0.7)
         .animation(Motion.ease, value: values)
         .accessibilityElement(children: .combine)
@@ -173,7 +173,7 @@ struct SerpPreview: View {
                     Circle()
                         .fill(Theme.press)
                         .frame(width: 26, height: 26)
-                        .overlay(Text(String(host.prefix(1)).uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink2))
+                        .overlay { Text(String(host.prefix(1)).uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink2) }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(host)
                             .font(.system(size: 13))
@@ -196,7 +196,7 @@ struct SerpPreview: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: .rect(cornerRadius: Metric.radiusLg))
-            .overlay(RoundedRectangle(cornerRadius: Metric.radiusLg).strokeBorder(Theme.line, lineWidth: 1))
+            .overlay { RoundedRectangle(cornerRadius: Metric.radiusLg).strokeBorder(Theme.line, lineWidth: 1) }
 
             HStack(spacing: 16) {
                 lengthNote("標題", count: title.count, ideal: 30, max: 60)
