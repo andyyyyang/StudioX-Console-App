@@ -191,6 +191,16 @@ struct OrderDetail {
     var paymentLabel: String
     var note: String?
     var invoiceNumber: String?
+    /// 發票：個人（載具）／公司（統編、抬頭）／捐贈（愛心碼）
+    var invoiceText: String?
+    var trackingNumber: String?
+    /// 貨態（黑貓的「順利送達」或 PAYUNi 的代碼）與更新時間
+    var logisticsStatus: String?
+    var logisticsUpdatedAt: Date?
+    /// 7-11 取貨單號（客人到店出示）
+    var cvsPaymentNo: String?
+    var refundNote: String?
+    var waybillURL: URL?
     var trackURL: URL?
     var packingSlipURL: URL?
     var adminURL: URL?
@@ -225,6 +235,13 @@ struct OrderDetail {
         let rawNote = o["note"]?.string ?? ""
         note = rawNote.isEmpty ? nil : rawNote
         invoiceNumber = o["invoiceNumber"]?.string
+        invoiceText = OrderDetail.invoiceText(o)
+        trackingNumber = o["trackingNumber"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        logisticsStatus = o["logisticsStatus"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        logisticsUpdatedAt = o["logisticsStatusUpdatedAt"]?.date
+        cvsPaymentNo = o["cvsPaymentNo"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        refundNote = o["refundNote"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        waybillURL = o["waybillPdfUrl"]?.string.flatMap(URL.init(string:))
         trackURL = json["trackUrl"]?.string.flatMap(URL.init(string:))
         packingSlipURL = json["packingSlipUrl"]?.string.flatMap(URL.init(string:))
         adminURL = json["adminUrl"]?.string.flatMap(URL.init(string:))
@@ -235,6 +252,27 @@ struct OrderDetail {
                 deadline: b["deadline"]?.date,
                 awaiting: b["awaitingConfirmation"]?.bool ?? false
             )
+        }
+    }
+
+    private static func invoiceText(_ o: JSONValue) -> String? {
+        let v = { (k: String) in o[k]?.string.flatMap { $0.isEmpty ? nil : $0 } }
+        switch v("invoiceType") {
+        case "company":
+            return ["公司戶", v("invoiceTaxId").map { "統編 \($0)" }, v("invoiceTitle")].compactMap { $0 }.joined(separator: "・")
+        case "donation":
+            return "捐贈" + (v("invoiceDonationCode").map { "・愛心碼 \($0)" } ?? "")
+        case "personal":
+            let carrier: String? = switch v("invoiceCarrierType") {
+            case "mobile": "手機條碼"
+            case "natural": "自然人憑證"
+            case "email": "Email 載具"
+            case "payuni": "PAYUNi 會員載具"
+            default: nil
+            }
+            return ["個人", carrier, v("invoiceCarrierCode")].compactMap { $0 }.joined(separator: "・")
+        default:
+            return nil
         }
     }
 
@@ -443,7 +481,9 @@ struct InquirySummary: Identifiable, Hashable {
 
 struct TrafficPoint: Identifiable {
     var id: String { label }
+    /// 10/2、14時
     let label: String
+    let date: Date?
     let visitors: Int
     let pageviews: Int
 }
@@ -452,45 +492,119 @@ struct TrafficTop: Identifiable {
     var id: String { key }
     let key: String
     let visitors: Int
+    let pageviews: Int
 }
 
 struct ChannelShare: Identifiable {
-    var id: String { name }
+    var id: String { key }
+    let key: String
     let name: String
     let visits: Int
 }
 
-/// 流量（traffic_report）
+/// 購物漏斗（黃毛丫頭：進站 → 看商品 → 加入購物車 → 開始結帳 → 送出訂單）
+struct FunnelStep: Identifiable {
+    var id: String { step }
+    let step: String
+    let label: String
+    let visitors: Int
+}
+
+struct FunnelProduct: Identifiable {
+    var id: String { slug }
+    let name: String
+    let slug: String
+    let viewers: Int
+    let adders: Int
+}
+
+/// 內容頁帶來的生意（黃毛丫頭的 contentPages：看了這頁的人有多少去看商品、加購物車、下單）
+struct ContentPageImpact: Identifiable {
+    var id: String { path }
+    let path: String
+    let visitors: Int
+    let viewed: Int
+    let carted: Int
+    let ordered: Int
+}
+
+/// 流量（traffic_report；atelier-cms 與 yellowgirl-website 的 lib/analytics.ts）
 struct TrafficReport {
     var installed: Bool
+    var days: Int
     var live: Int
     var visitors: Int
     var pageviews: Int
+    var visits: Int
+    /// 只看一頁就離開（%）
     var bounceRate: Double?
     var avgDurationMs: Double?
     /// 和前一期比（%）
     var change: Double?
+    var pageviewsChange: Double?
     var trend: [TrafficPoint]
     var pages: [TrafficTop]
+    var entries: [TrafficTop]
     var referrers: [TrafficTop]
+    var countries: [TrafficTop]
+    var devices: [TrafficTop]
+    var browsers: [TrafficTop]
+    var oses: [TrafficTop]
+    var campaigns: [TrafficTop]
     var channels: [ChannelShare]
+    /// [星期一…星期日][0…23 時] 的瀏覽次數（台北時間，isodow）
+    var weekHours: [[Int]]
+    var funnel: [FunnelStep]
+    var funnelPaidOrders: Int?
+    var funnelRevenueCents: Int?
+    var funnelProducts: [FunnelProduct]
+    var contentPages: [ContentPageImpact]
 
     init(_ json: JSONValue) {
         installed = json["installed"]?.bool ?? true
+        days = json["days"]?.int ?? 7
         live = json["live"]?.int ?? 0
         visitors = json["visitors"]?.int ?? 0
         pageviews = json["pageviews"]?.int ?? 0
+        visits = json["visits"]?.int ?? 0
         bounceRate = json["bounceRate"]?.double
         avgDurationMs = json["avgDurationMs"]?.double
         change = json["change"]?["visitors"]?.double
+        pageviewsChange = json["change"]?["pageviews"]?.double
         trend = (json["trend"]?.array ?? []).map {
-            TrafficPoint(label: TrafficReport.shortLabel($0["label"]?.string ?? ""), visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0)
+            let raw = $0["label"]?.string ?? ""
+            return TrafficPoint(label: TrafficReport.shortLabel(raw), date: TrafficReport.day(raw), visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0)
         }
         pages = TrafficReport.tops(json["pages"])
+        entries = TrafficReport.tops(json["entries"])
         referrers = TrafficReport.tops(json["referrers"])
+        countries = TrafficReport.tops(json["countries"])
+        devices = TrafficReport.tops(json["devices"])
+        browsers = TrafficReport.tops(json["browsers"])
+        oses = TrafficReport.tops(json["oses"])
+        campaigns = TrafficReport.tops(json["campaigns"])
         channels = (json["channels"]?.array ?? []).map {
-            ChannelShare(name: TrafficReport.channelLabel($0["channel"]?.string ?? ""), visits: $0["visits"]?.int ?? 0)
+            let key = $0["channel"]?.string ?? ""
+            return ChannelShare(key: key, name: TrafficReport.channelLabel(key), visits: $0["visits"]?.int ?? 0)
         }
+        weekHours = (json["weekHours"]?.array ?? []).map { $0.array.map { $0.int ?? 0 } }
+        let f = json["funnel"] ?? .null
+        funnel = (f["steps"]?.array ?? []).map { FunnelStep(step: $0["step"]?.string ?? "", label: $0["label"]?.string ?? "", visitors: $0["visitors"]?.int ?? 0) }
+        funnelPaidOrders = f["paid"]?["orders"]?.int
+        funnelRevenueCents = f["paid"]?["revenueCents"]?.int
+        funnelProducts = (f["products"]?.array ?? []).map {
+            FunnelProduct(name: $0["name"]?.string ?? "", slug: $0["slug"]?.string ?? UUID().uuidString, viewers: $0["viewers"]?.int ?? 0, adders: $0["adders"]?.int ?? 0)
+        }
+        contentPages = (json["contentPages"]?.array ?? []).map {
+            ContentPageImpact(path: $0["path"]?.string ?? "", visitors: $0["visitors"]?.int ?? 0, viewed: $0["viewed"]?.int ?? 0, carted: $0["carted"]?.int ?? 0, ordered: $0["ordered"]?.int ?? 0)
+        }
+    }
+
+    /// 平均停留：1 分 23 秒
+    var durationText: String? {
+        guard let ms = avgDurationMs else { return nil }
+        let s = Int((ms / 1000).rounded())
+        return s >= 60 ? "\(s / 60) 分 \(s % 60) 秒" : "\(s) 秒"
     }
 
     /// "2026-10-02" → "10/2"；"2026-10-02T14" → "14時"
@@ -503,11 +617,19 @@ struct TrafficReport {
         return "\(Int(parts[1]) ?? 0)/\(Int(parts[2]) ?? 0)"
     }
 
-    private static func tops(_ json: JSONValue?) -> [TrafficTop] {
-        (json?.array ?? []).map { TrafficTop(key: $0["key"]?.string ?? "（直接輸入）", visitors: $0["visitors"]?.int ?? 0) }
+    private static func day(_ raw: String) -> Date? {
+        let parts = raw.split(separator: "T").first?.split(separator: "-").compactMap { Int($0) } ?? []
+        guard parts.count == 3 else { return nil }
+        var c = DateComponents(year: parts[0], month: parts[1], day: parts[2])
+        if raw.contains("T"), let h = raw.split(separator: "T").last.flatMap({ Int($0) }) { c.hour = h }
+        return Calendar.taipei.date(from: c)
     }
 
-    private static func channelLabel(_ raw: String) -> String {
+    private static func tops(_ json: JSONValue?) -> [TrafficTop] {
+        (json?.array ?? []).map { TrafficTop(key: $0["key"]?.string ?? "（直接輸入）", visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0) }
+    }
+
+    static func channelLabel(_ raw: String) -> String {
         switch raw {
         case "direct": "直接輸入"
         case "search": "搜尋引擎"
@@ -516,6 +638,90 @@ struct TrafficReport {
         case "campaign": "行銷活動"
         default: raw
         }
+    }
+
+    static func deviceLabel(_ raw: String) -> String {
+        switch raw {
+        case "mobile": "手機"
+        case "desktop": "電腦"
+        case "tablet": "平板"
+        default: raw
+        }
+    }
+
+    /// TW → 台灣（系統的地區名稱）
+    static func countryName(_ code: String) -> String {
+        Locale(identifier: "zh_Hant_TW").localizedString(forRegionCode: code) ?? code
+    }
+}
+
+/// Google 搜尋成效（search_report；lib/search-console.ts）
+struct SearchReport {
+    struct Row: Identifiable {
+        var id: String { key }
+        let key: String
+        let clicks: Int
+        let impressions: Int
+        /// 0…1
+        let ctr: Double?
+        let position: Double?
+    }
+
+    struct Point: Identifiable {
+        var id: String { label }
+        let label: String
+        let date: Date?
+        let clicks: Int
+        let impressions: Int
+    }
+
+    /// not_connected / ok / error
+    var status: String
+    var note: String?
+    var property: String?
+    var rangeLabel: String?
+    var clicks: Int
+    var impressions: Int
+    var ctr: Double?
+    var position: Double?
+    var clicksChange: Double?
+    var impressionsChange: Double?
+    var trend: [Point]
+    var queries: [Row]
+    var pages: [Row]
+    var countries: [Row]
+
+    init(_ json: JSONValue) {
+        if json["connected"]?.bool == false {
+            status = "not_connected"
+        } else {
+            status = json["status"]?.string ?? "ok"
+        }
+        note = json["note"]?.string ?? json["error"]?.string
+        property = json["property"]?.string
+        if let start = json["range"]?["start"]?.string, let end = json["range"]?["end"]?.string {
+            rangeLabel = "\(start.replacingOccurrences(of: "-", with: "/")) – \(end.replacingOccurrences(of: "-", with: "/"))"
+        }
+        let t = json["totals"] ?? .null
+        clicks = t["clicks"]?.int ?? 0
+        impressions = t["impressions"]?.int ?? 0
+        ctr = t["ctr"]?.double
+        position = t["position"]?.double
+        clicksChange = json["change"]?["clicks"]?.double
+        impressionsChange = json["change"]?["impressions"]?.double
+        trend = (json["trend"]?.array ?? []).map {
+            let raw = $0["label"]?.string ?? ""
+            let parts = raw.split(separator: "-").compactMap { Int($0) }
+            let date = parts.count == 3 ? Calendar.taipei.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) : nil
+            let label = parts.count == 3 ? "\(parts[1])/\(parts[2])" : raw
+            return Point(label: label, date: date, clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0)
+        }
+        let rows = { (v: JSONValue?) in
+            (v?.array ?? []).map { Row(key: $0["key"]?.string ?? "", clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0, ctr: $0["ctr"]?.double, position: $0["position"]?.double) }
+        }
+        queries = rows(json["queries"])
+        pages = rows(json["pages"])
+        countries = rows(json["countries"])
     }
 }
 

@@ -4,111 +4,228 @@ import SwiftUI
 ///   客服信：客人已發言、我們還沒回的（等最久的在前）
 ///   Xena 轉來：網站上的 Xena 判斷要找人、轉給專人的對話
 ///   專案詢問：網站聯絡表單的新詢問
+///   信箱：寄到網站信箱、但不是客服對話的信（第一次寫信來的人、廠商…）
+/// iPad：左邊清單、右邊內容。
 struct InboxView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var picked: Route?
+
+    var body: some View {
+        if sizeClass == .regular {
+            NavigationSplitView {
+                InboxList(picked: $picked)
+                    .navigationSplitViewColumnWidth(min: 340, ideal: 400, max: 480)
+            } detail: {
+                NavigationStack(path: Bindable(model).inboxPath) {
+                    Group {
+                        if let picked {
+                            RouteView(route: picked).id(picked)
+                        } else {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Headline("Pick a *conversation*", role: .h2)
+                                Text("從左邊選一封信或一段對話。")
+                                    .textRole(.small)
+                                    .foregroundStyle(Theme.muted)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .brandPage()
+                        }
+                    }
+                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                }
+            }
+        } else {
+            NavigationStack(path: Bindable(model).inboxPath) {
+                InboxList(picked: nil)
+                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
+            }
+        }
+    }
+}
+
+struct InboxList: View {
+    var picked: Binding<Route?>?
+
+    @Environment(AppModel.self) private var model
     @State private var segment: Segment = .support
+    @State private var mailbox: [(site: String, row: RecordSummary)] = []
+    @State private var mailboxLoaded = false
 
     enum Segment: String, CaseIterable, Identifiable {
-        case support, handoffs, inquiries
+        case support, handoffs, inquiries, mailbox
         var id: Self { self }
     }
 
     var body: some View {
         let b = model.briefing
-        NavigationStack(path: Bindable(model).inboxPath) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Picker("收件匣", selection: $segment) {
-                        Text("客服信 \(b.awaiting.count)").tag(Segment.support)
-                        Text("Xena 轉來 \(b.handoffs.count)").tag(Segment.handoffs)
-                        Text("專案詢問 \(b.inquiries.count)").tag(Segment.inquiries)
-                    }
-                    .pickerStyle(.segmented)
-
-                    switch segment {
-                    case .support: supportList(b.awaiting)
-                    case .handoffs: handoffList(b.handoffs)
-                    case .inquiries: inquiryList(b.inquiries)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Headline("Your *inbox*", role: .h1)
+                    Text(b.updatedAt.map { "\($0.clockText) 更新・下拉重新整理" } ?? "Xena 正在看各網站…")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
                 }
-                .padding(.horizontal, Metric.gutter)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
+                FilterBar(items: segments, selection: $segment, title: { title($0) }, count: { count($0) })
+                switch segment {
+                case .support: supportList(b.awaiting)
+                case .handoffs: handoffList(b.handoffs)
+                case .inquiries: inquiryList(b.inquiries)
+                case .mailbox: mailboxList
+                }
             }
-            .refreshable { [model] in await model.refreshAll() }
-            .admPage()
-            .navigationTitle("收件匣")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: Route.self) { RouteView(route: $0) }
+            .pageWidth()
+            .padding(.top, 16)
+            .padding(.bottom, 48)
+        }
+        .refreshable { [model] in await model.refreshAll() }
+        .brandPage()
+        .navigationTitle("收件匣")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: segment) {
+            if segment == .mailbox { await loadMailbox() }
+        }
+    }
+
+    private var segments: [Segment] {
+        var out: [Segment] = [.support]
+        if model.sites.contains(where: { $0.tools.contains("list") && !$0.hasOrders }) || !model.briefing.handoffs.isEmpty { out.append(.handoffs) }
+        if model.sites.contains(where: { !$0.hasOrders }) || !model.briefing.inquiries.isEmpty { out.append(.inquiries) }
+        if !model.supportSites.isEmpty { out.append(.mailbox) }
+        return out
+    }
+
+    private func title(_ s: Segment) -> String {
+        switch s {
+        case .support: "客服信"
+        case .handoffs: "Xena 轉來"
+        case .inquiries: "專案詢問"
+        case .mailbox: "信箱"
+        }
+    }
+
+    private func count(_ s: Segment) -> Int? {
+        switch s {
+        case .support: model.briefing.awaiting.count
+        case .handoffs: model.briefing.handoffs.count
+        case .inquiries: model.briefing.inquiries.count
+        case .mailbox: mailboxLoaded ? mailbox.count : nil
+        }
+    }
+
+    private func loadMailbox() async {
+        var out: [(site: String, row: RecordSummary)] = []
+        for site in model.supportSites {
+            do {
+                let r = try await model.api.list(site: site.id, entity: "mailbox", filters: ["limit": 50])
+                out += r.rows.map { (site.id, $0) }
+            } catch {
+                // 這個網站沒有信箱（或不給看）：略過
+            }
+        }
+        mailbox = out.sorted { ($0.row.date ?? .distantPast) > ($1.row.date ?? .distantPast) }
+        mailboxLoaded = true
+    }
+
+    /// 點一列：手機推下一頁，iPad 在右邊打開
+    @ViewBuilder
+    private func open<Label: View>(_ route: Route, @ViewBuilder label: () -> Label) -> some View {
+        if let picked {
+            Button {
+                picked.wrappedValue = route
+                model.inboxPath = []
+            } label: {
+                label()
+                    .padding(.horizontal, 10)
+                    .background(picked.wrappedValue == route ? Theme.accentSoft : .clear)
+            }
+            .buttonStyle(.row)
+        } else {
+            NavigationLink(value: route) { label() }
+                .buttonStyle(.row)
         }
     }
 
     @ViewBuilder
     private func supportList(_ threads: [SupportThreadSummary]) -> some View {
         if threads.isEmpty {
-            empty("客人都回覆過了", "有新的客服信會出現在這裡。")
+            EmptyState(title: "客人都回覆過了", message: "有新的客服信會出現在這裡。")
         } else {
-            VStack(spacing: 0) {
+            RuledList {
                 ForEach(Array(threads.enumerated()), id: \.element.id) { index, t in
-                    if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 60) }
-                    NavigationLink(value: Route.thread(site: t.site, id: t.id)) {
-                        InboxRow(
-                            name: t.customer, title: t.subject, at: nil,
-                            badges: badges(for: t),
-                            site: model.site(t.site)
-                        )
+                    open(.thread(site: t.site, id: t.id)) {
+                        InboxRow(name: t.customer, title: t.subject, at: nil, badges: badges(for: t), site: model.site(t.site))
                     }
-                    .buttonStyle(RowPressStyle())
+                    .reveal(index)
                 }
             }
-            .admCard(padding: 0)
         }
     }
 
     private func badges(for t: SupportThreadSummary) -> [(String, Tone)] {
         var out: [(String, Tone)] = [(t.categoryLabel, Tone.neutral)]
         if let hours = t.waitingHours { out.append(("等了 \(Briefing.hours(hours))", Tone.warning)) }
+        if let n = t.orderNumber { out.append(("#\(n)", Tone.gold)) }
         return out
     }
 
     @ViewBuilder
     private func handoffList(_ items: [XenaConversationSummary]) -> some View {
         if items.isEmpty {
-            empty("沒有轉給專人的對話", "Xena 判斷需要真人時，對話會出現在這裡。")
+            EmptyState(title: "沒有轉給專人的對話", message: "Xena 判斷需要真人時，對話會出現在這裡。")
         } else {
-            VStack(spacing: 0) {
+            RuledList {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, c in
-                    if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 60) }
-                    NavigationLink(value: Route.xenaConversation(site: c.site, id: c.id)) {
+                    open(.xenaConversation(site: c.site, id: c.id)) {
                         InboxRow(
                             name: c.contactName ?? "訪客", title: c.firstQuestion ?? "（\(c.turns) 句對話）", at: c.at,
                             badges: [(c.statusLabel, c.tone)] + c.tags.prefix(2).map { (String($0), Tone.neutral) },
                             site: model.site(c.site)
                         )
                     }
-                    .buttonStyle(RowPressStyle())
+                    .reveal(index)
                 }
             }
-            .admCard(padding: 0)
         }
     }
 
     @ViewBuilder
     private func inquiryList(_ items: [InquirySummary]) -> some View {
         if items.isEmpty {
-            empty("沒有新的專案詢問", "網站聯絡表單送出的詢問會出現在這裡。")
+            EmptyState(title: "沒有新的專案詢問", message: "網站聯絡表單送出的詢問會出現在這裡。")
         } else {
-            VStack(spacing: 12) {
-                ForEach(items) { q in
-                    InquiryCard(inquiry: q, site: model.site(q.site))
+            RuledList {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, q in
+                    InquiryRow(inquiry: q, site: model.site(q.site))
+                        .reveal(index)
                 }
             }
         }
     }
 
-    private func empty(_ title: String, _ message: String) -> some View {
-        EmptyState(icon: "inbox", title: title, message: message)
-            .admCard(padding: 0)
+    @ViewBuilder
+    private var mailboxList: some View {
+        if !mailboxLoaded {
+            SkeletonRows(rows: 4)
+        } else if mailbox.isEmpty {
+            EmptyState(title: "信箱是空的", message: "寄到網站信箱、但不是客服對話的信會出現在這裡。")
+        } else {
+            RuledList {
+                ForEach(Array(mailbox.enumerated()), id: \.element.row.id) { index, item in
+                    open(.record(site: item.site, entity: "mailbox", id: item.row.id)) {
+                        InboxRow(
+                            name: item.row.raw["from"]?.string ?? "寄件人",
+                            title: item.row.title,
+                            at: item.row.date,
+                            badges: [(item.row.badge ?? "", item.row.tone), (item.row.raw["attachmentCount"]?.int.flatMap { $0 > 0 ? "附件 \($0)" : nil } ?? "", Tone.neutral)],
+                            site: model.site(item.site)
+                        )
+                    }
+                    .reveal(index)
+                }
+            }
+        }
     }
 }
 
@@ -121,24 +238,24 @@ private struct InboxRow: View {
     let site: SiteSummary?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Avatar(name: name, size: 36)
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: 14) {
+            Avatar(name: name, size: 38)
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(name)
-                        .font(.admCardTitle)
+                        .textRole(.h4)
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     if let at {
-                        Text(at.shortText)
-                            .font(.admMeta)
-                            .foregroundStyle(Theme.inkMuted)
+                        Text(at.relativeText)
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.muted)
                     }
                 }
                 Text(title)
-                    .font(.admBody)
-                    .foregroundStyle(Theme.inkMuted)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.ink2)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 HStack(spacing: 6) {
@@ -148,61 +265,60 @@ private struct InboxRow: View {
                     Spacer(minLength: 0)
                     if let site {
                         SiteIconView(site: site, size: 18)
-                        Text(site.name).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.inkMuted)
+                        Text(site.name)
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.muted)
                     }
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .padding(.vertical, 16)
+        .contentShape(.rect)
     }
 }
 
 /// 一筆專案詢問（atelier-cms 的 inquiry）：誰、哪家公司、想做什麼、預算；回覆用 Email
-private struct InquiryCard: View {
+private struct InquiryRow: View {
     let inquiry: InquirySummary
     let site: SiteSummary?
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
                 Text([inquiry.name, inquiry.company].compactMap { $0 }.joined(separator: "・"))
-                    .font(.admCardTitle)
+                    .textRole(.h4)
                     .foregroundStyle(Theme.ink)
                 Spacer()
                 if let at = inquiry.at {
-                    Text(at.shortText).font(.admMeta).foregroundStyle(Theme.inkMuted)
+                    Text(at.relativeText).textRole(.xs).foregroundStyle(Theme.muted)
                 }
             }
             if !inquiry.types.isEmpty || inquiry.budget != nil {
-                HStack(spacing: 6) {
-                    ForEach(inquiry.types, id: \.self) { StatusBadge($0, tone: .gold) }
-                    if let budget = inquiry.budget { StatusBadge(budget, tone: .neutral) }
+                FlowLayout(spacing: 6) {
+                    ForEach(inquiry.types, id: \.self) { Chip($0) }
+                    if let budget = inquiry.budget { StatusBadge(budget, tone: .gold) }
                 }
             }
             if let message = inquiry.message {
                 Text(message)
-                    .font(.admBody)
-                    .foregroundStyle(Theme.inkMuted)
-                    .lineLimit(5)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.ink2)
+                    .lineLimit(6)
             }
             HStack(spacing: 10) {
                 if let mail = URL(string: "mailto:\(inquiry.email)") {
-                    Button { openURL(mail) } label: {
-                        Label { Text("回信") } icon: { HeroIcon("envelope", size: 16) }
-                    }
-                    .buttonStyle(.adm(.secondary, size: .md))
+                    Button { openURL(mail) } label: { Text("回信") }
+                        .buttonStyle(.brand(.ghost, size: .sm, arrow: true))
                 }
                 Spacer()
                 if let site {
                     SiteIconView(site: site, size: 18)
-                    Text(site.name).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.inkMuted)
+                    Text(site.name).textRole(.xs).foregroundStyle(Theme.muted)
                 }
             }
         }
-        .admCard()
+        .padding(.vertical, 18)
     }
 }
 
@@ -224,7 +340,7 @@ struct SupportThreadView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 18) {
                     if let d = detail {
                         summary(d)
                         ForEach(d.messages) { m in
@@ -234,11 +350,12 @@ struct SupportThreadView: View {
                     } else if let error {
                         ErrorNote(message: error) { Task { await load() } }
                     } else {
-                        LoadingRow().admCard(padding: 0)
+                        SkeletonRows(rows: 4)
                     }
                 }
-                .padding(.horizontal, Metric.gutter)
-                .padding(.top, 8)
+                .frame(maxWidth: Metric.readable, alignment: .leading)
+                .pageWidth()
+                .padding(.top, 16)
                 .padding(.bottom, 16)
             }
             .defaultScrollAnchor(.bottom)
@@ -247,29 +364,23 @@ struct SupportThreadView: View {
                 if let last = detail?.messages.last?.id { proxy.scrollTo(last, anchor: .bottom) }
             }
         }
-        .admPage()
+        .brandPage()
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .navigationTitle(detail?.summary.customer ?? "客服信")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { model.askXena("幫我擬一封回覆給\(model.site(site)?.name ?? site)的客服信「\(detail?.summary.subject ?? "")」（\(threadID)）") } label: {
-                        Label { Text("請 Xena 擬回覆") } icon: { HeroIcon("sparkles") }
+                    Button("請 Xena 擬回覆") {
+                        model.askXena("幫我擬一封回覆給\(model.site(site)?.name ?? site)的客服信「\(detail?.summary.subject ?? "")」（\(threadID)）")
                     }
                     if detail?.summary.status != "closed" {
-                        Button { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "closed") } } } label: {
-                            Label { Text("結案") } icon: { HeroIcon("check-circle") }
-                        }
+                        Button("結案") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "closed") } } }
                     } else {
-                        Button { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "open") } } } label: {
-                            Label { Text("重新打開") } icon: { HeroIcon("arrow-path") }
-                        }
+                        Button("重新打開") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "open") } } }
                     }
                     if let url = detail?.adminURL {
-                        Button { openURL(url) } label: {
-                            Label { Text("在後台打開") } icon: { HeroIcon("arrow-top-right-on-square") }
-                        }
+                        Button("在後台打開") { openURL(url) }
                     }
                 } label: { HeroIcon("ellipsis-horizontal") }
             }
@@ -316,80 +427,80 @@ struct SupportThreadView: View {
     }
 
     private func summary(_ d: SupportThreadDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(d.summary.subject)
-                .font(.admSection)
-                .foregroundStyle(Theme.ink)
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
+            Eyebrow(model.site(site)?.name ?? site)
+            Headline(d.summary.subject, role: .h3)
+            FlowLayout(spacing: 6) {
                 StatusBadge(d.summary.statusLabel, tone: d.summary.tone)
                 if !d.summary.categoryLabel.isEmpty { StatusBadge(d.summary.categoryLabel) }
                 if let n = d.summary.orderNumber { StatusBadge("#\(n)", tone: .gold) }
             }
-            HStack(spacing: 6) {
-                Text(d.contactEmail)
-                if let name = d.memberName {
-                    Text("・會員 \(name)" + (d.memberTier.map { "（\($0)）" } ?? ""))
-                }
-            }
-            .font(.admMeta)
-            .foregroundStyle(Theme.inkMuted)
-            .lineLimit(1)
+            Text([d.contactEmail, d.memberName.map { "會員 \($0)" + (d.memberTier.map { "（\($0)）" } ?? "") }, d.memberSpend.map { "累積 \($0)" }].compactMap { $0 }.joined(separator: "・"))
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+                .lineLimit(2)
         }
-        .admCard()
+        .padding(.bottom, 8)
     }
 
     private func orders(_ d: SupportThreadDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FieldLabel("這位客人的訂單")
-            ForEach(d.orders) { o in
-                Button { model.open(.order(site: site, id: o.id)) } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("#\(o.number)").font(.system(.subheadline, weight: .semibold).monospacedDigit())
-                            Text(o.items).font(.admMeta).foregroundStyle(Theme.inkMuted).lineLimit(1)
+        VStack(alignment: .leading, spacing: 12) {
+            Eyebrow("這位客人的訂單")
+            RuledList {
+                ForEach(d.orders) { o in
+                    Button { model.open(.order(site: site, id: o.id)) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("#\(o.number)").font(.brand(15, .medium).monospacedDigit())
+                                Text(o.items).textRole(.xs).foregroundStyle(Theme.muted).lineLimit(1)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(o.totalLabel).font(.brand(15, .medium).monospacedDigit())
+                                Text(o.statusLabel).textRole(.xs).foregroundStyle(Theme.muted)
+                            }
                         }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(o.totalLabel).font(.system(.footnote).monospacedDigit())
-                            Text(o.statusLabel).font(.admMeta).foregroundStyle(Theme.inkMuted)
-                        }
+                        .foregroundStyle(Theme.ink)
+                        .padding(.vertical, 12)
+                        .contentShape(.rect)
                     }
-                    .foregroundStyle(Theme.ink)
+                    .buttonStyle(.row)
                 }
-                .buttonStyle(.plain)
             }
         }
-        .admCard()
+        .padding(.top, 12)
     }
 
     private var composer: some View {
         VStack(spacing: 8) {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("回覆客人…", text: $draft, axis: .vertical)
-                    .font(.system(size: 16))
+                    .fieldText()
                     .lineLimit(1...8)
                     .focused($focused)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.ink.opacity(0.3) : Theme.line))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.line))
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     Task { await propose { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
                 } label: {
-                    HeroIcon("paper-airplane", size: 18)
-                        .foregroundStyle(Theme.onPrimary)
+                    Text("→")
+                        .font(.brand(20, .medium))
+                        .foregroundStyle(Theme.onAccent)
                         .frame(width: 40, height: 40)
-                        .background(Theme.primary, in: .circle)
+                        .background(Theme.accent, in: .circle)
                 }
-                .buttonStyle(PressScale())
+                .buttonStyle(.press)
                 .disabled(working || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
+                .keyboardShortcut(.return, modifiers: .command)
                 .accessibilityLabel("寄出")
             }
             if focused || !draft.isEmpty {
                 Toggle(isOn: $closeAfter) {
-                    Text("寄出後結案").font(.admMeta).foregroundStyle(Theme.inkMuted)
+                    Text("寄出後結案").textRole(.xs).foregroundStyle(Theme.muted)
                 }
                 .toggleStyle(.switch)
                 .tint(Theme.primary)
@@ -399,52 +510,58 @@ struct SupportThreadView: View {
         .padding(.top, 10)
         .padding(.bottom, 12)
         .background(Theme.sheet)
-        .overlay(alignment: .top) { Theme.line.frame(height: 1) }
-        .animation(.smooth, value: focused)
+        .overlay(alignment: .top) { Rule() }
+        .animation(Motion.ease, value: focused)
     }
 }
 
-/// 客服信的一則訊息：客人在左（白卡）、我們在右（主色）
+/// 客服信的一則訊息：客人在左（白卡）、我們在右（品牌橘）
 private struct MessageBubble: View {
     let message: SupportMessage
 
     var body: some View {
         HStack {
-            if !message.fromCustomer { Spacer(minLength: 40) }
-            VStack(alignment: message.fromCustomer ? .leading : .trailing, spacing: 4) {
+            if !message.fromCustomer { Spacer(minLength: 48) }
+            VStack(alignment: message.fromCustomer ? .leading : .trailing, spacing: 5) {
                 Text("\(message.author)・\(message.at?.shortText ?? "")")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.inkMuted)
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
                 if !message.body.isEmpty {
                     Text(message.body)
-                        .font(.system(size: 15))
-                        .foregroundStyle(message.fromCustomer ? Theme.ink : Theme.onPrimary)
+                        .textRole(.body)
+                        .foregroundStyle(message.fromCustomer ? Theme.ink : Theme.onAccent)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 11)
                         .background(
-                            message.fromCustomer ? Theme.surface : Theme.primary,
+                            message.fromCustomer ? Theme.surface : Theme.accent,
                             in: UnevenRoundedRectangle(
-                                topLeadingRadius: 18,
-                                bottomLeadingRadius: message.fromCustomer ? 6 : 18,
-                                bottomTrailingRadius: message.fromCustomer ? 18 : 6,
-                                topTrailingRadius: 18,
+                                topLeadingRadius: 16,
+                                bottomLeadingRadius: message.fromCustomer ? 4 : 16,
+                                bottomTrailingRadius: message.fromCustomer ? 16 : 4,
+                                topTrailingRadius: 16,
                                 style: .continuous
                             )
                         )
+                        .overlay {
+                            if message.fromCustomer {
+                                UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16, style: .continuous)
+                                    .strokeBorder(Theme.line, lineWidth: 1)
+                            }
+                        }
                 }
                 ForEach(message.attachments, id: \.self) { name in
-                    Label { Text(name) } icon: { HeroIcon("document-text", size: 14) }
-                        .font(.admMeta)
-                        .foregroundStyle(Theme.inkMuted)
+                    Text("📎 \(name)")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
                 }
                 if let error = message.emailError, !error.isEmpty {
                     Text("信沒寄出：\(error)")
-                        .font(.admMeta)
+                        .textRole(.xs)
                         .foregroundStyle(Theme.dangerFG)
                 }
             }
-            if message.fromCustomer { Spacer(minLength: 40) }
+            if message.fromCustomer { Spacer(minLength: 48) }
         }
     }
 }
@@ -462,49 +579,50 @@ struct XenaConversationView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
+                Eyebrow("\(model.site(site)?.name ?? site)・網站上的 Xena")
                 if let error {
                     ErrorNote(message: error) { Task { await load() } }
                 } else if !loaded {
-                    LoadingRow().admCard(padding: 0)
+                    SkeletonRows(rows: 4)
                 }
                 ForEach(messages) { m in
                     switch m.role {
                     case "event":
                         Text(m.content)
-                            .font(.admMeta)
+                            .textRole(.xs)
                             .foregroundStyle(Theme.faint)
                             .frame(maxWidth: .infinity)
                     case "user":
                         Text(m.content)
-                            .font(.system(size: 15))
+                            .textRole(.body)
                             .foregroundStyle(Theme.ink)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(Theme.surface, in: .rect(cornerRadius: 18, style: .continuous))
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 11)
+                            .background(Theme.surface, in: .rect(cornerRadius: 16, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     default:
-                        HStack(alignment: .top, spacing: 8) {
-                            if m.role == "assistant" { OrbIcon(size: 18).padding(.top, 2) } else { Avatar(name: m.author ?? "專人", size: 20) }
+                        HStack(alignment: .top, spacing: 10) {
+                            if m.role == "assistant" { OrbIcon(size: 20).padding(.top, 2) } else { Avatar(name: m.author ?? "專人", size: 22) }
                             Text(markdown(m.content))
-                                .font(.system(size: 15))
+                                .textRole(.body)
                                 .foregroundStyle(Theme.ink)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
                 if loaded, let admin = model.site(site)?.adminURL {
-                    Button { openURL(admin) } label: {
-                        Label { Text("到後台接手回覆") } icon: { HeroIcon("arrow-top-right-on-square", size: 16) }
-                    }
-                    .buttonStyle(.adm(.secondary, size: .lg, fullWidth: true))
-                    .padding(.top, 8)
+                    Button { openURL(admin) } label: { Text("到後台接手回覆 ↗") }
+                        .buttonStyle(.brand(.ghost, size: .lg, fullWidth: true))
+                        .padding(.top, 8)
                 }
             }
-            .padding(.horizontal, Metric.gutter)
-            .padding(.vertical, 8)
+            .frame(maxWidth: Metric.readable, alignment: .leading)
+            .pageWidth()
+            .padding(.vertical, 16)
         }
-        .admPage()
+        .brandPage()
         .navigationTitle("Xena 的對話")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }

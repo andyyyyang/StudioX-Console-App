@@ -34,8 +34,12 @@ extension ConsoleAPI {
         do {
             let r = try await tool("list", site: site, ["entity": "assistant_conversation", "limit": 40])
             return (r["items"]?.array ?? []).map { XenaConversationSummary(site: site, $0) }
-        } catch APIError.tool {
-            return []
+        } catch let error as APIError {
+            // 這個網站沒有這種資料（或不給看）：當作沒有
+            switch error {
+            case .tool, .rpc, .scope: return []
+            default: throw error
+            }
         }
     }
 
@@ -53,8 +57,12 @@ extension ConsoleAPI {
             if let status { args["status"] = .string(status) }
             let r = try await tool("list", site: site, args)
             return (r["items"]?.array ?? []).map { InquirySummary(site: site, $0) }
-        } catch APIError.tool {
-            return []
+        } catch let error as APIError {
+            // 這個網站沒有這種資料（或不給看）：當作沒有
+            switch error {
+            case .tool, .rpc, .scope: return []
+            default: throw error
+            }
         }
     }
 
@@ -68,7 +76,81 @@ extension ConsoleAPI {
         OpsReport(try await tool("ops_report", site: site, ["section": "orders", "days": .number(Double(days))]))
     }
 
+    /// Google 搜尋成效（days：往回幾天，預設 28）
+    func searchReport(site: String, days: Int = 28) async throws -> SearchReport {
+        SearchReport(try await tool("search_report", site: site, ["days": .number(Double(days))]))
+    }
+
+    // MARK: 內容與資料（網站後台的 list / get，照 /api/app/schema 的實體）
+
+    /// 一種資料的清單（篩選：query、publishedOnly、activeOnly、status、limit）
+    func list(site: String, entity: String, query: String? = nil, filters: [String: JSONValue] = [:]) async throws -> (rows: [RecordSummary], raw: JSONValue) {
+        var args = filters
+        args["entity"] = .string(entity)
+        if let query, !query.isEmpty { args["query"] = .string(query) }
+        let r = try await tool("list", site: site, args)
+        return (RecordSummary.rows(in: r, entity: entity), r)
+    }
+
+    /// 一筆的完整內容（每種資料的形狀不一樣，畫面自己挑）
+    func get(site: String, entity: String, id: String?) async throws -> JSONValue {
+        var args: [String: JSONValue] = ["entity": .string(entity)]
+        if let id { args["id"] = .string(id) }
+        return try await tool("get", site: site, args)
+    }
+
+    /// 跨訂單、會員、折價券、商品搜尋（有商店的網站）
+    func search(site: String, query: String) async throws -> JSONValue {
+        try await tool("search", site: site, ["query": .string(query)])
+    }
+
     // MARK: 寫（回提案，確認後才執行）
+
+    /// 修改一筆：只送改過的欄位（網站會列出「舊 → 新」讓你確認）
+    func proposeUpdate(site: String, entity: String, id: String?, fields: [String: JSONValue]) async throws -> WriteOutcome {
+        var args: [String: JSONValue] = ["entity": .string(entity), "fields": .object(fields)]
+        if let id { args["id"] = .string(id) }
+        return try await propose("update", site: site, args)
+    }
+
+    /// 新增一筆
+    func proposeCreate(site: String, entity: String, fields: [String: JSONValue]) async throws -> WriteOutcome {
+        try await propose("create", site: site, ["entity": .string(entity), "fields": .object(fields)])
+    }
+
+    /// 刪除一筆（要打字確認：刪除、刪除商品…）
+    func proposeDelete(site: String, entity: String, id: String) async throws -> WriteOutcome {
+        try await propose("delete", site: site, ["entity": .string(entity), "id": .string(id)])
+    }
+
+    /// 圖片：移除、換主圖、整體重排（網站會列出前後張數讓你確認）
+    func proposeImages(site: String, entity: String, id: String, remove: [String]? = nil, setCover: String? = nil, order: [String]? = nil) async throws -> WriteOutcome {
+        var args: [String: JSONValue] = ["entity": .string(entity), "id": .string(id)]
+        if let remove { args["remove"] = .array(remove.map { .string($0) }) }
+        if let setCover { args["setCover"] = .string(setCover) }
+        if let order { args["images"] = .array(order.map { .string($0) }) }
+        return try await propose("set_images", site: site, args)
+    }
+
+    /// 上傳圖片：先跟網站要一次性的上傳連結（30 分鐘、一次），再把檔案送過去
+    func uploadImage(site: String, entity: String, id: String, data: Data, mime: String, position: Int? = nil) async throws -> [String] {
+        var args: [String: JSONValue] = ["entity": .string(entity), "id": .string(id), "requestUpload": true]
+        if let position { args["position"] = .number(Double(position)) }
+        let r = try await tool("set_images", site: site, args)
+        guard let link = r["uploadUrl"]?.string.flatMap(URL.init(string:)) else { throw APIError.tool("網站沒有給上傳連結") }
+        let ext = mime.split(separator: "/").last.map(String.init)?.replacingOccurrences(of: "jpeg", with: "jpg") ?? "jpg"
+        return try await upload(to: link, data: data, mime: mime, filename: "studiox-app.\(ext)")
+    }
+
+    /// 發折價券給會員（每人一張一次性的券，排入通知）
+    func proposeIssueCoupons(site: String, userIDs: [String], fields: [String: JSONValue]) async throws -> WriteOutcome {
+        try await propose("issue_coupons", site: site, ["userIds": .array(userIDs.map { .string($0) }), "fields": .object(fields)])
+    }
+
+    /// 確認收到匯款（要打「確認收款」；只有看過帳單才能按）
+    func proposeConfirmTransfer(site: String, orderID: String) async throws -> WriteOutcome {
+        try await propose("confirm_bank_transfer", site: site, ["id": .string(orderID)])
+    }
 
     /// 改一張訂單：狀態、物流單號
     func proposeOrderUpdate(site: String, id: String, status: String? = nil, trackingNumber: String? = nil) async throws -> WriteOutcome {

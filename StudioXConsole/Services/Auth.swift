@@ -2,6 +2,7 @@ import AuthenticationServices
 import CryptoKit
 import Foundation
 import Security
+import SwiftUI
 
 /// console 的網址與 App 的 OAuth client（atelier-cms 的 src/lib/oauth.ts 的 APP_CLIENT_ID）
 enum ConsoleConfig {
@@ -62,7 +63,7 @@ enum Auth {
         let callback: URL
         do {
             // 和 Safari 共用登入狀態：已經在 Safari 登入過 console 就不用再打密碼
-            callback = try await session.authenticate(using: c.url!, callbackURLScheme: ConsoleConfig.callbackScheme, preferredBrowserSession: .shared)
+            callback = try await session.authenticate(using: c.url!, callback: .customScheme(ConsoleConfig.callbackScheme), preferredBrowserSession: .shared, additionalHeaderFields: [:])
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             throw AuthError.cancelled
         }

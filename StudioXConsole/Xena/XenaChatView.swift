@@ -20,7 +20,7 @@ struct XenaChatView: View {
                         if let problem = session.problem {
                             Text(problem)
                                 .font(.system(size: 13))
-                                .foregroundStyle(Theme.inkMuted)
+                                .foregroundStyle(Theme.muted)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 10)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -61,7 +61,7 @@ struct XenaChatView: View {
                                 .foregroundStyle(Theme.ink)
                             Text(session.isBusy ? session.mood.label : (session.threadTitle ?? "你的店長"))
                                 .font(.system(size: 12))
-                                .foregroundStyle(Theme.inkMuted)
+                                .foregroundStyle(Theme.muted)
                                 .lineLimit(1)
                         }
                     }
@@ -93,7 +93,7 @@ struct XenaChatView: View {
             Text("我是 Xena，你的店長。問我任何網站的事，或請我動手處理——要改東西之前，我一定先問你。")
                 .font(.system(size: 15))
                 .lineSpacing(4)
-                .foregroundStyle(Theme.inkMuted)
+                .foregroundStyle(Theme.muted)
             ChipFlow(items: XenaSession.starters) { session.send($0) }
         }
         .padding(.vertical, 8)
@@ -132,7 +132,7 @@ struct XenaChatView: View {
                 .frame(width: 40, height: 40)
                 .background(Theme.primary, in: .circle)
             }
-            .buttonStyle(PressScale())
+            .buttonStyle(PressScale(scale: 0.92))
             .disabled(!session.isBusy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .opacity(!session.isBusy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
             .accessibilityLabel(session.isBusy ? "停止" : "送出")
@@ -142,15 +142,6 @@ struct XenaChatView: View {
         .padding(.bottom, 12)
         .background(Theme.sheet)
         .overlay(alignment: .top) { Theme.line.frame(height: 1) }
-    }
-}
-
-/// 按下微縮（.cp-send:active）
-struct PressScale: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
@@ -173,7 +164,7 @@ struct ChipFlow: View {
                         .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
                         .contentShape(Capsule())
                 }
-                .buttonStyle(PressScale())
+                .buttonStyle(PressScale(scale: 0.92))
                 .disabled(disabled)
             }
         }
@@ -320,14 +311,14 @@ struct XenaConfirmCard: View {
             Text(card.danger ? "危險動作・要你確認" : "要你確認")
                 .font(.system(size: 11.5, weight: .semibold))
                 .tracking(0.46)
-                .foregroundStyle(card.danger ? Theme.dangerFG : Theme.inkMuted)
+                .foregroundStyle(card.danger ? Theme.dangerFG : Theme.muted)
             Text(card.title)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.ink)
             Text(card.detail)
                 .font(.system(size: 13))
                 .lineSpacing(3)
-                .foregroundStyle(Theme.inkMuted)
+                .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
 
             switch card.status {
@@ -366,9 +357,9 @@ struct XenaConfirmCard: View {
             case .failed:
                 result(card.result ?? "沒有成功", color: Theme.dangerFG)
             case .cancelled:
-                result(card.result ?? "取消了，什麼都沒改", color: Theme.inkMuted)
+                result(card.result ?? "取消了，什麼都沒改", color: Theme.muted)
             case .expired:
-                result(card.result ?? "這張確認卡已經過期", color: Theme.inkMuted)
+                result(card.result ?? "這張確認卡已經過期", color: Theme.muted)
             }
         }
         .padding(14)
@@ -425,13 +416,13 @@ private struct CardsRow: View {
                 Text(title)
                     .font(.system(size: 11.5, weight: .semibold))
                     .tracking(0.46)
-                    .foregroundStyle(Theme.inkMuted)
+                    .foregroundStyle(Theme.muted)
             }
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
                     ForEach(item.cards, id: \.self) { card in
                         Button { open(card) } label: { EntityCardView(card: card) }
-                            .buttonStyle(PressScale())
+                            .buttonStyle(PressScale(scale: 0.92))
                     }
                 }
             }
@@ -470,7 +461,7 @@ private struct EntityCardView: View {
             HStack {
                 Text(card.kind)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.inkMuted)
+                    .foregroundStyle(Theme.muted)
                 Spacer(minLength: 6)
                 if let badge = card.badge {
                     StatusBadge(badge.label, tone: Tone(card: badge.tone))
@@ -483,7 +474,7 @@ private struct EntityCardView: View {
             if let subtitle = card.subtitle {
                 Text(subtitle)
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.inkMuted)
+                    .foregroundStyle(Theme.muted)
                     .lineLimit(1)
             }
             ForEach(card.fields.prefix(3), id: \.self) { field in
@@ -496,7 +487,9 @@ private struct EntityCardView: View {
             }
         }
         .frame(width: 230, alignment: .leading)
-        .admCard(padding: 12)
+        .padding(12)
+        .background(Theme.surface, in: .rect(cornerRadius: Metric.xenaCard, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Metric.xenaCard, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
     }
 }
 
@@ -515,7 +508,7 @@ private struct AskView: View {
             if let answer = ask.answer {
                 Label { Text(answer) } icon: { HeroIcon("check", size: 14) }
                     .font(.system(size: 13))
-                    .foregroundStyle(Theme.inkMuted)
+                    .foregroundStyle(Theme.muted)
             } else {
                 ChipFlow(items: ask.options, disabled: disabled, onTap: onAnswer)
                 if ask.allowText {
@@ -526,7 +519,7 @@ private struct AskView: View {
                             .frame(height: 38)
                             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
                         Button("送出") { onAnswer(text) }
-                            .buttonStyle(.adm(.primary, size: .lg))
+                            .buttonStyle(.brand(.primary, size: .lg))
                             .disabled(disabled || text.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
@@ -557,7 +550,7 @@ private struct ThinkingRow: View {
             Text("Xena 正在查…")
         }
         .font(.system(size: 12.5))
-        .foregroundStyle(Theme.inkMuted)
+        .foregroundStyle(Theme.muted)
     }
 }
 
@@ -576,13 +569,13 @@ private struct ThreadListView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(thread.title)
-                                .font(.admCardTitle)
+                                .textRole(.h4)
                                 .foregroundStyle(Theme.ink)
                                 .lineLimit(1)
                             if let date = thread.updatedAt.flatMap({ JSONValue.string($0).date }) {
                                 Text(date.shortText)
-                                    .font(.admMeta)
-                                    .foregroundStyle(Theme.inkMuted)
+                                    .textRole(.xs)
+                                    .foregroundStyle(Theme.muted)
                             }
                         }
                     }
@@ -597,7 +590,7 @@ private struct ThreadListView: View {
             .background(Theme.sheet)
             .overlay {
                 if model.xena.threads.isEmpty {
-                    EmptyState(icon: "chat-bubble-left-right", title: "還沒有對話", message: "在網頁或 App 跟 Xena 說過的話都會在這裡。")
+                    EmptyState(title: "還沒有對話", message: "在網頁或 App 跟 Xena 說過的話都會在這裡。")
                 }
             }
             .navigationTitle("對話紀錄")

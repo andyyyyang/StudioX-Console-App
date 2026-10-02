@@ -1,39 +1,43 @@
-import Charts
 import SwiftUI
 import UIKit
 
-/// 網站選擇器（console 的 /sites）：每個網站一列，7 天訪客＋走勢；點進去是那個網站的儀表板
+/// 網站（手機的分頁）：每個網站一列，7 天訪客＋走勢；點進去是那個網站（概況＋所有可以管理的內容）。
+/// iPad 上網站直接列在側欄（MainView 的 TabSection），每個網站是一個 SiteWorkspace。
 struct SitesView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         NavigationStack(path: Bindable(model).sitesPath) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    PageTitle(title: "我的網站", subtitle: summary)
+                VStack(alignment: .leading, spacing: 40) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Headline("Your *sites*", role: .h1)
+                        Text(summary)
+                            .textRole(.lead)
+                            .foregroundStyle(Theme.ink2)
+                    }
+                    .reveal()
                     if model.sites.isEmpty {
-                        EmptyState(icon: "globe-alt", title: "目前沒有可以管理的網站", message: "收到邀請連結的話，直接打開連結就能加入網站。")
-                            .admCard(padding: 0)
+                        EmptyState(title: "目前沒有可以管理的網站", message: "收到邀請連結的話，直接打開連結就能加入網站。")
                     } else {
-                        VStack(spacing: 0) {
+                        RuledList {
                             ForEach(Array(model.sites.enumerated()), id: \.element.id) { index, site in
-                                if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 56) }
                                 NavigationLink(value: Route.site(site.id)) {
-                                    SiteStatRow(site: site)
+                                    SiteRow(site: site)
                                 }
-                                .buttonStyle(RowPressStyle())
+                                .buttonStyle(.row)
+                                .reveal(index + 1)
                             }
                         }
-                        .admCard(padding: 0)
                     }
                     ConnectorCard()
                 }
-                .padding(.horizontal, Metric.gutter)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
+                .pageWidth()
+                .padding(.top, 24)
+                .padding(.bottom, 48)
             }
             .refreshable { [model] in await model.refreshAll() }
-            .admPage()
+            .brandPage()
             .navigationTitle("網站")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
@@ -42,31 +46,26 @@ struct SitesView: View {
 
     private var summary: String {
         let visitors = model.sites.reduce(0) { $0 + ($1.stats?.visitors ?? 0) }
-        return "\(model.sites.count) 個網站・最近 7 天 \(visitors.formatted()) 位訪客"
+        return "\(model.sites.count) 個網站・最近 7 天 \(visitors.formatted()) 位訪客。"
     }
 }
 
 /// 連接 Claude／ChatGPT（console 一個網址管所有網站；atelier-cms 的「AI → 連接外部 AI」）
-private struct ConnectorCard: View {
+struct ConnectorCard: View {
     @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                HeroIcon("puzzle-piece", size: 18).foregroundStyle(Theme.icon)
-                Text("連接 Claude／ChatGPT")
-                    .font(.admCardTitle)
-                    .foregroundStyle(Theme.ink)
-            }
-            Text("在 AI 的「連接器」貼上這個網址，用 StudioX 帳號登入就能操作你所有的網站；修改一律要你確認。")
-                .font(.admMeta)
-                .foregroundStyle(Theme.inkMuted)
+        VStack(alignment: .leading, spacing: 14) {
+            Eyebrow("AI 連接器")
+            Text("在 Claude 或 ChatGPT 的「連接器」貼上這個網址，用 StudioX 帳號登入，就能用聊天操作你所有的網站；修改一律要你確認。")
+                .textRole(.small)
+                .foregroundStyle(Theme.ink2)
             HStack(spacing: 10) {
                 Text(ConsoleConfig.mcpURL)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
                     .textSelection(.enabled)
                 Spacer(minLength: 0)
                 Button(copied ? "已複製" : "複製") {
@@ -77,21 +76,206 @@ private struct ConnectorCard: View {
                         copied = false
                     }
                 }
-                .buttonStyle(.adm(.secondary, size: .sm))
+                .buttonStyle(.brand(.ghost, size: .sm))
                 .sensoryFeedback(.success, trigger: copied) { _, now in now }
             }
-            .padding(10)
-            .background(Theme.ink.opacity(0.04), in: .rect(cornerRadius: Metric.radiusMd, style: .continuous))
         }
-        .admCard()
+        .panel()
     }
 }
 
-/// 一個網站的儀表板（網站後台的「流量」＋「概況」）：在線、訪客、走勢、熱門頁面、來源；有商店的再加昨天的營運
-struct SiteDetailView: View {
+// MARK: - 一個網站（手機：概況＋可以管理的內容；iPad：側欄＋內容）
+
+/// 網站的首頁（手機）：名稱、概況（流量、昨天的營運）、可以管理的所有內容
+struct SiteHomeView: View {
     let siteID: String
     @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let site = model.site(siteID) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 56) {
+                    SiteHeader(site: site)
+                    SiteOverview(site: site)
+                    SiteSections(site: site, style: .ruled)
+                }
+                .pageWidth()
+                .padding(.top, 16)
+                .padding(.bottom, 56)
+            }
+            .brandPage()
+            .navigationTitle(site.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { SiteToolbar(site: site, model: model) }
+        } else {
+            EmptyState(title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
+                .pageWidth()
+                .brandPage()
+        }
+    }
+}
+
+/// iPad：一個網站一個工作區。左邊是這個網站可以管理的東西，右邊是內容（各自一疊頁面）
+struct SiteWorkspace: View {
+    let siteID: String
+    @Environment(AppModel.self) private var model
+    @State private var section: SiteSection? = .overview
+    @State private var visibility: NavigationSplitViewVisibility = .all
+
+    var body: some View {
+        if let site = model.site(siteID) {
+            NavigationSplitView(columnVisibility: $visibility) {
+                SiteSectionSidebar(site: site, selection: $section)
+                    .navigationTitle(site.name)
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
+            } detail: {
+                NavigationStack(path: path) {
+                    sectionView(site)
+                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                }
+                .id(section)
+            }
+            .navigationSplitViewStyle(.balanced)
+            .onChange(of: section) { model.sitePaths[siteID] = [] }
+        } else {
+            EmptyState(title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
+                .pageWidth()
+                .brandPage()
+        }
+    }
+
+    private var path: Binding<[Route]> {
+        Binding(get: { model.sitePaths[siteID] ?? [] }, set: { model.sitePaths[siteID] = $0 })
+    }
+
+    @ViewBuilder
+    private func sectionView(_ site: SiteSummary) -> some View {
+        switch section ?? .overview {
+        case .overview:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 64) {
+                    SiteHeader(site: site)
+                    SiteOverview(site: site)
+                }
+                .pageWidth()
+                .padding(.top, 24)
+                .padding(.bottom, 64)
+            }
+            .brandPage()
+            .navigationTitle("概況")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { SiteToolbar(site: site, model: model) }
+        case .traffic:
+            TrafficView(siteID: site.id)
+        case .search:
+            SearchConsoleView(siteID: site.id)
+        case .entity(let key):
+            EntityRoot(site: site.id, entity: key)
+        }
+    }
+}
+
+/// iPad 側欄的一項
+enum SiteSection: Hashable {
+    case overview, traffic, search
+    case entity(String)
+}
+
+/// iPad 的側欄：概況、流量、Google 搜尋，以及照網站欄位定義分好組的內容
+private struct SiteSectionSidebar: View {
+    let site: SiteSummary
+    @Binding var selection: SiteSection?
+    @Environment(AppModel.self) private var model
+    @State private var schema: SiteSchema?
+
+    var body: some View {
+        List(selection: $selection) {
+            Section {
+                Label { Text("概況") } icon: { HeroIcon("squares-2x2", size: 18) }
+                    .tag(SiteSection.overview)
+                if site.hasTraffic {
+                    Label { Text("流量") } icon: { HeroIcon("chart-bar", size: 18) }
+                        .tag(SiteSection.traffic)
+                }
+                if site.tools.contains("search_report") {
+                    Label { Text("Google 搜尋") } icon: { HeroIcon("magnifying-glass", size: 18) }
+                        .tag(SiteSection.search)
+                }
+            }
+            if let schema {
+                ForEach(EntityStyle.groups(for: schema), id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.entities) { entity in
+                            Label { Text(entity.label) } icon: { HeroIcon(EntityStyle.icon(entity.key), size: 18) }
+                                .tag(SiteSection.entity(entity.key))
+                        }
+                    }
+                }
+            } else if let error = model.schemaErrors[site.id] {
+                Section {
+                    Text(error)
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .task { schema = await model.schema(for: site.id) }
+    }
+}
+
+/// 網站的頁首：圖示、名稱、網址、職能；開啟後台、看網站
+struct SiteHeader: View {
+    let site: SiteSummary
     @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 14) {
+                SiteIconView(site: site, size: 56)
+                VStack(alignment: .leading, spacing: 4) {
+                    Eyebrow([site.org, site.levelLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    Text(site.host)
+                        .textRole(.small)
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            Headline(site.name, role: .h1)
+            HStack(spacing: 10) {
+                if let url = site.adminURL {
+                    Button { openURL(url) } label: { Text("開啟後台") }
+                        .buttonStyle(.brand(.primary, arrow: true))
+                }
+                if let url = site.url {
+                    Button { openURL(url) } label: { Text("看網站 ↗") }
+                        .buttonStyle(.brand(.ghost))
+                }
+            }
+        }
+        .reveal()
+    }
+}
+
+/// 網站頁首右上角：問 Xena
+struct SiteToolbar: ToolbarContent {
+    let site: SiteSummary
+    let model: AppModel
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { model.askXena("幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣") } label: {
+                Image("XenaOrb").resizable().scaledToFit().frame(width: 22, height: 22)
+            }
+            .accessibilityLabel("問 Xena 這個網站")
+        }
+    }
+}
+
+// MARK: - 概況（流量＋昨天的營運）
+
+struct SiteOverview: View {
+    let site: SiteSummary
+    @Environment(AppModel.self) private var model
     @State private var days = 7
     @State private var report: TrafficReport?
     @State private var ops: OpsReport?
@@ -99,292 +283,293 @@ struct SiteDetailView: View {
     @State private var loading = false
 
     var body: some View {
-        if let site = model.site(siteID) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header(site)
-                    if site.hasTraffic {
-                        trafficSection
-                    }
-                    if site.hasOrders {
-                        opsSection(site)
-                    }
-                    if let error {
-                        ErrorNote(message: error) { Task { await load(site) } }
-                    }
-                }
-                .padding(.horizontal, Metric.gutter)
-                .padding(.bottom, 32)
+        VStack(alignment: .leading, spacing: 56) {
+            if site.hasTraffic {
+                traffic
             }
-            .refreshable { await load(site) }
-            .admPage()
-            .navigationTitle(site.name)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { model.askXena("幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣") } label: { HeroIcon("sparkles") }
-                        .accessibilityLabel("問 Xena")
-                }
+            if site.hasOrders, let ops {
+                store(ops)
             }
-            .task(id: days) { await load(site) }
-        } else {
-            EmptyState(icon: "globe-alt", title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
-                .admPage()
+            if let error {
+                ErrorNote(message: error) { Task { await load() } }
+            }
         }
+        .task(id: days) { await load() }
     }
 
-    private func load(_ site: SiteSummary) async {
+    private func load() async {
         loading = true
         defer { loading = false }
         error = nil
         do {
             if site.hasTraffic { report = try await model.api.traffic(site: site.id, days: days) }
-            if site.hasOrders { ops = try await model.api.ops(site: site.id, days: 1) }
+            if site.hasOrders, ops == nil { ops = try await model.api.ops(site: site.id, days: 1) }
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func header(_ site: SiteSummary) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                SiteIconView(site: site, size: 52)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(site.name)
-                        .font(.admTitle)
-                        .tracking(-0.33)
-                        .foregroundStyle(Theme.ink)
-                    Text([site.org, site.host, site.levelLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.admMeta)
-                        .foregroundStyle(Theme.inkMuted)
-                }
+    private var traffic: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            SectionHead("Traffic", aside: days == 1 ? "今天到現在。" : "最近 \(days) 天，台北時間。") {
+                MoreLink("完整報表") { model.open(.traffic(site: site.id)) }
             }
-            HStack(spacing: 10) {
-                if let url = site.adminURL {
-                    Button { openURL(url) } label: { Label { Text("開啟後台") } icon: { HeroIcon("arrow-top-right-on-square", size: 16) } }
-                        .buttonStyle(.adm(.primary, size: .lg))
-                }
-                if let url = site.url {
-                    Button { openURL(url) } label: { Label { Text("看網站") } icon: { HeroIcon("globe-alt", size: 16) } }
-                        .buttonStyle(.adm(.secondary, size: .lg))
-                }
-            }
-        }
-        .padding(.top, 8)
-    }
-
-    @ViewBuilder
-    private var trafficSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("流量")
-                    .font(.admSection)
-                    .foregroundStyle(Theme.ink)
-                Spacer()
-                Picker("期間", selection: $days) {
-                    Text("今天").tag(1)
-                    Text("7 天").tag(7)
-                    Text("30 天").tag(30)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
-            }
-            .padding(.horizontal, 4)
-
+            FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "今天" : "\($0) 天" })
             if let r = report {
                 if !r.installed {
-                    EmptyState(icon: "cursor-arrow-rays", title: "還沒有流量資料", message: "網站裝好流量追蹤之後，這裡就看得到。")
-                        .admCard(padding: 0)
+                    EmptyState(title: "還沒有流量資料", message: "網站裝好流量追蹤之後，這裡就看得到。")
                 } else {
-                    Grid(horizontalSpacing: 10, verticalSpacing: 10) {
-                        GridRow {
-                            KpiTile(label: "現在在線", value: "\(r.live)", live: true)
-                            KpiTile(label: "訪客", value: r.visitors.formatted(), percent: r.change)
-                        }
-                        GridRow {
-                            KpiTile(label: "瀏覽", value: r.pageviews.formatted())
-                            KpiTile(label: "平均停留", value: r.avgDurationMs.map { Self.duration($0) } ?? "—")
-                        }
+                    StatGrid {
+                        Stat(value: Double(r.live), label: "現在在線")
+                        Stat(value: Double(r.visitors), label: "訪客", change: r.change)
+                        Stat(value: Double(r.pageviews), label: "瀏覽", change: r.pageviewsChange)
+                        Stat(value: (r.avgDurationMs ?? 0) / 1000, label: "平均停留", format: { s in
+                            let n = Int(s.rounded())
+                            return n >= 60 ? "\(n / 60)m\(n % 60)s" : "\(n)s"
+                        })
                     }
-                    chart(r)
-                    topList("熱門頁面", r.pages)
-                    topList("從哪裡來", r.referrers)
-                    channels(r)
+                    TrafficChart(points: r.trend, metric: .visitors)
+                        .frame(height: 220)
                 }
             } else if loading {
-                LoadingRow().admCard(padding: 0)
+                SkeletonRows(rows: 2)
             }
         }
     }
 
-    private static func duration(_ ms: Double) -> String {
-        let s = Int(ms / 1000)
-        return s >= 60 ? "\(s / 60) 分 \(s % 60) 秒" : "\(s) 秒"
-    }
-
-    private func chart(_ r: TrafficReport) -> some View {
-        Chart(r.trend) { p in
-            AreaMark(x: .value("時間", p.label), y: .value("訪客", p.visitors))
-                .foregroundStyle(LinearGradient(colors: [Theme.chart[0].opacity(0.25), Theme.chart[0].opacity(0)], startPoint: .top, endPoint: .bottom))
-                .interpolationMethod(.monotone)
-            LineMark(x: .value("時間", p.label), y: .value("訪客", p.visitors))
-                .foregroundStyle(Theme.chart[0])
-                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                .interpolationMethod(.monotone)
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading) { _ in
-                AxisGridLine().foregroundStyle(Theme.hair)
-                AxisValueLabel().foregroundStyle(Theme.inkMuted)
-            }
-        }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { _ in
-                AxisValueLabel().foregroundStyle(Theme.inkMuted)
-            }
-        }
-        .frame(height: 170)
-        .admCard()
-    }
-
-    @ViewBuilder
-    private func topList(_ title: String, _ items: [TrafficTop]) -> some View {
-        if !items.isEmpty {
-            let top = Array(items.prefix(6))
-            let maxValue = max(top.map(\.visitors).max() ?? 1, 1)
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title)
-                    .font(.admCardTitle)
-                    .foregroundStyle(Theme.ink)
-                ForEach(top) { item in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(item.key)
-                                .font(.admMeta)
-                                .foregroundStyle(Theme.ink)
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            Text(item.visitors.formatted())
-                                .font(.system(.footnote, weight: .semibold).monospacedDigit())
-                                .foregroundStyle(Theme.ink)
-                        }
-                        GeometryReader { geo in
-                            Capsule()
-                                .fill(Theme.chart[0].opacity(0.22))
-                                .frame(width: max(4, geo.size.width * CGFloat(item.visitors) / CGFloat(maxValue)))
-                        }
-                        .frame(height: 4)
-                    }
+    private func store(_ ops: OpsReport) -> some View {
+        VStack(alignment: .leading, spacing: 28) {
+            SectionHead("Store, *yesterday*", aside: ops.rangeLabel) {
+                MoreLink("看訂單") {
+                    model.ordersSite = site.id
+                    model.ordersStatus = "paid"
+                    model.tab = .orders
                 }
             }
-            .admCard()
-        }
-    }
-
-    @ViewBuilder
-    private func channels(_ r: TrafficReport) -> some View {
-        let total = max(r.channels.reduce(0) { $0 + $1.visits }, 1)
-        if r.channels.contains(where: { $0.visits > 0 }) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("流量來源")
-                    .font(.admCardTitle)
-                    .foregroundStyle(Theme.ink)
-                GeometryReader { geo in
-                    HStack(spacing: 2) {
-                        ForEach(Array(r.channels.enumerated()), id: \.element.id) { i, c in
-                            if c.visits > 0 {
-                                Rectangle()
-                                    .fill(Theme.chart[i % Theme.chart.count])
-                                    .frame(width: max(2, geo.size.width * CGFloat(c.visits) / CGFloat(total) - 2))
-                            }
-                        }
-                    }
-                    .clipShape(.capsule)
-                }
-                .frame(height: 8)
-                FlowLayout(spacing: 12) {
-                    ForEach(Array(r.channels.enumerated()), id: \.element.id) { i, c in
-                        HStack(spacing: 5) {
-                            Circle().fill(Theme.chart[i % Theme.chart.count]).frame(width: 7, height: 7)
-                            Text("\(c.name) \(Int((Double(c.visits) / Double(total) * 100).rounded()))%")
-                                .font(.admMeta)
-                                .foregroundStyle(Theme.inkMuted)
-                        }
-                    }
-                }
+            StatGrid {
+                Stat(value: Double(ops.createdTotal), label: "新訂單")
+                Stat(value: Double(ops.revenueCents) / 100, label: "收款", format: { "NT$" + Int($0.rounded()).formatted() })
+                Stat(value: Double(ops.paidButUnfulfilled), label: "等出貨")
+                Stat(value: Double(ops.supportAwaiting), label: "客人等回覆")
             }
-            .admCard()
-        }
-    }
-
-    @ViewBuilder
-    private func opsSection(_ site: SiteSummary) -> some View {
-        if let ops {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "昨天的營運") { Text(ops.rangeLabel) }
-                VStack(alignment: .leading, spacing: 12) {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
-                        GridRow {
-                            MetricTile(label: "新訂單", value: "\(ops.createdTotal)")
-                            MetricTile(label: "收款", value: ntd(cents: ops.revenueCents))
-                        }
-                        GridRow {
-                            MetricTile(label: "等出貨", value: "\(ops.paidButUnfulfilled)", tone: ops.paidButUnfulfilled > 0 ? .gold : nil)
-                            MetricTile(label: "客人等回覆", value: "\(ops.supportAwaiting)", tone: ops.supportAwaiting > 0 ? .warning : nil)
-                        }
-                    }
+            if !ops.alerts.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(ops.alerts, id: \.self) { alert in
-                        Label { Text(alert) } icon: { HeroIcon("exclamation-triangle", size: 15) }
-                            .font(.admMeta)
-                            .foregroundStyle(Theme.dangerFG)
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Circle().fill(Theme.dangerFG).frame(width: 6, height: 6)
+                            Text(alert)
+                                .textRole(.small)
+                                .foregroundStyle(Theme.ink)
+                        }
                     }
-                    Button {
-                        model.ordersSite = site.id
-                        model.ordersStatus = "paid"
-                        model.tab = .orders
-                    } label: {
-                        Label { Text("看訂單") } icon: { HeroIcon("shopping-bag", size: 16) }
-                    }
-                    .buttonStyle(.adm(.secondary, size: .lg, fullWidth: true))
                 }
-                .admCard()
             }
         }
     }
 }
 
-/// 儀表板上的數字（網站後台的 KPI 卡）
-struct KpiTile: View {
-    let label: String
-    let value: String
-    var percent: Double?
-    var live = false
+// MARK: - 可以管理的內容（照網站的欄位定義）
+
+struct SiteSections: View {
+    enum Style { case ruled }
+    let site: SiteSummary
+    var style: Style = .ruled
+    @Environment(AppModel.self) private var model
+    @State private var schema: SiteSchema?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                if live {
-                    Circle()
-                        .fill(Theme.successFG)
-                        .frame(width: 6, height: 6)
-                        .phaseAnimator([1.0, 0.3]) { content, phase in
-                            content.opacity(phase)
-                        } animation: { _ in
-                            .easeInOut(duration: 1)
-                        }
+        VStack(alignment: .leading, spacing: 40) {
+            SectionHead("Manage", aside: "網站後台的內容，和後台同一份；修改一律要你確認。")
+            RuledList {
+                if site.hasTraffic {
+                    sectionRow(icon: "chart-bar", title: "流量", detail: "訪客、熱門頁面、來源、時段", route: .traffic(site: site.id))
                 }
-                FieldLabel(label)
+                if site.tools.contains("search_report") {
+                    sectionRow(icon: "magnifying-glass", title: "Google 搜尋", detail: "點擊、曝光、搜尋關鍵字", route: .searchConsole(site: site.id))
+                }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(value)
-                    .font(.system(.title3, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                ChangeLabel(percent: percent)
+            if let schema {
+                ForEach(EntityStyle.groups(for: schema), id: \.title) { group in
+                    VStack(alignment: .leading, spacing: 14) {
+                        Eyebrow(group.title)
+                        RuledList {
+                            ForEach(group.entities) { entity in
+                                sectionRow(
+                                    icon: EntityStyle.icon(entity.key),
+                                    title: entity.label,
+                                    detail: EntityStyle.detail(entity),
+                                    route: entity.singleton ? .record(site: site.id, entity: entity.key, id: nil) : .collection(site: site.id, entity: entity.key)
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if let error = model.schemaErrors[site.id] {
+                ErrorNote(message: error) { Task { schema = await model.schema(for: site.id, reload: true) } }
+            } else {
+                SkeletonRows(rows: 4)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .admCard(padding: 14)
+        .task { schema = await model.schema(for: site.id) }
+    }
+
+    private func sectionRow(icon: String, title: String, detail: String?, route: Route) -> some View {
+        NavigationLink(value: route) {
+            HStack(spacing: 16) {
+                HeroIcon(icon, size: 20)
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 36, height: 36)
+                    .overlay(RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(Theme.line, lineWidth: 1))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .textRole(.h4)
+                        .foregroundStyle(Theme.ink)
+                    if let detail {
+                        Text(detail)
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text("→")
+                    .font(.brand(18, .medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(.vertical, 16)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.row)
+    }
+}
+
+/// 一種資料在 App 裡的樣子：圖示、分組、英文的大標
+enum EntityStyle {
+    struct Group {
+        let title: String
+        let entities: [EntitySchema]
+    }
+
+    /// 這些有自己的分頁或收件匣，不重複列
+    static let hidden: Set<String> = ["order", "support_thread", "unmatched_inbound", "assistant_conversation", "inquiry"]
+
+    static func group(_ key: String) -> String {
+        switch key {
+        case "product", "category", "bundle", "coupon", "stall_menu", "membership_tier", "campaign", "shipping_settings", "bank_transfer":
+            "商店"
+        case "user", "mailbox", "pending_notification":
+            "顧客"
+        case "page_seo", "business_info", "site_settings", "notifications_config", "personalized_config", "assistant_settings", "integration", "service":
+            "網站設定"
+        case "automation", "automation_run":
+            "自動化"
+        default:
+            "內容"
+        }
+    }
+
+    static let groupOrder = ["內容", "商店", "顧客", "自動化", "網站設定"]
+
+    static func groups(for schema: SiteSchema) -> [Group] {
+        let shown = schema.entities.filter { !hidden.contains($0.key) && ($0.canList || $0.singleton || $0.canGet) }
+        let byGroup = Dictionary(grouping: shown, by: { group($0.key) })
+        return groupOrder.compactMap { title in byGroup[title].map { Group(title: title, entities: $0) } }
+    }
+
+    static func icon(_ key: String) -> String {
+        switch key {
+        case "product": "cube"
+        case "category": "tag"
+        case "bundle": "gift"
+        case "coupon": "ticket"
+        case "news", "content_news": "newspaper"
+        case "banner": "photo"
+        case "faq", "content_faq": "question-mark-circle"
+        case "milestone": "trophy"
+        case "membership_tier": "star"
+        case "campaign": "megaphone"
+        case "user": "users"
+        case "mailbox": "envelope"
+        case "pending_notification": "bell"
+        case "shipping_settings": "truck"
+        case "site_settings": "cog-6-tooth"
+        case "bank_transfer": "banknotes"
+        case "notifications_config": "bell-alert"
+        case "personalized_config": "sparkles"
+        case "stall_menu": "queue-list"
+        case "projects": "briefcase"
+        case "services": "squares-2x2"
+        case "engagements": "document-duplicate"
+        case "home": "home"
+        case "about": "book-open"
+        case "contact": "phone"
+        case "assistant": "chat-bubble-oval-left-ellipsis"
+        case "assistant_settings": "adjustments-horizontal"
+        case "page_seo": "magnifying-glass"
+        case "business_info": "identification"
+        case "automation": "bolt"
+        case "automation_run": "clock"
+        case "service": "puzzle-piece"
+        case "integration": "link"
+        default: "rectangle-stack"
+        }
+    }
+
+    /// 英文大標（網站的區塊標題：英文大字＋襯線強調詞）
+    static func headline(_ key: String) -> String? {
+        switch key {
+        case "product": "*Products*"
+        case "category": "*Categories*"
+        case "bundle": "*Bundles*"
+        case "coupon": "*Coupons*"
+        case "news", "content_news": "Latest *news*"
+        case "banner": "*Banners*"
+        case "faq", "content_faq": "*FAQ*"
+        case "milestone": "*Milestones*"
+        case "membership_tier": "Member *tiers*"
+        case "campaign": "*Campaigns*"
+        case "user": "*Members*"
+        case "mailbox": "*Mailbox*"
+        case "projects": "Selected *work*"
+        case "services": "What we *do*"
+        case "engagements": "How we *work*"
+        case "page_seo": "Search *appearance*"
+        case "automation": "*Automations*"
+        case "stall_menu": "The *menu*"
+        default: nil
+        }
+    }
+
+    /// 清單上的一句說明
+    static func detail(_ entity: EntitySchema) -> String? {
+        if let d = entity.collection?.description { return d }
+        var can: [String] = []
+        if entity.canCreate { can.append("新增") }
+        if entity.canUpdate { can.append("修改") }
+        if entity.images != nil { can.append("換圖") }
+        if entity.canDelete { can.append("刪除") }
+        return can.isEmpty ? "只能查看" : can.joined(separator: "・")
+    }
+}
+
+/// iPad 側欄點到一種資料：單一頁面直接打開，其他是清單
+struct EntityRoot: View {
+    let site: String
+    let entity: String
+    @Environment(AppModel.self) private var model
+    @State private var schema: EntitySchema?
+
+    var body: some View {
+        Group {
+            if let schema {
+                if schema.singleton {
+                    RecordView(site: site, entity: entity, id: nil)
+                } else {
+                    CollectionView(site: site, entity: entity)
+                }
+            } else {
+                SkeletonRows(rows: 5).pageWidth().brandPage()
+            }
+        }
+        .task(id: entity) { schema = await model.schema(for: site)?.entity(entity) }
     }
 }

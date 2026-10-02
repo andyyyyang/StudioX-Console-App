@@ -22,6 +22,8 @@ final class Briefing {
     /// 這一輪要拿的網站、拿回來的結果（同時拿的時候各自寫進來）
     @ObservationIgnored private var plan: [String: SiteSummary] = [:]
     @ObservationIgnored private var collected: [String: SiteResult] = [:]
+    /// 拿資料的途中又被要求重新整理（例如 Xena 剛改了東西）：這一輪結束後再跑一輪
+    @ObservationIgnored private var rerun: [SiteSummary]?
 
     init(api: ConsoleAPI) {
         self.api = api
@@ -48,9 +50,21 @@ final class Briefing {
     }
 
     func refresh(sites: [SiteSummary]) async {
-        guard !loading else { return }
+        guard !loading else {
+            rerun = sites
+            return
+        }
         loading = true
         defer { loading = false }
+        var next: [SiteSummary]? = sites
+        while let round = next {
+            rerun = nil
+            await collect(round)
+            next = rerun
+        }
+    }
+
+    private func collect(_ sites: [SiteSummary]) async {
         plan = Dictionary(uniqueKeysWithValues: sites.map { ($0.id, $0) })
         collected = [:]
         // 一個網站一個請求序列；網站之間同時跑（結果各自寫回這裡）
@@ -73,20 +87,20 @@ final class Briefing {
     private func load(_ id: String) async {
         guard let site = plan[id] else { return }
         var r = SiteResult(site: site.id)
-        do {
-            if site.hasOrders {
-                r.ops = try? await api.ops(site: site.id, days: 1)
-                r.toShip = try await api.orders(site: site.id, status: "paid", limit: 30)
-            }
-            if site.hasSupport {
-                r.awaiting = try await api.supportThreads(site: site.id)
-            }
-            if site.tools.contains("list") {
-                r.handoffs = try await api.xenaConversations(site: site.id).filter { $0.status == "waiting" || $0.status == "human" }
-                r.inquiries = try await api.inquiries(site: site.id, status: "new")
-            }
-        } catch {
-            r.failure = error.localizedDescription
+        // 每一段各自拿：一段失敗不影響同一個網站的其他段（失敗的原因記第一個）
+        func note(_ error: any Error) {
+            if r.failure == nil { r.failure = error.localizedDescription }
+        }
+        if site.hasOrders {
+            r.ops = try? await api.ops(site: site.id, days: 1)
+            do { r.toShip = try await api.orders(site: site.id, status: "paid", limit: 30) } catch { note(error) }
+        }
+        if site.hasSupport {
+            do { r.awaiting = try await api.supportThreads(site: site.id) } catch { note(error) }
+        }
+        if site.tools.contains("list") {
+            do { r.handoffs = try await api.xenaConversations(site: site.id).filter { $0.status == "waiting" || $0.status == "human" } } catch { note(error) }
+            do { r.inquiries = try await api.inquiries(site: site.id, status: "new") } catch { note(error) }
         }
         collected[id] = r
     }

@@ -1,41 +1,51 @@
 import SwiftUI
 
-/// 首頁就是 Xena：24 小時值班的店長。
-///   - 水滴＋她跟你打招呼（照真的資料說：昨天的訂單、現在誰在等你）
-///   - 需要你看一下：客人在等回覆、已付款等出貨、營運異常、Xena 轉給專人的對話、新的專案詢問（點了直接去處理）
-///   - 昨天：有商店的網站各自的營運報表
-///   - 最近 7 天：每個網站的訪客
+/// 首頁就是 Xena：24 小時值班的店長。版面照 studiox.tw 的首頁：
+///   - Hero：日期、一行一行升起的招呼（照真的資料說）、Xena 的水滴，背後是柔光與點陣
+///   - 跑馬燈：各網站現在的數字（在線、昨天的收款、等出貨）
+///   - Needs you：客人在等回覆、已付款等出貨、營運異常、轉給專人的對話、新的專案詢問（點了直接去處理）
+///   - Yesterday：有商店的網站昨天的營運
+///   - This week：各網站最近 7 天的訪客
+///   - Ask Xena：常問的幾句
 struct XenaHomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         NavigationStack(path: Bindable(model).homePath) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    presence
-                    attention
-                    yesterday
-                    traffic
-                    asks
+                VStack(alignment: .leading, spacing: 0) {
+                    hero
+                    if !marqueeItems.isEmpty {
+                        Marquee(items: marqueeItems)
+                            .padding(.top, 8)
+                    }
+                    VStack(alignment: .leading, spacing: sizeClass == .regular ? 96 : 64) {
+                        attention
+                        yesterday
+                        thisWeek
+                        asks
+                    }
+                    .pageWidth()
+                    .padding(.top, sizeClass == .regular ? 88 : 56)
+                    footer
                 }
-                .padding(.horizontal, Metric.gutter)
-                .padding(.bottom, 32)
             }
             .scrollIndicators(.hidden)
             .refreshable { [model] in await model.refreshAll() }
-            .admPage()
-            .navigationTitle(Date.now.dayTitle)
-            .navigationBarTitleDisplayMode(.inline)
+            .brandPage()
+            .navigationTitle("今天")
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
         }
     }
 
-    // MARK: 招呼
+    // MARK: Hero
 
-    private var greeting: String {
+    /// 招呼：三行（第二行是重點，強調詞用品牌橘）
+    private var greetingLines: [String] {
         let b = model.briefing
-        guard b.updatedAt != nil else { return "我正在看你的網站昨晚到現在的狀況，等我一下…" }
-        let hour = Calendar.current.component(.hour, from: .now)
+        let hour = Calendar.taipei.component(.hour, from: .now)
         let hello = switch hour {
         case 5..<11: "早安"
         case 11..<14: "午安"
@@ -43,6 +53,18 @@ struct XenaHomeView: View {
         case 18..<23: "晚上好"
         default: "這麼晚還在忙"
         }
+        let name = model.me?.name ?? ""
+        let first = name.isEmpty ? "\(hello)。" : "\(hello)，\(name)。"
+        guard b.updatedAt != nil else { return [first, "我正在看你的網站，", "*等我一下*。"] }
+        let count = b.attention(sites: model.sites).count
+        if count == 0 { return [first, "現在沒有要你決定的事，", "我*繼續看著*。"] }
+        return [first, "今天有 *\(count) 件事*", "等你決定。"]
+    }
+
+    /// Xena 的說明：昨天的訂單、現在誰在等你（照真的資料）
+    private var report: String {
+        let b = model.briefing
+        guard b.updatedAt != nil else { return "我在看各網站昨晚到現在的狀況。" }
         var parts: [String] = []
         for site in model.orderSites {
             if let r = b.ops[site.id] {
@@ -55,48 +77,98 @@ struct XenaHomeView: View {
         if ship > 0 { now.append("\(ship) 筆訂單等出貨") }
         if !b.handoffs.isEmpty { now.append("\(b.handoffs.count) 段對話轉給專人") }
         if !b.inquiries.isEmpty { now.append("\(b.inquiries.count) 筆新的專案詢問") }
-        var text = "\(hello)，\(model.me?.name ?? "")。"
-        if !parts.isEmpty { text += parts.joined(separator: "；") + "。" }
-        text += now.isEmpty ? "現在沒有要你決定的事，我繼續看著 ☕️" : "現在" + now.joined(separator: "、") + "，我列在下面。"
+        var text = parts.isEmpty ? "" : parts.joined(separator: "；") + "。"
+        text += now.isEmpty ? "其他都很順，有事我會先跟你說。" : "現在" + now.joined(separator: "、") + "。"
         return text
     }
 
-    private var presence: some View {
-        VStack(spacing: 14) {
-            Button {
-                model.showXena = true
-            } label: {
-                XenaOrb(mood: model.xena.mood, size: 112, pulse: model.xena.pulse)
+    private var hero: some View {
+        let regular = sizeClass == .regular
+        return VStack(alignment: .leading, spacing: regular ? 40 : 28) {
+            HStack(alignment: .center) {
+                Eyebrow("\(Date.now.dayTitle) · \(Date.now.englishDay)")
+                Spacer()
+                presence
             }
-            .buttonStyle(PressScale())
-            .accessibilityHint("打開對話")
 
-            VStack(spacing: 3) {
-                Text("Xena")
-                    .font(.system(size: 26, weight: .semibold))
-                    .tracking(-0.4)
-                    .foregroundStyle(Theme.ink)
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Theme.successFG)
-                        .frame(width: 7, height: 7)
-                    Text("店長・\(model.xena.mood.label)・24 小時在線")
+            if regular {
+                HStack(alignment: .bottom, spacing: 48) {
+                    greeting
+                    Button { model.showXena = true } label: {
+                        XenaOrb(mood: model.xena.mood, size: 200, pulse: model.xena.pulse)
+                    }
+                    .buttonStyle(.press)
+                    .accessibilityLabel("和 Xena 說話")
                 }
-                .font(.admMeta)
-                .foregroundStyle(Theme.inkMuted)
+            } else {
+                greeting
+                HStack(alignment: .center, spacing: 16) {
+                    Button { model.showXena = true } label: {
+                        XenaOrb(mood: model.xena.mood, size: 76, pulse: model.xena.pulse)
+                    }
+                    .buttonStyle(.press)
+                    .accessibilityLabel("和 Xena 說話")
+                    Button("和 Xena 說話") { model.showXena = true }
+                        .buttonStyle(.brand(.primary, size: .md, arrow: true))
+                }
             }
+        }
+        .pageWidth()
+        .padding(.top, regular ? 72 : 64)
+        .padding(.bottom, regular ? 72 : 48)
+        .background {
+            // 背景：點陣、柔光、四個角的裁切記號（PageHeroFull）
+            ZStack {
+                DotGrid()
+                Glow(size: regular ? 520 : 340)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: regular ? .trailing : .topTrailing)
+                    .offset(x: regular ? -40 : 80, y: regular ? 0 : -40)
+                CropMarks()
+            }
+            .ignoresSafeArea(edges: .top)
+        }
+    }
 
-            TypewriterText(text: greeting, animate: !model.greeted) {
+    private var greeting: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            RisingHeadline(lines: greetingLines, role: .hero, replayKey: model.briefing.updatedAt == nil ? 0 : 1)
+            TypewriterText(text: report, animate: !model.greeted) {
                 if model.briefing.updatedAt != nil { model.greeted = true }
             }
-            .font(.system(size: 16))
-            .lineSpacing(4)
-            .foregroundStyle(Theme.ink)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .admCard()
+            .textRole(.lead)
+            .foregroundStyle(Theme.ink2)
+            .frame(maxWidth: 560, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Xena 在線
+    private var presence: some View {
+        HStack(spacing: 8) {
+            LiveDot()
+            Text("Xena・\(model.xena.mood.label)")
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: 跑馬燈
+
+    private var marqueeItems: [Marquee.Item] {
+        var items: [Marquee.Item] = []
+        for site in model.sites {
+            if let stats = site.stats {
+                items.append(.init(text: "\(site.name) 7 天 \(stats.visitors.formatted()) 位訪客"))
+                if stats.live > 0 { items.append(.init(text: "\(stats.live) 位在線", serif: true)) }
+            }
+            if let r = model.briefing.ops[site.id], r.revenueCents > 0 {
+                items.append(.init(text: "昨天收款 \(ntd(cents: r.revenueCents))"))
+            }
+        }
+        guard !items.isEmpty else { return [] }
+        items.append(.init(text: "Always on", serif: true))
+        return items
     }
 
     // MARK: 需要你看一下
@@ -104,27 +176,32 @@ struct XenaHomeView: View {
     @ViewBuilder
     private var attention: some View {
         let items = model.briefing.attention(sites: model.sites)
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "需要你看一下") {
-                if model.briefing.loading { ProgressView().controlSize(.small) } else if let at = model.briefing.updatedAt { Text("\(at.clockText) 更新") }
+        VStack(alignment: .leading, spacing: 28) {
+            SectionHead("Needs *you*", aside: "需要你決定的事，越急的越前面。") {
+                if model.briefing.loading {
+                    ProgressView().controlSize(.small)
+                } else if let at = model.briefing.updatedAt {
+                    Text("\(at.clockText) 更新")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                }
             }
             if items.isEmpty {
                 if model.briefing.updatedAt != nil {
-                    EmptyState(icon: "check-circle", title: "都處理好了", message: "沒有要你決定的事，我繼續看著。")
-                        .admCard(padding: 0)
+                    EmptyState(title: "都處理好了", message: "沒有要你決定的事，我繼續看著。")
                 } else {
-                    LoadingRow(text: "Xena 正在看各網站…")
-                        .admCard(padding: 0)
+                    SkeletonRows(rows: 3)
                 }
             } else {
-                VStack(spacing: 0) {
+                RuledList {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 56) }
-                        Button { run(item.action) } label: { AttentionRow(item: item, site: model.site(item.site)) }
-                            .buttonStyle(RowPressStyle())
+                        Button { run(item.action) } label: {
+                            AttentionRow(item: item, site: model.site(item.site))
+                        }
+                        .buttonStyle(.row)
+                        .reveal(index)
                     }
                 }
-                .admCard(padding: 0)
             }
             ForEach(model.briefing.failures.sorted(by: { $0.key < $1.key }), id: \.key) { site, message in
                 ErrorNote(message: "\(model.site(site)?.name ?? site)：\(message)") {
@@ -153,34 +230,29 @@ struct XenaHomeView: View {
     private var yesterday: some View {
         let reports = model.orderSites.compactMap { site in model.briefing.ops[site.id].map { (site, $0) } }
         if !reports.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "昨天") { Text(reports.first?.1.rangeLabel ?? "") }
+            VStack(alignment: .leading, spacing: 28) {
+                SectionHead("Yesterday, *in numbers*", aside: reports.first?.1.rangeLabel)
                 ForEach(reports, id: \.0.id) { site, report in
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 16) {
                         HStack(spacing: 10) {
-                            SiteIconView(site: site, size: 28)
+                            SiteIconView(site: site, size: 26)
                             Text(site.name)
-                                .font(.admCardTitle)
+                                .textRole(.h4)
                                 .foregroundStyle(Theme.ink)
                         }
-                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
-                            GridRow {
-                                MetricTile(label: "訂單", value: "\(report.createdTotal)")
-                                MetricTile(label: "收款", value: ntd(cents: report.revenueCents))
-                            }
-                            GridRow {
-                                MetricTile(label: "等付款", value: "\(report.awaitingPayment)")
-                                MetricTile(label: "等出貨", value: "\(report.paidButUnfulfilled)", tone: report.paidButUnfulfilled > 0 ? .gold : nil)
-                            }
+                        StatGrid {
+                            Stat(value: Double(report.createdTotal), label: "筆訂單")
+                            Stat(value: Double(report.revenueCents) / 100, label: "收款", format: { "NT$" + Int($0.rounded()).formatted() })
+                            Stat(value: Double(report.paidButUnfulfilled), label: "等出貨")
+                            Stat(value: Double(report.awaitingPayment), label: "等付款")
                         }
                         if !report.summary.isEmpty {
                             Text(report.summary)
-                                .font(.admMeta)
-                                .foregroundStyle(Theme.inkMuted)
+                                .textRole(.small)
+                                .foregroundStyle(Theme.ink2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .admCard()
                 }
             }
         }
@@ -189,123 +261,131 @@ struct XenaHomeView: View {
     // MARK: 最近 7 天
 
     @ViewBuilder
-    private var traffic: some View {
+    private var thisWeek: some View {
         let sites = model.sites.filter { $0.stats != nil }
         if !sites.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "最近 7 天") { Text("訪客") }
-                VStack(spacing: 0) {
-                    ForEach(Array(sites.enumerated()), id: \.element.id) { index, site in
-                        if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 56) }
-                        Button { model.open(.site(site.id)) } label: { SiteStatRow(site: site) }
-                            .buttonStyle(RowPressStyle())
+            VStack(alignment: .leading, spacing: 28) {
+                SectionHead("This *week*", aside: "各網站最近 7 天的訪客。")
+                RuledList {
+                    ForEach(sites) { site in
+                        Button { model.open(.site(site.id)) } label: { SiteRow(site: site) }
+                            .buttonStyle(.row)
                     }
                 }
-                .admCard(padding: 0)
             }
         }
     }
 
+    // MARK: 問 Xena
+
     private var asks: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader("問 Xena")
-            ChipFlow(items: XenaSession.starters) { model.askXena($0) }
+        VStack(alignment: .leading, spacing: 28) {
+            SectionHead("Ask *Xena*", aside: "和網頁版同一個 Xena、同一份對話紀錄。")
+            RuledList {
+                ForEach(XenaSession.starters, id: \.self) { prompt in
+                    Button { model.askXena(prompt) } label: {
+                        HStack {
+                            Text(prompt)
+                                .textRole(.h4)
+                                .foregroundStyle(Theme.ink)
+                            Spacer(minLength: 12)
+                            Text("→")
+                                .font(.brand(18, .medium))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .padding(.vertical, 18)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.row)
+                }
+            }
         }
+    }
+
+    // MARK: 頁尾
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Xena 是你的店長，24 小時看著每個網站。")
+                .textRole(.small)
+                .foregroundStyle(Theme.inverseMuted)
+            Wordmark(color: Theme.onInverse)
+        }
+        .pageWidth()
+        .padding(.top, 56)
+        .padding(.bottom, 24)
+        .background(Theme.inverse)
+        .padding(.top, 96)
     }
 }
 
-/// 首頁的一件事
+/// 首頁的一件事：狀態方塊、標題、說明、橘色的箭頭
 private struct AttentionRow: View {
     let item: AttentionItem
     let site: SiteSummary?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 16) {
             HeroIcon(item.icon, size: 18)
                 .foregroundStyle(item.tone.foreground)
-                .frame(width: 32, height: 32)
-                .background(item.tone.background, in: .rect(cornerRadius: Metric.radiusMd, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: 36, height: 36)
+                .background(item.tone.background, in: .rect(cornerRadius: Metric.radiusSm))
+            VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
-                    .font(.admCardTitle)
+                    .textRole(.h4)
                     .foregroundStyle(Theme.ink)
                     .multilineTextAlignment(.leading)
                 Text(item.detail)
-                    .font(.admMeta)
-                    .foregroundStyle(Theme.inkMuted)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.muted)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
             Spacer(minLength: 8)
-            HeroIcon("chevron-right", size: 14)
-                .foregroundStyle(Theme.faint)
-                .padding(.top, 9)
+            ArrowTile(glyph: "→", size: 28)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .padding(.vertical, 18)
+        .contentShape(.rect)
     }
 }
 
-/// 網站一列：圖示、名稱、7 天訪客、走勢（console 網站選擇器的 .au-site）
-struct SiteStatRow: View {
+/// 網站一列：圖示、名稱、網址、7 天訪客、走勢（console 網站選擇器的 .au-site）
+struct SiteRow: View {
     let site: SiteSummary
 
     var body: some View {
-        HStack(spacing: 12) {
-            SiteIconView(site: site, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 14) {
+            SiteIconView(site: site, size: 40)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(site.name)
-                    .font(.admCardTitle)
+                    .textRole(.h4)
                     .foregroundStyle(Theme.ink)
-                Text([site.org, site.host].compactMap { $0 }.joined(separator: " · "))
-                    .font(.admMeta)
-                    .foregroundStyle(Theme.inkMuted)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if let live = site.stats?.live, live > 0 {
+                        LiveDot()
+                        Text("\(live) 位在線").foregroundStyle(Theme.ink2)
+                        Text("·")
+                    }
+                    Text(site.host)
+                }
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+                .lineLimit(1)
             }
             Spacer(minLength: 8)
             if let stats = site.stats {
-                Sparkline(values: stats.trend.map(Double.init))
-                    .stroke(Theme.chart[0], style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
-                    .frame(width: 56, height: 18)
-                    .opacity(0.8)
-                VStack(alignment: .trailing, spacing: 1) {
+                SparkView(values: stats.trend.map(Double.init))
+                    .frame(width: 64, height: 24)
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(stats.visitors.formatted())
-                        .font(.system(.subheadline, weight: .semibold).monospacedDigit())
+                        .textRole(.number)
                         .foregroundStyle(Theme.ink)
                     ChangeLabel(percent: stats.change)
                 }
+                .frame(minWidth: 64, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
-    }
-}
-
-/// 一個數字＋標籤
-struct MetricTile: View {
-    let label: String
-    let value: String
-    var tone: Tone?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            FieldLabel(label)
-            Text(value)
-                .font(.system(.title3, weight: .semibold).monospacedDigit())
-                .foregroundStyle(tone?.foreground ?? Theme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// 清單的一列：按下有淡淡的底（--adm-hover）
-struct RowPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(configuration.isPressed ? Theme.hover : .clear)
+        .padding(.vertical, 16)
+        .contentShape(.rect)
     }
 }

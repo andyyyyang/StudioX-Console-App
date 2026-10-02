@@ -7,6 +7,7 @@ import SwiftUI
 struct WelcomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var covered: CGFloat = 320
     @State private var assemble = 0
     @State private var busy = false
@@ -20,15 +21,20 @@ struct WelcomeView: View {
 
     var body: some View {
         GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                Theme.paper.ignoresSafeArea()
-                LogoWebView(coveredBottom: covered, assemble: assemble)
+            // 寬的畫面（iPad 橫放）：左邊 3D 標誌、右邊登入面板（AuthScreen 在 900px 以上也是左右並排）
+            let side = sizeClass == .regular && geo.size.width >= 900
+            ZStack(alignment: side ? .trailing : .bottom) {
+                Theme.page.ignoresSafeArea()
+                LogoWebView(coveredBottom: side ? 0 : covered, assemble: assemble)
                     .ignoresSafeArea()
+                    .padding(.trailing, side ? 500 : 0)
                 panel
+                    .padding(.trailing, side ? 40 : 0)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         covered = height + geo.safeAreaInsets.bottom + 8
                     }
             }
+            .animation(Motion.ease, value: side)
         }
         .onAppear { error = model.loadError }
     }
@@ -40,24 +46,25 @@ struct WelcomeView: View {
                     .frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Xena · 店長")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.inkMuted)
+                        .font(.brand(12, .semibold))
+                        .foregroundStyle(Theme.muted)
                     TypewriterText(text: line)
-                        .font(.system(size: 15))
-                        .foregroundStyle(Theme.paperInk)
+                        .font(.brand(15, .regular))
+                        .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
             }
 
             Text("登入 StudioX Console")
-                .font(.system(size: 17))
-                .foregroundStyle(Theme.inkMuted)
+                .font(.brand(17, .medium))
+                .tracking(-0.2)
+                .foregroundStyle(Theme.muted)
                 .padding(.top, 4)
 
             if let error {
                 Text(error)
-                    .font(.system(size: 14))
+                    .font(.brand(14, .regular))
                     .foregroundStyle(Theme.dangerFG)
                     .multilineTextAlignment(.center)
                     .transition(.opacity)
@@ -68,10 +75,10 @@ struct WelcomeView: View {
             } label: {
                 HStack(spacing: 10) {
                     if busy {
-                        ProgressView().tint(Theme.paper)
+                        ProgressView().tint(Theme.page)
                     } else {
                         BrandMark()
-                            .foregroundStyle(Theme.paper)
+                            .foregroundStyle(Theme.page)
                             .frame(width: 18, height: 18)
                     }
                     Text(busy ? "登入中…" : "用 StudioX 帳號登入")
@@ -81,18 +88,18 @@ struct WelcomeView: View {
             .disabled(busy)
 
             Text("Apple 或 Email 都可以。收到邀請連結的話，直接打開連結就能加入網站。")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.inkMuted)
+                .font(.brand(12.5, .regular))
+                .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 22)
         .padding(.top, 22)
         .padding(.bottom, 18)
         .frame(maxWidth: 440)
-        .glassEffect(.regular.tint(Theme.paper.opacity(0.35)), in: .rect(cornerRadius: 32, style: .continuous))
+        .glassEffect(.regular.tint(Theme.page.opacity(0.35)), in: .rect(cornerRadius: 32, style: .continuous))
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
-        .animation(.smooth, value: error)
+        .animation(Motion.ease, value: error)
     }
 
     private func signIn() async {
@@ -117,11 +124,11 @@ struct AuthButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 17, weight: .semibold))
-            .tracking(-0.17)
+            .font(.brand(17, .semibold))
+            .tracking(-0.2)
             .frame(maxWidth: .infinity, minHeight: 56)
-            .foregroundStyle(Theme.paper)
-            .background(Theme.paperInk, in: .capsule)
+            .foregroundStyle(Theme.page)
+            .background(Theme.ink, in: .capsule)
             .opacity(isEnabled ? 1 : 0.6)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)

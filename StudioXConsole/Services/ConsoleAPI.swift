@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Foundation
+import SwiftUI
 
 nonisolated enum APIError: LocalizedError {
     /// 登入過期或被撤銷：要重新登入
@@ -146,7 +147,7 @@ final class ConsoleAPI {
             r.httpBody = payload
             return r
         }
-        let reply = (try? json(data)) ?? .null
+        let reply = rpcReply(data, contentType: http.value(forHTTPHeaderField: "content-type"))
         if http.statusCode == 403 {
             throw APIError.scope(reply["error_description"]?.string ?? "你在這個網站沒有這個權限")
         }
@@ -159,6 +160,75 @@ final class ConsoleAPI {
         if result["isError"]?.bool == true { throw APIError.tool(text) }
         if let parsed = try? json(Data(text.utf8)) { return parsed }
         return .string(text)
+    }
+
+    /// JSON-RPC 的回覆：一般是 JSON；伺服器用 SSE 回的話（data: 一行一個訊息）取最後一個
+    private func rpcReply(_ data: Data, contentType: String?) -> JSONValue {
+        if contentType?.contains("text/event-stream") == true {
+            let text = String(decoding: data, as: UTF8.self)
+            let messages = text.split(whereSeparator: \.isNewline)
+                .filter { $0.hasPrefix("data:") }
+                .compactMap { try? json(Data($0.dropFirst(5).trimmingCharacters(in: .whitespaces).utf8)) }
+            return messages.last { $0["result"] != nil || $0["error"] != nil } ?? .null
+        }
+        return (try? json(data)) ?? .null
+    }
+
+    // MARK: 欄位定義、現在的值、換圖（/api/app/schema、/api/app/record、網站的上傳連結）
+
+    /// 網站的資料與欄位定義（網站的 lib/mcp-schema.ts）
+    func schema(site: String) async throws -> SiteSchema {
+        var c = URLComponents(url: ConsoleConfig.baseURL.appending(path: "api/app/schema"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "site", value: site)]
+        let url = c.url!
+        let (data, http) = try await send { URLRequest(url: url) }
+        let body = (try? json(data)) ?? .null
+        guard http.statusCode == 200 else {
+            if http.statusCode == 404, body["error"]?.string == "not_found" { throw APIError.tool("console 還沒更新到支援 App 編輯的版本") }
+            throw APIError.tool(body["message"]?.string ?? "拿不到這個網站的欄位定義（\(http.statusCode)）")
+        }
+        return SiteSchema(body)
+    }
+
+    /// 一筆資料現在的欄位值（和 update 比對新舊的同一份；金額是「分」）
+    func record(site: String, entity: String, id: String?) async throws -> RecordValues {
+        var c = URLComponents(url: ConsoleConfig.baseURL.appending(path: "api/app/record"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "site", value: site), URLQueryItem(name: "entity", value: entity)] + (id.map { [URLQueryItem(name: "id", value: $0)] } ?? [])
+        let url = c.url!
+        let (data, http) = try await send { URLRequest(url: url) }
+        let body = (try? json(data)) ?? .null
+        guard http.statusCode == 200 else { throw APIError.tool(body["message"]?.string ?? "拿不到這筆資料（\(http.statusCode)）") }
+        return RecordValues(body)
+    }
+
+    /// 換圖：網站給的一次性上傳連結（set_images 的 requestUpload），直接把檔案送到網站
+    /// （和手機上點連結上傳是同一條路：存恢復點、通知店主、稽核）。回傳新的圖片清單
+    func upload(to link: URL, data: Data, mime: String, filename: String) async throws -> [String] {
+        let token = link.lastPathComponent
+        guard var c = URLComponents(url: link, resolvingAgainstBaseURL: false), !token.isEmpty else { throw APIError.tool("上傳連結不正確") }
+        c.path = "/api/upload/\(token)"
+        c.query = nil
+        guard let url = c.url else { throw APIError.tool("上傳連結不正確") }
+        let boundary = "studiox-\(UUID().uuidString)"
+        var body = Data()
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: \(mime)\r\n\r\n".utf8))
+        body.append(data)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        var r = URLRequest(url: url)
+        r.httpMethod = "POST"
+        r.timeoutInterval = 120
+        r.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "content-type")
+        let reply: Data
+        let response: URLResponse
+        do {
+            (reply, response) = try await URLSession.shared.upload(for: r, from: body)
+        } catch let error as URLError where error.code == .notConnectedToInternet || error.code == .networkConnectionLost || error.code == .timedOut {
+            throw APIError.offline
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let result = (try? json(reply)) ?? .null
+        guard status == 200, result["ok"]?.bool == true else { throw APIError.tool(result["error"]?.string ?? "上傳失敗（\(status)）") }
+        return result["images"]?.array.compactMap(\.string) ?? []
     }
 
     enum WriteOutcome {

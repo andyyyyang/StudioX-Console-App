@@ -1,121 +1,120 @@
 import SwiftUI
 import UIKit
 
-/// StudioX 後台配色標準（atelier-cms 的 src/app/admin/_ui/theme.ts，所有後台共用一份）。
-/// 這裡的色碼一對一照抄那份檔案的「角色變數」；亮色、暗色各自選色，跟著裝置設定切換。
-/// 規則和網頁一樣：主色是品牌橘、只用在主要動作與選取；其他一律中性灰；狀態色只表示狀態、一定配文字或圖示。
+/// StudioX 的顏色。版面與字照 studiox.tw（studio_website 的 src/styles/global.css :root）：
+/// 暖紙色的底、墨色的字、一條條細線、品牌橘只點在重點上；亮色、暗色各自選色，跟著裝置切換。
+/// 狀態色、圖表色、系統控制項的主色照後台（atelier-cms 的 src/app/admin/_ui/theme.ts）。
+/// 頁面裡一律用這裡的名字，不寫色碼。
 enum Theme {
-    // MARK: 主色（橘）
+    // MARK: 底（global.css）
 
-    /// --adm-primary：主要按鈕的底、開關打開、勾選、選取中
-    static let primary = Color(light: 0xCB3E01, dark: 0xFF6A33)
-    /// --adm-primary-hover：按住
-    static let primaryPressed = Color(light: 0x9F2E00, dark: 0xFF8250)
-    /// --adm-on-primary：主要按鈕上的字
-    static let onPrimary = Color(light: 0xFFFFFF, dark: 0x18181B)
-    /// --adm-accent：強調的文字與圖示、使用中的標籤
-    static let accent = Color(light: 0xB83700, dark: 0xFF8250)
-    /// --adm-accent-soft：選取中的列、強調卡片的淡底
-    static let accentSoft = Color(light: .rgb(0xFEF7F4), dark: .rgba(255, 106, 51, 0.14))
-    /// --adm-focus：焦點框
-    static let focus = Color(light: .rgba(255, 90, 31, 0.4), dark: .rgba(255, 130, 80, 0.45))
+    /// --bg：暖紙色
+    static let page = Color(light: 0xF2F0EB, dark: 0x0D0D0C)
+    /// --bg-2：交錯的區塊
+    static let pageAlt = Color(light: 0xE9E6DF, dark: 0x141413)
+    /// --surface：卡片、表單
+    static let surface = Color(light: 0xF8F7F3, dark: 0x1A1A18)
+    /// --panel-top：卡片漸層的上緣（.panel）
+    static let panelTop = Color(light: 0xFBFAF8, dark: 0x1F1F1D)
+    /// --panel-hl：卡片上緣的亮線
+    static let panelHighlight = Color(light: .rgba(255, 255, 255, 0.8), dark: .rgba(255, 255, 255, 0.06))
+    /// 底部面板（AuthScreen 的 sheet：#faf9f6 / #151513）
+    static let sheet = Color(light: 0xFAF9F6, dark: 0x151513)
 
-    // MARK: 文字與底
+    // MARK: 字
 
-    /// --color-ink：主要文字
-    static let ink = Color(light: 0x18181B, dark: 0xEDEDEF)
-    /// --color-ink-muted：次要文字
-    static let inkMuted = Color(light: 0x71717A, dark: 0xA1A1AA)
-    /// --adm-icon：一般圖示
-    static let icon = Color(light: 0x52525B, dark: 0xA1A1AA)
-    /// --adm-faint：最淡的提示（不放重要資訊）
-    static let faint = Color(light: 0xA1A1AA, dark: 0x71717A)
-    /// --adm-on-ink：深色底上的字
-    static let onInk = Color(light: 0xFFFFFF, dark: 0x18181B)
-    /// --adm-surface：卡片、輸入框、表格
-    static let surface = Color(light: 0xFFFFFF, dark: 0x1C1C1F)
-    /// --color-surface-soft：稍深的底
-    static let surfaceSoft = Color(light: 0xF4F4F5, dark: 0x1F1F23)
-    /// --color-surface-elevated：浮起來的底
-    static let surfaceElevated = Color(light: 0xFFFFFF, dark: 0x232327)
-    /// --page-bg：最底層（暖灰）
-    static let page = Color(light: 0xEBE8E5, dark: 0x0C0C0E)
-    /// --adm-sheet-bg：底部面板（實心）
-    static let sheet = Color(light: 0xFAFAFA, dark: 0x1E1E21)
+    /// --ink：主要的字
+    static let ink = Color(light: 0x0F0F0E, dark: 0xEEEBE5)
+    /// --ink-2：次要的字、導言
+    static let ink2 = Color(light: 0x3B3A37, dark: 0xBDB9B1)
+    /// --muted：說明、標籤、時間
+    static let muted = Color(light: 0x77746D, dark: 0x85827B)
+    /// 最淡的提示（不放重要資訊）
+    static let faint = Color(light: .rgba(15, 15, 14, 0.32), dark: .rgba(238, 235, 229, 0.3))
 
-    // MARK: 表面
+    // MARK: 線
 
-    /// --adm-hair：細線、分隔線
-    static let hair = Color(light: .rgba(0, 0, 0, 0.06), dark: .rgba(255, 255, 255, 0.08))
-    /// 輸入框的框（tokens.border.field：ink 12%）
-    static let fieldBorder = Color(light: .rgba(24, 24, 27, 0.12), dark: .rgba(237, 237, 239, 0.12))
-    /// --adm-btn2-border：次要按鈕的框
-    static let secondaryBorder = Color(light: .rgba(0, 0, 0, 0.10), dark: .rgba(255, 255, 255, 0.10))
-    /// --adm-highlight：表面頂端的亮邊
-    static let highlight = Color(light: .rgba(255, 255, 255, 0.9), dark: .rgba(255, 255, 255, 0.07))
-    /// --adm-hover：按下的底
-    static let hover = Color(light: .rgba(0, 0, 0, 0.04), dark: .rgba(255, 255, 255, 0.05))
+    /// --line：細線、框
+    static let line = Color(light: .rgba(15, 15, 14, 0.14), dark: .rgba(238, 235, 229, 0.13))
+    /// 清單裡比較密的分隔線
+    static let hair = Color(light: .rgba(15, 15, 14, 0.08), dark: .rgba(238, 235, 229, 0.08))
+    /// 按下、選取中的淡底
+    static let press = Color(light: .rgba(15, 15, 14, 0.05), dark: .rgba(238, 235, 229, 0.06))
     /// Xena 對話裡的淡底（copilot 的 --cp-soft）
     static let soft = Color(light: .rgba(0, 0, 0, 0.045), dark: .rgba(255, 255, 255, 0.06))
-    /// Xena 對話裡的線（--cp-line）
-    static let line = Color(light: .rgba(0, 0, 0, 0.08), dark: .rgba(255, 255, 255, 0.09))
 
-    // MARK: 狀態（只表示狀態，配文字或圖示）
+    // MARK: 品牌橘
+
+    /// --accent：品牌橘（強調的字、點、按下時填滿）
+    static let accent = Color(light: 0xFF5A1F, dark: 0xFF6A33)
+    /// 橘色上的字
+    static let onAccent = Color.white
+    /// 小字用的橘（在紙色上夠清楚；後台的 --adm-accent）
+    static let accentText = Color(light: 0xB83700, dark: 0xFF8250)
+    /// 橘色的淡底
+    static let accentSoft = Color(light: .rgba(255, 90, 31, 0.1), dark: .rgba(255, 106, 51, 0.14))
+    /// 系統控制項（開關、游標、選取）用的主色（後台的 --adm-primary，亮色比品牌橘深一點才夠清楚）
+    static let primary = Color(light: 0xCB3E01, dark: 0xFF6A33)
+    /// 主色上的字（後台的 --adm-on-primary；Xena 對話裡自己的泡泡）
+    static let onPrimary = Color(light: 0xFFFFFF, dark: 0x18181B)
+    /// 焦點框
+    static let focus = Color(light: .rgba(255, 90, 31, 0.4), dark: .rgba(255, 130, 80, 0.45))
+    /// 標誌的摺角（亮暗都一樣的品牌橘）
+    static let brandOrange = Color(hex: 0xFF5A1F)
+
+    // MARK: 反白的帶（.inverse：跑馬燈、行動區塊、頁尾）
+
+    static let inverse = Color(light: 0x0F0F0E, dark: 0x181816)
+    static let onInverse = Color(light: 0xF2F0EB, dark: 0xEEEBE5)
+    static let inverseMuted = Color(light: .rgba(242, 240, 235, 0.58), dark: .rgba(238, 235, 229, 0.55))
+    static let inverseLine = Color(light: .rgba(242, 240, 235, 0.14), dark: .rgba(238, 235, 229, 0.13))
+
+    // MARK: 狀態（只表示狀態，一定配文字或圖示；theme.ts）
 
     static let successFG = Color(light: 0x166534, dark: 0x4ADE80)
     static let warningFG = Color(light: 0x854D0E, dark: 0xFACC15)
     static let dangerFG = Color(light: 0xBE123C, dark: 0xFB7185)
     static let infoFG = Color(light: 0x1D4ED8, dark: 0x60A5FA)
+    /// --success（網站上的「在線」綠點）
+    static let live = Color(light: 0x1FA35A, dark: 0x34C46F)
 
-    // MARK: 圖表（資料標記，順序固定、跟著「東西」走）
+    // MARK: Xena（AI 專用的三個顏色，只出現在 Xena 身上；Orb.astro）
+
+    static let xenaPink = Color(hex: 0xFF6BD1)
+    static let xenaViolet = Color(hex: 0x845CFF)
+    static let xenaCyan = Color(hex: 0x40CCFF)
+
+    // MARK: 圖表（資料標記，順序固定、跟著「東西」走；theme.ts）
 
     static let chart: [Color] = [
-        Color(light: 0xE64700, dark: 0xE64700),
+        Color(light: 0xE64700, dark: 0xFF6A33),
         Color(light: 0x2A78D6, dark: 0x3987E5),
         Color(light: 0x1BAF7A, dark: 0x199E70),
         Color(light: 0x4A3AA7, dark: 0x9085E9),
         Color(light: 0xEDA100, dark: 0xC98500),
     ]
-
-    // MARK: 品牌（對外頁面：登入、歡迎頁；AuthScreen.tsx）
-
-    /// 品牌橘（Logo 的摺角）
-    static let brandOrange = Color(hex: 0xFF5A1F)
-    /// 對外頁面的底（--bg）
-    static let paper = Color(light: 0xF2F0EB, dark: 0x0D0D0C)
-    /// 對外頁面的字（--ink）
-    static let paperInk = Color(light: 0x0F0F0E, dark: 0xF2F0EB)
 }
 
-/// 尺寸（tokens.ts）：圓角、間距。手機版的卡片圓角是 14（mobile-css.ts）
+/// 尺寸（global.css）：圓角、留白
 enum Metric {
-    static let radiusSm: CGFloat = 6
-    static let radiusMd: CGFloat = 8
+    /// --radius-sm：按鈕、標籤、方形圖示鈕
+    static let radiusSm: CGFloat = 5
+    /// --radius：卡片、圖片
+    static let radius: CGFloat = 8
+    /// --radius-lg：表單、文章封面
     static let radiusLg: CGFloat = 10
-    static let radiusXl: CGFloat = 12
-    /// 手機的卡片
-    static let card: CGFloat = 14
-    /// Xena 的卡片（.cp-card）
+    /// .chip
+    static let chip: CGFloat = 4
+    /// Xena 的卡片（copilot 的 .cp-card）
     static let xenaCard: CGFloat = 16
-    /// 頁面左右留白（手機版 --admin-pad）
+    /// 手機左右留白（--gutter 在手機是 16）
     static let gutter: CGFloat = 16
-}
-
-extension Font {
-    /// 頁首標題（tokens.text.h1：22 / 650 / -0.015em）
-    static let admTitle = Font.system(.title2, weight: .semibold)
-    /// 段落標題（h2：16 / 650）
-    static let admSection = Font.system(.callout, weight: .semibold)
-    /// 卡片標題
-    static let admCardTitle = Font.system(.subheadline, weight: .semibold)
-    /// 內文（後台的字重是 500–650）
-    static let admBody = Font.system(.subheadline, weight: .medium)
-    /// 說明、時間
-    static let admMeta = Font.system(.footnote, weight: .medium)
-    /// 欄位標籤（tokens.text.label：11 / 600 / 0.04em / 大寫）
-    static let admLabel = Font.system(.caption2, weight: .semibold)
-    /// 數字（等寬）
-    static let admNumber = Font.system(.title3, weight: .semibold).monospacedDigit()
+    /// iPad 左右留白（--gutter：clamp(16px, 4vw, 56px)）
+    static let gutterWide: CGFloat = 40
+    /// 文章、表單最寬（news/[slug] 的 760px）
+    static let readable: CGFloat = 760
+    /// 一般頁面最寬（.container 1520，平板上收一點）
+    static let page: CGFloat = 1180
 }
 
 // MARK: - 顏色的寫法
@@ -150,34 +149,70 @@ extension Color {
         let l = light.uiColor, d = dark.uiColor
         self.init(uiColor: UIColor { traits in traits.userInterfaceStyle == .dark ? d : l })
     }
+
+    /// 網站橫幅的底色（#rrggbb 字串）
+    init?(hexString: String) {
+        var s = hexString.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        self.init(hex: v)
+    }
 }
 
+// MARK: - 日期
+
 extension Date {
-    private static let clock: DateFormatter = {
+    private static func formatter(_ format: String) -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_Hant_TW")
-        f.dateFormat = "HH:mm"
+        f.timeZone = TimeZone(identifier: "Asia/Taipei")
+        f.dateFormat = format
         return f
-    }()
+    }
 
-    private static let monthDay: DateFormatter = {
+    private static let clock = formatter("HH:mm")
+    private static let monthDay = formatter("M/d HH:mm")
+    private static let dayOnly = formatter("yyyy/M/d")
+    private static let dayTitleFormat = formatter("M月d日 EEEE")
+    private static let weekday = formatter("EEEE")
+    private static let english = {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_Hant_TW")
-        f.dateFormat = "M/d HH:mm"
-        return f
-    }()
-
-    private static let dayTitle: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_Hant_TW")
-        f.dateFormat = "M月d日 EEEE"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "Asia/Taipei")
+        f.dateFormat = "EEE, MMM d"
         return f
     }()
 
     /// 15:40
     var clockText: String { Self.clock.string(from: self) }
     /// 今天的只寫時間，其他寫日期＋時間
-    var shortText: String { Calendar.current.isDateInToday(self) ? Self.clock.string(from: self) : Self.monthDay.string(from: self) }
+    var shortText: String { Calendar.taipei.isDateInToday(self) ? Self.clock.string(from: self) : Self.monthDay.string(from: self) }
+    /// 2026/10/2
+    var dayText: String { Self.dayOnly.string(from: self) }
     /// 10月2日 星期五
-    var dayTitle: String { Self.dayTitle.string(from: self) }
+    var dayTitle: String { Self.dayTitleFormat.string(from: self) }
+    /// 星期五
+    var weekdayText: String { Self.weekday.string(from: self) }
+    /// Fri, Oct 2
+    var englishDay: String { Self.english.string(from: self) }
+
+    /// 3 分鐘前、2 小時前、昨天、9/28
+    var relativeText: String {
+        let s = Date.now.timeIntervalSince(self)
+        if s < 60 { return "剛剛" }
+        if s < 3600 { return "\(Int(s / 60)) 分鐘前" }
+        if Calendar.taipei.isDateInToday(self) { return "\(Int(s / 3600)) 小時前" }
+        if Calendar.taipei.isDateInYesterday(self) { return "昨天 \(clockText)" }
+        return Self.monthDay.string(from: self)
+    }
+}
+
+extension Calendar {
+    /// 網站的「今天、昨天」都是台北時間
+    static let taipei: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Taipei") ?? .current
+        c.locale = Locale(identifier: "zh_Hant_TW")
+        return c
+    }()
 }

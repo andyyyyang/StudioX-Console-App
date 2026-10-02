@@ -4,6 +4,10 @@ import SwiftUI
 struct StudioXConsoleApp: App {
     @State private var model = AppModel()
 
+    init() {
+        BrandFonts.register()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -11,10 +15,31 @@ struct StudioXConsoleApp: App {
                 .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
                 .tint(Theme.primary)
         }
+        .commands {
+            // iPad 的鍵盤與選單列：⌘1–⌘5 切換、⌘K 找 Xena、⌘R 重新整理
+            CommandMenu("前往") {
+                Button("Xena") { model.tab = .xena }
+                    .keyboardShortcut("1")
+                Button("網站") { model.goToSites() }
+                    .keyboardShortcut("2")
+                Button("訂單") { model.tab = .orders }
+                    .keyboardShortcut("3")
+                    .disabled(model.orderSites.isEmpty)
+                Button("收件匣") { model.tab = .inbox }
+                    .keyboardShortcut("4")
+                Button("我") { model.tab = .account }
+                    .keyboardShortcut("5")
+                Divider()
+                Button("和 Xena 說話") { model.showXena = true }
+                    .keyboardShortcut("k")
+                Button("重新整理") { Task { await model.refreshAll() } }
+                    .keyboardShortcut("r")
+            }
+        }
     }
 }
 
-/// 沒登入：3D 歡迎頁；登入後：Xena 當店長的主畫面
+/// 沒登入：3D 歡迎頁；登入後：品牌的載入動畫 → Xena 當店長的主畫面
 struct RootView: View {
     @Environment(AppModel.self) private var model
 
@@ -26,13 +51,15 @@ struct RootView: View {
                     .transition(.opacity)
             case .loading:
                 LoadingScreen()
-                    .transition(.opacity)
+                    // 載入完：整片像布幕一樣往上收（Loader 的 translateY(-100%)，1 秒 ease-in-out）
+                    .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .top)))
+                    .zIndex(1)
             case .ready:
                 MainView()
-                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .transition(.opacity)
             }
         }
-        .animation(.smooth(duration: 0.6), value: model.phase)
+        .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 1), value: model.phase)
         .overlay(alignment: .top) {
             if let toast = model.toast {
                 ToastView(toast: toast)
@@ -41,57 +68,54 @@ struct RootView: View {
                     .task(id: toast.id) {
                         try? await Task.sleep(for: .seconds(2.6))
                         if model.toast?.id == toast.id {
-                            withAnimation(.smooth) { model.toast = nil }
+                            withAnimation(Motion.spring) { model.toast = nil }
                         }
                     }
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: model.toast)
+        .animation(Motion.spring, value: model.toast)
         .task { await model.start() }
     }
 }
 
-/// 登入後拿網站清單的那一下
+/// 登入後拿網站清單的那一下：studiox.tw 的載入動畫；拿不到時說明＋重試
 private struct LoadingScreen: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            XenaOrb(mood: model.loadError == nil ? .thinking : .idle, size: 96)
-            if let error = model.loadError {
+        if let error = model.loadError {
+            VStack(alignment: .leading, spacing: 20) {
+                Spacer()
+                XenaOrb(mood: .idle, size: 72)
+                Headline("Something's *off*.", role: .h1)
                 Text(error)
-                    .font(.admBody)
-                    .foregroundStyle(Theme.ink)
-                    .multilineTextAlignment(.center)
+                    .textRole(.lead)
+                    .foregroundStyle(Theme.ink2)
                 HStack(spacing: 10) {
-                    Button("登出") { Task { await model.signOut() } }
-                        .buttonStyle(.adm(.secondary))
                     Button("再試一次") { Task { await model.loadMe() } }
-                        .buttonStyle(.adm(.primary))
+                        .buttonStyle(.brand(.primary, arrow: true))
+                    Button("登出") { Task { await model.signOut() } }
+                        .buttonStyle(.brand(.ghost))
                 }
-            } else {
-                Text("Xena 正在打開你的網站…")
-                    .font(.admBody)
-                    .foregroundStyle(Theme.inkMuted)
+                Spacer()
             }
-            Spacer()
+            .padding(28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(Theme.page.ignoresSafeArea())
+        } else {
+            BrandLoader(caption: "Xena 正在打開你的網站")
         }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.paper.ignoresSafeArea())
     }
 }
 
+/// 主畫面：手機是底部分頁；iPad 是可以收合的側欄，每個網站直接列在側欄裡（TabSection）
 struct MainView: View {
     @Environment(AppModel.self) private var model
-
-    private var inboxCount: Int {
-        model.briefing.awaiting.count + model.briefing.handoffs.count + model.briefing.inquiries.count
-    }
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         @Bindable var model = model
+        let regular = sizeClass == .regular
         TabView(selection: $model.tab) {
             Tab("Xena", image: "XenaOrb", value: AppTab.xena) {
                 XenaHomeView()
@@ -99,6 +123,7 @@ struct MainView: View {
             Tab("網站", image: "hi-globe-alt", value: AppTab.sites) {
                 SitesView()
             }
+            .hidden(regular)
             if !model.orderSites.isEmpty {
                 Tab("訂單", image: "hi-shopping-bag", value: AppTab.orders) {
                     OrdersView()
@@ -107,18 +132,43 @@ struct MainView: View {
             Tab("收件匣", image: "hi-inbox-stack", value: AppTab.inbox) {
                 InboxView()
             }
-            .badge(inboxCount)
+            .badge(model.inboxCount)
             Tab("我", image: "hi-user-circle", value: AppTab.account) {
                 AccountView()
             }
+            TabSection("網站") {
+                ForEach(model.sites) { site in
+                    Tab(site.name, image: site.hasOrders ? "hi-building-storefront" : "hi-globe-alt", value: AppTab.site(site.id)) {
+                        SiteWorkspace(siteID: site.id)
+                    }
+                }
+            }
+            .hidden(!regular)
         }
+        .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
+        .tabViewSidebarHeader {
+            HStack(spacing: 10) {
+                BrandMark()
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 22, height: 22)
+                Text("\(Text("studiox").foregroundStyle(Theme.ink))\(Text(".").foregroundStyle(Theme.accent))")
+                    .font(.brand(22, .semibold))
+                    .tracking(-0.9)
+            }
+            .padding(.vertical, 6)
+            .accessibilityElement()
+            .accessibilityLabel("StudioX")
+        }
         .tabViewBottomAccessory {
             XenaAccessory()
         }
         .sheet(isPresented: $model.showXena) {
             XenaChatView()
                 .presentationDragIndicator(.visible)
+        }
+        .onChange(of: regular, initial: true) { _, value in
+            model.setRegular(value)
         }
     }
 }
@@ -129,10 +179,16 @@ struct RouteView: View {
 
     var body: some View {
         switch route {
-        case .site(let id): SiteDetailView(siteID: id)
+        case .site(let id): SiteHomeView(siteID: id)
         case .order(let site, let id): OrderDetailView(site: site, orderID: id)
         case .thread(let site, let id): SupportThreadView(site: site, threadID: id)
         case .xenaConversation(let site, let id): XenaConversationView(site: site, conversationID: id)
+        case .collection(let site, let entity): CollectionView(site: site, entity: entity)
+        case .record(let site, let entity, let id): RecordView(site: site, entity: entity, id: id)
+        case .create(let site, let entity): RecordEditor(site: site, entity: entity, mode: .create)
+        case .traffic(let site): TrafficView(siteID: site)
+        case .searchConsole(let site): SearchConsoleView(siteID: site)
+        case .member(let site, let id): MemberView(site: site, memberID: id)
         }
     }
 }

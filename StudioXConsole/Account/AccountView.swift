@@ -13,82 +13,89 @@ struct AccountView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: Bindable(model).accountPath) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if let me = model.me {
-                        HStack(spacing: 14) {
-                            Avatar(name: me.name, imageURL: me.imageURL, size: 52)
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Text(me.name)
-                                        .font(.admSection)
-                                        .foregroundStyle(Theme.ink)
-                                    if me.staff { StatusBadge("StudioX", tone: .gold) }
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 56) {
+                        if let me = model.me {
+                            VStack(alignment: .leading, spacing: 18) {
+                                HStack(spacing: 14) {
+                                    Avatar(name: me.name, imageURL: me.imageURL, size: 60)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        if me.staff { Eyebrow("StudioX 團隊") } else { Eyebrow("StudioX 帳號") }
+                                        Text(me.email)
+                                            .textRole(.small)
+                                            .foregroundStyle(Theme.muted)
+                                    }
                                 }
-                                Text(me.email)
-                                    .font(.admMeta)
-                                    .foregroundStyle(Theme.inkMuted)
+                                Headline("Hello, *\(me.name)*", role: .h1)
+                            }
+                            .reveal()
+                        }
+
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("Your *roles*", aside: "職能由網站負責人在 StudioX Console 設定。", role: .h3)
+                            RuledList {
+                                ForEach(model.sites) { site in
+                                    HStack(spacing: 14) {
+                                        SiteIconView(site: site, size: 32)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(site.name).textRole(.h4).foregroundStyle(Theme.ink)
+                                            Text(site.host).textRole(.xs).foregroundStyle(Theme.muted)
+                                        }
+                                        Spacer()
+                                        Chip(site.levelLabel)
+                                    }
+                                    .padding(.vertical, 14)
+                                }
                             }
                         }
-                        .admCard()
-                    }
 
-                    section("我的網站") {
-                        ForEach(Array(model.sites.enumerated()), id: \.element.id) { index, site in
-                            if index > 0 { Divider().overlay(Theme.hair).padding(.leading, 52) }
-                            HStack(spacing: 12) {
-                                SiteIconView(site: site, size: 28)
-                                Text(site.name)
-                                    .font(.admBody)
-                                    .foregroundStyle(Theme.ink)
-                                Spacer()
-                                Text(site.levelLabel)
-                                    .font(.admMeta)
-                                    .foregroundStyle(Theme.inkMuted)
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Xena*", aside: "App 和網頁上是同一個 Xena、同一份對話紀錄。", role: .h3)
+                            RuledList {
+                                row("跟 Xena 說話") { model.showXena = true }
+                                row("動手改東西之前", value: "一律先問你", action: nil)
+                                row("退款、刪除", value: "要打字確認", action: nil)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
                         }
-                    }
-                    Text("職能由網站負責人在 StudioX Console 設定；要調整請聯絡網站負責人或 StudioX。")
-                        .font(.admMeta)
-                        .foregroundStyle(Theme.inkMuted)
-                        .padding(.horizontal, 4)
 
-                    section("Xena") {
-                        row("sparkles", "跟 Xena 說話") { model.showXena = true }
-                        Divider().overlay(Theme.hair).padding(.leading, 44)
-                        row("shield-check", "動手改東西之前", value: "一律先問你", action: nil)
-                    }
-                    Text("Xena 在 App 和網頁上是同一個，對話紀錄也是同一份。修改任何資料前都會先出確認；退款、刪除要打字確認。")
-                        .font(.admMeta)
-                        .foregroundStyle(Theme.inkMuted)
-                        .padding(.horizontal, 4)
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Console*", aside: "在瀏覽器打開 StudioX Console。", role: .h3)
+                            RuledList {
+                                row("網站與成員") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
+                                row("連接外部 AI 的授權") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
+                                row("版本", value: version, action: nil)
+                            }
+                            ConnectorCard()
+                        }
 
-                    section("StudioX Console") {
-                        row("squares-2x2", "在瀏覽器打開 console") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
-                        Divider().overlay(Theme.hair).padding(.leading, 44)
-                        row("puzzle-piece", "連接外部 AI 的授權") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
-                        Divider().overlay(Theme.hair).padding(.leading, 44)
-                        row("information-circle", "版本", value: version, action: nil)
+                        Button {
+                            confirmingSignOut = true
+                        } label: { Text("登出") }
+                        .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
                     }
+                    .frame(maxWidth: Metric.readable + 120, alignment: .leading)
+                    .pageWidth()
+                    .padding(.top, 24)
 
-                    Button(role: .destructive) {
-                        confirmingSignOut = true
-                    } label: {
-                        Label { Text("登出") } icon: { HeroIcon("arrow-right-start-on-rectangle", size: 18) }
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Built with care in Tainan.")
+                            .font(.serif(18, italic: true))
+                            .foregroundStyle(Theme.inverseMuted)
+                        Wordmark(color: Theme.onInverse)
                     }
-                    .buttonStyle(.adm(.danger, fullWidth: true))
-                    .padding(.top, 6)
+                    .pageWidth()
+                    .padding(.top, 48)
+                    .padding(.bottom, 24)
+                    .background(Theme.inverse)
+                    .padding(.top, 72)
                 }
-                .padding(.horizontal, Metric.gutter)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
             }
-            .admPage()
+            .brandPage()
             .navigationTitle("我")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: Route.self) { RouteView(route: $0) }
             .confirmationDialog("要登出嗎？", isPresented: $confirmingSignOut, titleVisibility: .visible) {
                 Button("登出", role: .destructive) { Task { await model.signOut() } }
                 Button("取消", role: .cancel) {}
@@ -98,38 +105,26 @@ struct AccountView: View {
         }
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title)
-            VStack(spacing: 0) { content() }
-                .admCard(padding: 0)
-        }
-    }
-
     @ViewBuilder
-    private func row(_ icon: String, _ title: String, value: String? = nil, action: (() -> Void)?) -> some View {
+    private func row(_ title: String, value: String? = nil, action: (() -> Void)?) -> some View {
         let content = HStack(spacing: 12) {
-            HeroIcon(icon, size: 18)
-                .foregroundStyle(Theme.icon)
-                .frame(width: 20)
             Text(title)
-                .font(.admBody)
+                .textRole(.h4)
                 .foregroundStyle(Theme.ink)
             Spacer()
             if let value {
-                Text(value).font(.admMeta).foregroundStyle(Theme.inkMuted)
+                Text(value).textRole(.small).foregroundStyle(Theme.muted)
             }
             if action != nil {
-                HeroIcon("chevron-right", size: 13).foregroundStyle(Theme.faint)
+                Text("→").font(.brand(18, .medium)).foregroundStyle(Theme.accent)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .padding(.vertical, 16)
+        .contentShape(.rect)
 
         if let action {
             Button(action: action) { content }
-                .buttonStyle(RowPressStyle())
+                .buttonStyle(.row)
         } else {
             content
         }

@@ -189,5 +189,5 @@ nonisolated func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
         }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .admPage()
+    .brandPage()
 }

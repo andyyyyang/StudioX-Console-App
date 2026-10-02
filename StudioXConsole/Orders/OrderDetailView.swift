@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// 一張訂單：品項、金額、收件、付款、物流；出貨、完成、取消、退款（都先出網站的確認，按了才執行）
+/// 一張訂單：金額、品項、收件、付款、物流與貨態、發票；出貨、完成、取消、退款、確認收款
+/// （都先出網站的確認，按了才執行）
 struct OrderDetailView: View {
     let site: String
     let orderID: String
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var detail: OrderDetail?
     @State private var error: String?
     @State private var proposal: Proposal?
@@ -16,33 +18,46 @@ struct OrderDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 44) {
                 if let d = detail {
                     header(d)
                     actions(d)
-                    items(d)
-                    customer(d)
-                    payment(d)
+                    if sizeClass == .regular {
+                        HStack(alignment: .top, spacing: 48) {
+                            items(d).frame(maxWidth: .infinity, alignment: .topLeading)
+                            VStack(alignment: .leading, spacing: 44) {
+                                customer(d)
+                                payment(d)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                    } else {
+                        items(d)
+                        customer(d)
+                        payment(d)
+                    }
                     links(d)
                 } else if let error {
                     ErrorNote(message: error) { Task { await load() } }
                 } else {
-                    LoadingRow().admCard(padding: 0)
+                    SkeletonRows(rows: 6)
                 }
             }
-            .padding(.horizontal, Metric.gutter)
-            .padding(.top, 8)
-            .padding(.bottom, 32)
+            .pageWidth()
+            .padding(.top, 16)
+            .padding(.bottom, 64)
         }
         .refreshable { await load() }
-        .admPage()
+        .brandPage()
         .navigationTitle(detail.map { "#\($0.summary.number)" } ?? "訂單")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     model.askXena("幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
-                } label: { HeroIcon("sparkles") }
+                } label: {
+                    Image("XenaOrb").resizable().scaledToFit().frame(width: 22, height: 22)
+                }
                 .accessibilityLabel("問 Xena")
             }
         }
@@ -91,145 +106,183 @@ struct OrderDetailView: View {
         }
     }
 
-    // MARK: 區塊
+    // MARK: 頁首
 
     private func header(_ d: OrderDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 16) {
+            Eyebrow("\(model.site(site)?.name ?? site)・\(d.summary.createdAt?.shortText ?? "")")
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                CountUp(value: Double(d.totalCents) / 100, format: { "NT$" + Int($0.rounded()).formatted() })
+                    .textRole(.stat)
+                    .foregroundStyle(Theme.ink)
+                Text("#\(d.summary.number)")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Theme.muted)
+                    .textSelection(.enabled)
+            }
+            HStack(spacing: 8) {
                 StatusBadge(d.summary.status.label, tone: d.summary.status.tone)
                 if let refund = d.summary.refundStatus {
                     StatusBadge(refund == "succeeded" ? "已退款" : refund == "failed" ? "退款失敗" : "退款中", tone: refund == "failed" ? .danger : .neutral)
                 }
-                Spacer()
-                Text(d.summary.createdAt?.shortText ?? "")
-                    .font(.admMeta)
-                    .foregroundStyle(Theme.inkMuted)
+                if let logistics = d.logisticsStatus {
+                    StatusBadge(logistics, tone: logistics.contains("送達") ? .active : .info)
+                }
             }
-            Text(ntd(cents: d.totalCents))
-                .font(.system(.largeTitle, weight: .semibold).monospacedDigit())
-                .tracking(-0.6)
-                .foregroundStyle(Theme.ink)
             Text("\(d.summary.customer)・\(d.shippingMethod)")
-                .font(.admBody)
-                .foregroundStyle(Theme.inkMuted)
+                .textRole(.lead)
+                .foregroundStyle(Theme.ink2)
         }
-        .admCard()
+        .reveal()
     }
+
+    // MARK: 動作
 
     @ViewBuilder
     private func actions(_ d: OrderDetail) -> some View {
         let status = d.summary.status
         let s = model.site(site)
-        VStack(spacing: 10) {
-            if status == .paid {
-                Button { shipping = true } label: {
-                    Label { Text("標記已出貨") } icon: { HeroIcon("truck", size: 18) }
+        let canConfirmTransfer = s?.tools.contains("confirm_bank_transfer") == true && d.bankTransfer?.awaiting == true
+        let canRefund = s?.canRefund == true && [.paid, .shipped, .completed].contains(status) && d.refundCents < d.totalCents
+        if status == .paid || status == .shipped || status == .pending || status == .awaitingPayment || canConfirmTransfer || canRefund {
+            VStack(alignment: .leading, spacing: 10) {
+                if status == .paid {
+                    Button { shipping = true } label: { Text("標記已出貨") }
+                        .buttonStyle(.brand(.accent, size: .lg, fullWidth: true, arrow: true))
                 }
-                .buttonStyle(.adm(.primary, fullWidth: true))
-            }
-            if status == .shipped {
-                Button {
-                    Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "completed") } }
-                } label: {
-                    Label { Text("標記已完成") } icon: { HeroIcon("check-circle", size: 18) }
-                }
-                .buttonStyle(.adm(.primary, fullWidth: true))
-            }
-            HStack(spacing: 10) {
-                if status == .pending || status == .awaitingPayment {
+                if status == .shipped {
                     Button {
-                        Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "cancelled") } }
-                    } label: { Text("取消訂單") }
-                    .buttonStyle(.adm(.danger, fullWidth: true))
+                        Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "completed") } }
+                    } label: { Text("標記已完成") }
+                    .buttonStyle(.brand(.primary, size: .lg, fullWidth: true, arrow: true))
                 }
-                if s?.canRefund == true, [.paid, .shipped, .completed].contains(status), d.refundCents < d.totalCents {
-                    Button { refunding = true } label: {
-                        Label { Text("退款…") } icon: { HeroIcon("arrow-uturn-left", size: 16) }
+                if canConfirmTransfer {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            Task { await propose { try await model.api.proposeConfirmTransfer(site: site, orderID: orderID) } }
+                        } label: { Text("我在帳上看到這筆錢了，確認收款") }
+                        .buttonStyle(.brand(.primary, size: .lg, fullWidth: true))
+                        Text("只有看過銀行帳單才按；客人說他匯了、或回報了後五碼都不算。確認後網站會寄確認信給客人、把出貨單寄給網購處理人員。")
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.muted)
                     }
-                    .buttonStyle(.adm(.danger, fullWidth: true))
+                }
+                HStack(spacing: 10) {
+                    if status == .pending || status == .awaitingPayment {
+                        Button {
+                            Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "cancelled") } }
+                        } label: { Text("取消訂單") }
+                        .buttonStyle(.brand(.danger, fullWidth: true))
+                    }
+                    if canRefund {
+                        Button { refunding = true } label: { Text("退款…") }
+                            .buttonStyle(.brand(.danger, fullWidth: true))
+                    }
                 }
             }
+            .disabled(working)
         }
-        .disabled(working)
     }
 
+    // MARK: 品項與金額
+
     private func items(_ d: OrderDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FieldLabel("品項")
-            ForEach(d.lines) { line in
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(line.name).font(.admBody).foregroundStyle(Theme.ink)
-                        if let v = line.variant { Text(v).font(.admMeta).foregroundStyle(Theme.inkMuted) }
+        VStack(alignment: .leading, spacing: 14) {
+            Eyebrow("品項")
+            RuledList {
+                ForEach(d.lines) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(line.name).textRole(.body).foregroundStyle(Theme.ink)
+                            if let v = line.variant { Text(v).textRole(.xs).foregroundStyle(Theme.muted) }
+                        }
+                        Text("× \(line.quantity)").textRole(.small).foregroundStyle(Theme.muted)
+                        Spacer()
+                        Text(ntd(cents: line.totalCents))
+                            .font(.brand(15, .medium).monospacedDigit())
+                            .foregroundStyle(Theme.ink)
                     }
-                    Text("× \(line.quantity)").font(.admMeta).foregroundStyle(Theme.inkMuted)
-                    Spacer()
-                    Text(ntd(cents: line.totalCents)).font(.system(.subheadline).monospacedDigit()).foregroundStyle(Theme.ink)
+                    .padding(.vertical, 12)
                 }
             }
-            Divider().overlay(Theme.hair)
-            amountRow("小計", d.subtotalCents)
-            amountRow("運費", d.shippingFeeCents, zero: "免運")
-            if d.discountCents > 0 { amountRow("折扣", -d.discountCents) }
-            if d.refundCents > 0 { amountRow("已退款", -d.refundCents) }
-            HStack {
-                Text("合計").font(.admCardTitle)
+            VStack(spacing: 8) {
+                amountRow("小計", d.subtotalCents)
+                amountRow("運費", d.shippingFeeCents, zero: "免運")
+                if d.discountCents > 0 { amountRow("折扣", -d.discountCents) }
+                if d.refundCents > 0 { amountRow("已退款", -d.refundCents) }
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("合計").textRole(.h4)
                 Spacer()
-                Text(ntd(cents: d.totalCents)).font(.system(.headline).monospacedDigit())
+                Text(ntd(cents: d.totalCents)).font(.brand(22, .medium).monospacedDigit())
             }
             .foregroundStyle(Theme.ink)
+            .padding(.top, 4)
         }
-        .admCard()
     }
 
     private func amountRow(_ label: String, _ cents: Int, zero: String? = nil) -> some View {
         HStack {
             Text(label)
             Spacer()
-            Text(cents == 0 && zero != nil ? zero! : (cents < 0 ? "−" + ntd(cents: -cents) : ntd(cents: cents)))
+            Text(cents == 0 && zero != nil ? zero ?? "" : (cents < 0 ? "−" + ntd(cents: -cents) : ntd(cents: cents)))
                 .monospacedDigit()
         }
-        .font(.admMeta)
-        .foregroundStyle(Theme.inkMuted)
+        .textRole(.small)
+        .foregroundStyle(Theme.ink2)
     }
+
+    // MARK: 收件
 
     private func customer(_ d: OrderDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FieldLabel("收件")
-            infoRow("user", d.summary.customer)
-            if !d.phone.isEmpty, let tel = URL(string: "tel:\(d.phone.filter { $0.isNumber || $0 == "+" })") {
-                Button { openURL(tel) } label: { infoRow("phone", d.phone, tappable: true) }
-                    .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 14) {
+            Eyebrow("收件")
+            RuledList(color: Theme.hair) {
+                infoRow("姓名", d.summary.customer)
+                if !d.phone.isEmpty, let tel = URL(string: "tel:\(d.phone.filter { $0.isNumber || $0 == "+" })") {
+                    Button { openURL(tel) } label: { infoRow("電話", d.phone, link: true) }
+                        .buttonStyle(.row)
+                }
+                if let email = d.email, let mail = URL(string: "mailto:\(email)") {
+                    Button { openURL(mail) } label: { infoRow("Email", email, link: true) }
+                        .buttonStyle(.row)
+                }
+                infoRow(d.shippingMethod, d.address)
+                if let code = d.cvsPaymentNo { infoRow("7-11 取貨單號", code) }
+                if let note = d.note { infoRow("備註", note) }
             }
-            if let email = d.email, let mail = URL(string: "mailto:\(email)") {
-                Button { openURL(mail) } label: { infoRow("envelope", email, tappable: true) }
-                    .buttonStyle(.plain)
-            }
-            infoRow("map-pin", d.address)
-            if let note = d.note { infoRow("document-text", note) }
         }
-        .admCard()
     }
 
+    // MARK: 付款、物流、發票
+
     private func payment(_ d: OrderDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            FieldLabel("付款與物流")
-            infoRow("credit-card", d.paymentLabel + (d.summary.paidAt.map { "・\($0.shortText) 付款" } ?? ""))
-            if let b = d.bankTransfer {
-                VStack(alignment: .leading, spacing: 4) {
-                    infoRow("banknotes", "客人回報：\(b.name ?? "—")・後五碼 \(b.last5 ?? "—")")
-                    Text(b.awaiting ? "這是客人說的，還沒對帳。確認收款請在後台看過銀行帳單再按。" : "已確認收款")
-                        .font(.admMeta)
-                        .foregroundStyle(b.awaiting ? Theme.warningFG : Theme.successFG)
-                        .padding(.leading, 30)
+        VStack(alignment: .leading, spacing: 14) {
+            Eyebrow("付款・物流・發票")
+            RuledList(color: Theme.hair) {
+                infoRow("付款", d.paymentLabel + (d.summary.paidAt.map { "・\($0.shortText) 付款" } ?? ""))
+                if let b = d.bankTransfer {
+                    VStack(alignment: .leading, spacing: 4) {
+                        infoRow("客人回報", "\(b.name ?? "—")・後五碼 \(b.last5 ?? "—")")
+                        Text(b.awaiting ? "這是客人說的，還沒對帳" + (b.deadline.map { "・\($0.shortText) 前沒收到會自動取消" } ?? "") : "已確認收款")
+                            .textRole(.xs)
+                            .foregroundStyle(b.awaiting ? Theme.warningFG : Theme.successFG)
+                            .padding(.bottom, 8)
+                    }
                 }
+                if let tracking = d.trackingNumber { infoRow("物流單號", tracking) }
+                if let logistics = d.logisticsStatus {
+                    infoRow("貨態", logistics + (d.logisticsUpdatedAt.map { "・\($0.shortText)" } ?? ""))
+                }
+                if let waybill = d.waybillURL {
+                    Button { openURL(waybill) } label: { infoRow("託運單", "打開 PDF", link: true) }
+                        .buttonStyle(.row)
+                }
+                if let invoice = d.invoiceNumber { infoRow("發票號碼", invoice) }
+                if let text = d.invoiceText { infoRow("發票", text) }
+                if let note = d.refundNote { infoRow("退款備註", note) }
             }
-            if let tracking = d.summary.trackingNumber, !tracking.isEmpty {
-                infoRow("truck", "物流單號 \(tracking)")
-            }
-            if let invoice = d.invoiceNumber { infoRow("receipt-refund", "發票 \(invoice)") }
         }
-        .admCard()
     }
 
     @ViewBuilder
@@ -237,30 +290,31 @@ struct OrderDetailView: View {
         HStack(spacing: 10) {
             if let track = d.trackURL {
                 ShareLink(item: track, subject: Text("訂單 #\(d.summary.number) 的追蹤頁")) {
-                    Label { Text("分享追蹤頁") } icon: { HeroIcon("link", size: 16) }
+                    Text("分享追蹤頁")
                 }
-                .buttonStyle(.adm(.secondary, size: .lg, fullWidth: true))
+                .buttonStyle(.brand(.ghost, fullWidth: true))
             }
             if let slip = d.packingSlipURL {
-                Button { openURL(slip) } label: {
-                    Label { Text("出貨單") } icon: { HeroIcon("printer", size: 16) }
-                }
-                .buttonStyle(.adm(.secondary, size: .lg, fullWidth: true))
+                Button { openURL(slip) } label: { Text("出貨單 ↗") }
+                    .buttonStyle(.brand(.ghost, fullWidth: true))
             }
         }
     }
 
-    private func infoRow(_ icon: String, _ text: String, tappable: Bool = false) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            HeroIcon(icon, size: 18)
-                .foregroundStyle(Theme.icon)
-                .frame(width: 20)
+    private func infoRow(_ label: String, _ text: String, link: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(label)
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+                .frame(width: 84, alignment: .leading)
             Text(text)
-                .font(.admBody)
-                .foregroundStyle(tappable ? Theme.accent : Theme.ink)
+                .textRole(.body)
+                .foregroundStyle(link ? Theme.accentText : Theme.ink)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 11)
+        .contentShape(.rect)
     }
 }
 
@@ -273,31 +327,32 @@ private struct ShipSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                FieldLabel("物流單號（選填）")
-                TextField("例如黑貓的託運單號", text: $tracking)
-                    .keyboardType(.asciiCapable)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused($focused)
-                    .admField(focused: focused)
+            VStack(alignment: .leading, spacing: 20) {
+                Headline("Mark as *shipped*", role: .h2)
+                FieldBlock(label: "物流單號（選填）", hint: "黑貓的單號填了之後，網站每 15 分鐘自動更新貨態", focused: focused) {
+                    TextField("例如黑貓的託運單號", text: $tracking)
+                        .keyboardType(.asciiCapable)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($focused)
+                        .fieldText()
+                }
                 Text("下一步會出網站的確認，按了才會改。")
-                    .font(.admMeta)
-                    .foregroundStyle(Theme.inkMuted)
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
                 Spacer()
                 Button("下一步") {
                     let t = tracking.trimmingCharacters(in: .whitespaces)
                     dismiss()
                     onSubmit(t.isEmpty ? nil : t)
                 }
-                .buttonStyle(.adm(.primary, fullWidth: true))
+                .buttonStyle(.brand(.accent, size: .lg, fullWidth: true, arrow: true))
             }
-            .padding(20)
+            .padding(24)
             .background(Theme.sheet.ignoresSafeArea())
-            .navigationTitle("標記已出貨")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(380)])
         .onAppear { focused = true }
     }
 }
@@ -309,35 +364,43 @@ private struct RefundSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var amount = ""
     @State private var note = ""
+    @FocusState private var focused: Int?
 
     private var maxNtd: Int { Int((Double(totalCents) / 100).rounded()) }
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                FieldLabel("退多少（元）")
-                TextField("全額 \(maxNtd)", text: $amount)
-                    .keyboardType(.numberPad)
-                    .admField()
-                FieldLabel("備註（選填）")
-                TextField("例如：延誤補償", text: $note)
-                    .admField()
+            VStack(alignment: .leading, spacing: 22) {
+                Headline("*Refund*", role: .h2)
+                FieldBlock(label: "退多少（元）", hint: "空白＝全額退剩下的 NT$\(maxNtd.formatted())", focused: focused == 0) {
+                    HStack(spacing: 6) {
+                        Text("NT$").foregroundStyle(Theme.muted)
+                        TextField("\(maxNtd)", text: $amount)
+                            .keyboardType(.numberPad)
+                            .focused($focused, equals: 0)
+                    }
+                    .fieldText()
+                }
+                FieldBlock(label: "備註（選填）", focused: focused == 1) {
+                    TextField("例如：延誤補償", text: $note)
+                        .focused($focused, equals: 1)
+                        .fieldText()
+                }
                 Text("下一步會出網站的確認，要打「退款」才會執行；金額超過門檻還要店主的驗證碼。")
-                    .font(.admMeta)
-                    .foregroundStyle(Theme.inkMuted)
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
                 Spacer()
                 Button("下一步") {
                     let value = Int(amount.filter(\.isNumber))
                     dismiss()
                     onSubmit(value.flatMap { $0 > 0 && $0 < maxNtd ? $0 : nil }, note.trimmingCharacters(in: .whitespaces))
                 }
-                .buttonStyle(.adm(.danger, fullWidth: true))
+                .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
             }
-            .padding(20)
+            .padding(24)
             .background(Theme.sheet.ignoresSafeArea())
-            .navigationTitle("退款")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }
