@@ -28,7 +28,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 選 Xcode（有 27 用 27，沒有就用最新的）
         run: |
@@ -68,7 +68,7 @@ jobs:
             grep -E "^/.*warning:" build.log | sed "s|$GITHUB_WORKSPACE/||" | sort -u | head -100 | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || true
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: build-log

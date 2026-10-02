@@ -34,7 +34,7 @@ jobs:
       ready: ${{ steps.check.outputs.ready }}
       app_id: ${{ steps.asc.outputs.app_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: check
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -78,7 +78,7 @@ jobs:
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 選 Xcode（有 27 用 27，沒有就用最新的）
         run: |
@@ -212,7 +212,7 @@ jobs:
           rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${{ steps.sign.outputs.profile_uuid }}.mobileprovision" \
                 "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/${{ steps.sign.outputs.profile_uuid }}.mobileprovision"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: testflight-logs
@@ -232,7 +232,7 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 20
       - run: pip install --quiet pyjwt cryptography
