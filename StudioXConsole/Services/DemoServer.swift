@@ -8,6 +8,7 @@ import Foundation
 /// 其他啟動參數：
 ///   -demoTab sites|orders|inbox|account|search   打開哪個分頁
 ///   -demoRoute site|traffic|order|thread|products|product|xena   打開哪一頁
+///   -demoSheet today|yellowgirl.tw   首頁卡片打開的 sheet
 ///   -demoLock YES   顯示 Face ID 的鎖定畫面
 nonisolated enum DemoServer {
     static let enabled = ProcessInfo.processInfo.arguments.contains("-demo")

@@ -203,6 +203,8 @@ final class AppModel {
         default: break
         }
         if defaults.bool(forKey: "demoVoice") { showVoice = true }
+        // 首頁卡片打開的 sheet：today 或網站代號
+        if let sheet = defaults.string(forKey: "demoSheet") { deckSheet = DeckSheet(id: sheet) }
     }
     #endif
 

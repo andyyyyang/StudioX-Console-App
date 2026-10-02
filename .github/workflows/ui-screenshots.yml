@@ -89,6 +89,7 @@ jobs:
           scenes=(
             "talk|-demo|5"
             "home|-demo|13"
+            "sheet|-demo -demoSheet today|6"
             "site|-demo -demoRoute site"
             "xena|-demo -demoRoute xena"
             "voice|-demo -demoVoice YES"
