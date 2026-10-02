@@ -438,12 +438,10 @@ def invite(app_id, group):
         try:
             found = call("GET", "/betaTesters", query={"filter[email]": email, "limit": 1}).get("data", [])
             if found:
-                try:
-                    call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": found[0]["id"]}]})
-                    summary(f"- {mask(email)} 加進「{gname}」")
-                except ApiError as e:
-                    if e.status not in (409, 422):
-                        raise
+                a = found[0].get("attributes") or {}
+                summary(f"- {mask(email)} 已經是測試員（{a.get('inviteType') or '?'}／{a.get('state') or '?'}），加進「{gname}」…")
+                call("POST", f"/betaGroups/{gid}/relationships/betaTesters", {"data": [{"type": "betaTesters", "id": found[0]["id"]}]})
+                summary(f"- {mask(email)} 加進「{gname}」")
             else:
                 call("POST", "/betaTesters", {"data": {
                     "type": "betaTesters",
