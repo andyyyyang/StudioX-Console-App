@@ -70,8 +70,13 @@ struct RecordEditor: View {
     /// 等確認的是哪一種動作（確認成功之後要做的事不一樣）
     enum Pending { case save, create, delete, images }
 
-    /// 只能寫、不能讀的欄位（一次性的操作），通用畫面不顯示
-    private static let operationKeys: Set<String> = ["addItems", "removeProductIds", "updateItems", "removeItemIds", "sections"]
+    /// 通用畫面不顯示的欄位：
+    ///   - 只能寫、不能讀的一次性操作（addItems、removeItemIds…）
+    ///   - 整組替換、但網站回報不了現在值的（折價券的 productIds、組合的 items）：送出會把原本的整組換掉，
+    ///     所以只在下面的「只能用在這些商品」「組合內容」顯示，要改請 Xena 或後台
+    private static let operationKeys: Set<String> = ["addItems", "removeProductIds", "updateItems", "removeItemIds"]
+    /// 哪一種資料的哪個欄位（同名的欄位在別的資料是一般欄位，例如服務的 items）
+    private static let hiddenFields: [String: Set<String>] = ["coupon": ["productIds"], "bundle": ["items"], "stall_menu": ["sections"]]
 
     var body: some View {
         ScrollView {
@@ -127,6 +132,10 @@ struct RecordEditor: View {
             for f in s.createFields {
                 if let d = f.defaultValue { start[f.key] = d }
             }
+            // 內容集合：和後台的新增表單一樣先填好欄位的預設值（包括一組欄位裡的，例如封面的樣式與顏色）
+            for def in s.collection?.fields ?? [] where start[def.key] == nil {
+                if let d = def.initialValue { start[def.key] = d }
+            }
             original = [:]
             draft = start
             return
@@ -166,6 +175,31 @@ struct RecordEditor: View {
         }
         original = values
         draft = values
+    }
+
+    /// 換了圖之後：圖片可能在某個欄位裡（例如作品的 cover.image），重新拿現在的值，
+    /// 但保留還沒儲存的修改——沒動過的欄位用新的值；動過的一組欄位（object）裡沒動過的子欄位也換成新的
+    private func refreshAfterImages() async {
+        guard let s = schema, let fresh = try? await model.api.record(site: site, entity: entity, id: mode.id) else { return }
+        var values = fresh.values
+        for f in s.fields where f.kind == .ntd {
+            if let cents = values[f.key]?.double { values[f.key] = .number(cents / 100) }
+        }
+        var next = values
+        for (key, edited) in draft where edited != (original[key] ?? .null) {
+            if case .object(var mine) = edited, case .object(let before) = original[key] ?? .null, case .object(let after) = values[key] ?? .null {
+                for (sub, value) in mine where value == (before[sub] ?? .null) {
+                    mine[sub] = after[sub] ?? .null
+                }
+                for (sub, value) in after where mine[sub] == nil { mine[sub] = value }
+                next[key] = .object(mine)
+            } else {
+                next[key] = edited
+            }
+        }
+        original = values
+        draft = next
+        if let list = fresh.images { images = list }
     }
 
     /// 網站還沒有 /api/app/record 時：從 get 的內容找同名的欄位（盡量）
@@ -243,7 +277,9 @@ struct RecordEditor: View {
             SerpPreview(title: draft["titleZh"]?.string ?? "", description: draft["descriptionZh"]?.string ?? "", url: detail["url"]?.string ?? model.site(site)?.url?.absoluteString ?? "")
         default:
             if s.images != nil, mode != .create {
-                ImageGallery(site: site, entity: entity, id: mode.id ?? "", single: s.images == .single, images: $images)
+                ImageGallery(site: site, entity: entity, id: mode.id ?? "", single: s.images == .single, images: $images) {
+                    Task { await refreshAfterImages() }
+                }
             }
             if let c = s.collection, c.seo, mode != .create {
                 let seo = draft["seo"] ?? .null
@@ -261,7 +297,8 @@ struct RecordEditor: View {
     private var fields: [FieldSpec] {
         guard let schema else { return [] }
         let list = mode == .create ? schema.createFields : schema.fields
-        return list.filter { !Self.operationKeys.contains($0.key) }
+        let hidden = Self.hiddenFields[entity] ?? []
+        return list.filter { !Self.operationKeys.contains($0.key) && !hidden.contains($0.key) }
     }
 
     private var editable: Bool { mode == .create || (schema?.canUpdate ?? false) }
@@ -366,12 +403,47 @@ struct RecordEditor: View {
             let now = Self.normalize(draft[f.key] ?? .null, f)
             let before = Self.normalize(original[f.key] ?? .null, f)
             if mode == .create {
-                if !now.isNull, now != .string(""), now != .array([]) { out[f.key] = now }
-            } else if now != before {
+                if !Self.isEmpty(now) { out[f.key] = now }
+            } else if Self.comparable(now, f) != Self.comparable(before, f) {
                 out[f.key] = now
             }
         }
         return out
+    }
+
+    /// 沒有值：null、空字串、空陣列、空物件
+    private static func isEmpty(_ v: JSONValue) -> Bool {
+        switch v {
+        case .null: true
+        case .string(let s): s.isEmpty
+        case .array(let a): a.isEmpty
+        case .object(let o): o.values.allSatisfy(isEmpty)
+        default: false
+        }
+    }
+
+    /// 比對用的形狀（不是送出的值）：沒有值的都算一樣、日期比時間點、物件裡沒值的欄位當作沒有
+    /// ——改了又改回去、日期重選同一個時間，都不算變更
+    private static func comparable(_ v: JSONValue, _ f: FieldSpec) -> JSONValue {
+        if isEmpty(v) { return .null }
+        if f.kind == .date, let d = v.date { return .number((d.timeIntervalSince1970 * 1000).rounded()) }
+        return compact(v)
+    }
+
+    private static func compact(_ v: JSONValue) -> JSONValue {
+        switch v {
+        case .object(let o):
+            var out: [String: JSONValue] = [:]
+            for (k, x) in o {
+                let c = compact(x)
+                if !isEmpty(c) && c != .bool(false) { out[k] = c }
+            }
+            return .object(out)
+        case .array(let a):
+            return .array(a.map(compact))
+        default:
+            return v
+        }
     }
 
     private static func normalize(_ v: JSONValue, _ f: FieldSpec) -> JSONValue {

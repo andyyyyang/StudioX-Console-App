@@ -12,6 +12,8 @@ struct ImageGallery: View {
     let id: String
     var single = false
     @Binding var images: [String]
+    /// 圖片改了（上傳、移除、換主圖）：編輯畫面重新拿欄位的值（圖片可能在某個欄位裡）
+    var onChanged: () -> Void = {}
 
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -91,6 +93,7 @@ struct ImageGallery: View {
                 withAnimation(Motion.ease) { images = list.compactMap { $0["url"]?.string ?? $0.string } }
             }
             model.show("圖片已更新")
+            onChanged()
         }
         .sheet(item: Binding(get: { viewing.map(ViewingImage.init) }, set: { viewing = $0?.url })) { item in
             ImageViewer(url: URL(string: item.url))
@@ -122,10 +125,12 @@ struct ImageGallery: View {
                 withAnimation(Motion.ease) { images = next }
             } catch {
                 model.show(error.localizedDescription, tone: .danger)
+                if uploaded > 0 { onChanged() }
                 return
             }
         }
         model.show(uploaded == 1 ? "已上傳 1 張圖片" : "已上傳 \(uploaded) 張圖片")
+        onChanged()
     }
 
     /// 長邊最多 2400、JPEG（網站的上限是 5MB）

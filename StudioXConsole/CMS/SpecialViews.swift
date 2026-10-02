@@ -76,7 +76,7 @@ struct MemberView: View {
                     Link(email, destination: url)
                 }
                 if let phone = u["phone"]?.string, let url = URL(string: "tel:\(phone.filter { $0.isNumber || $0 == "+" })") {
-                    Link(phone + ((u["phoneVerified"]?.bool ?? false) ? " ✓" : ""), destination: url)
+                    Link(phone + (u["phoneVerified"].map { !$0.isNull } ?? false ? " ✓" : ""), destination: url)
                 }
             }
             .textRole(.body)

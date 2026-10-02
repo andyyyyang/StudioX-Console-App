@@ -186,6 +186,8 @@ struct FieldDef: Identifiable, Hashable {
     var collection: String?
     var maxLength: Int?
     var localized: Bool
+    /// 新增時的預設值（後台的新增表單也是先填這個）
+    var defaultValue: JSONValue?
 
     var id: String { key }
 
@@ -201,6 +203,18 @@ struct FieldDef: Identifiable, Hashable {
         collection = json["collection"]?.string
         maxLength = json["maxLength"]?.int
         localized = json["localized"]?.bool ?? false
+        defaultValue = json["default"].flatMap { $0.isNull ? nil : $0 }
+    }
+
+    /// 新增時一開始的值：自己的預設值；一組欄位（object）是子欄位預設值組成的物件（admin 的 EntryEditor 的 initialData）
+    var initialValue: JSONValue? {
+        if let defaultValue { return defaultValue }
+        guard kind == .object else { return nil }
+        var o: [String: JSONValue] = [:]
+        for sub in fields {
+            if let v = sub.initialValue { o[sub.key] = v }
+        }
+        return o.isEmpty ? nil : .object(o)
     }
 
     /// 自己或底下有要翻譯的欄位

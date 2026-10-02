@@ -59,7 +59,7 @@ struct CollectionView: View {
 
     /// 網站的 list 支援 query 的資料（其他的在 App 裡篩）
     private var serverSearch: Bool {
-        schema?.collection != nil || ["product", "user", "automation", "automation_run"].contains(entity)
+        schema?.collection != nil || ["product", "user", "automation"].contains(entity)
     }
 
     /// 篩選：上架、啟用、已處理…
@@ -104,9 +104,14 @@ struct CollectionView: View {
 
     /// 網站沒有搜尋的資料：在 App 裡篩
     private var shown: [RecordSummary] {
+        var list = rows
+        // 「已上架／已發布」：有的資料網站的 list 不支援篩選（例如組合），在 App 裡再篩一次
+        if filter == "published" {
+            list = list.filter { $0.raw["isPublished"]?.bool != false && ($0.raw["status"]?.string ?? "published") == "published" }
+        }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty, !serverSearch else { return rows }
-        return rows.filter { [$0.title, $0.subtitle ?? "", $0.detail ?? ""].joined(separator: " ").lowercased().contains(q) }
+        guard !q.isEmpty, !serverSearch else { return list }
+        return list.filter { [$0.title, $0.subtitle ?? "", $0.detail ?? ""].joined(separator: " ").lowercased().contains(q) }
     }
 
     // MARK: 頁首
