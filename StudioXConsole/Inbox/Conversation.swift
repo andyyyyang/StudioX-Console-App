@@ -25,6 +25,8 @@ struct XenaConversationView: View {
     @State private var replying = false
     @State private var working = false
     @State private var viewing: ViewedMedia?
+    /// 照片從縮圖放大成全螢幕（iOS 的 zoom 轉場）
+    @Namespace private var mediaSpace
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var atBottom = true
     /// 捲在上面時進來的新訊息
@@ -112,7 +114,10 @@ struct XenaConversationView: View {
         }
         .onAppear { model.openChats += 1 }
         .onDisappear { model.openChats = max(0, model.openChats - 1) }
-        .fullScreenCover(item: $viewing) { MediaViewer(media: $0) }
+        .fullScreenCover(item: $viewing) { media in
+            MediaViewer(media: media)
+                .navigationTransition(.zoom(sourceID: media.url, in: mediaSpace))
+        }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             if replying { announceReply(result) } else { model.show("已更新") }
             replying = false
@@ -132,19 +137,19 @@ struct XenaConversationView: View {
         let flagged = Self.jevFlags(d.messages)
         ForEach(ChatEntry.build(d.messages)) { entry in
             switch entry {
-            case .day(let date):
-                ChatDayDivider(date: date)
-                    .padding(.top, 22)
+            case .time(_, let date):
+                ChatTimeHeader(date: date)
+                    .padding(.top, 20)
                     .padding(.bottom, 4)
             case .event(let m):
                 ChatEventRow(message: m, reason: m.id == lastHandoff ? d.handoffReason : nil)
-                    .padding(.top, 14)
+                    .padding(.vertical, 8)
             case .message(let m, let first, let last):
                 XenaChatRow(
                     message: m, first: first, last: last, jevFlag: flagged.contains(m.id),
-                    who: who, picture: d.picture, site: site, siteURL: model.site(site)?.url
+                    site: site, siteURL: model.site(site)?.url, space: mediaSpace
                 ) { viewing = $0 }
-                .padding(.top, first ? 14 : 3)
+                .padding(.top, first ? 10 : 2)
             }
         }
     }
@@ -395,71 +400,166 @@ struct XenaConversationView: View {
 
 // MARK: - 對話的一列一列
 
-/// 對話排成一列一列：日期、事件、訊息（同一個人五分鐘內連著說的合成一組：第一則放名字與時間，客人的第一則放頭像）
+/// 對話排成一列一列（照 iMessage）：隔了 15 分鐘以上或跨天放一行時間；同一個人連著說的合成一組，
+/// 組的最後一個泡泡有小尾巴；我們這邊換人說話時（Xena ↔ 專人）在第一個泡泡上面寫是誰
 enum ChatEntry: Identifiable {
-    case day(Date)
+    case time(id: Int, Date)
     case event(XenaConversationMessage)
     case message(XenaConversationMessage, first: Bool, last: Bool)
 
     var id: String {
         switch self {
-        case .day(let d): "day-\(Int(d.timeIntervalSince1970))"
+        case .time(let id, _): "t-\(id)"
         case .event(let m), .message(let m, _, _): "m-\(m.id)"
         }
     }
 
+    /// 隔多久要再放一行時間
+    static let gap: TimeInterval = 15 * 60
+
+    /// 這一則前面要不要放時間（第一則、跨天、隔了 15 分鐘以上）
+    static func needsTime(_ at: Date?, after previous: Date?) -> Bool {
+        guard let at else { return false }
+        guard let previous else { return true }
+        return !Calendar.taipei.isDate(previous, inSameDayAs: at) || at.timeIntervalSince(previous) >= gap
+    }
+
     static func build(_ messages: [XenaConversationMessage]) -> [ChatEntry] {
+        var headers: [Bool] = []
+        var lastAt: Date?
+        for m in messages {
+            headers.append(needsTime(m.at, after: lastAt))
+            if let at = m.at { lastAt = at }
+        }
         var out: [ChatEntry] = []
-        var day: Date?
         for (i, m) in messages.enumerated() {
-            if let at = m.at {
-                let d = Calendar.taipei.startOfDay(for: at)
-                if d != day {
-                    out.append(.day(d))
-                    day = d
-                }
-            }
+            if headers[i], let at = m.at { out.append(.time(id: m.id, at)) }
             if m.role == "event" {
                 out.append(.event(m))
                 continue
             }
             let previous = i > 0 ? messages[i - 1] : nil
             let next = i + 1 < messages.count ? messages[i + 1] : nil
-            out.append(.message(m, first: !sameRun(previous, m), last: !sameRun(m, next)))
+            let first = headers[i] || !sameSender(previous, m)
+            let last = next == nil || headers[i + 1] || !sameSender(m, next)
+            out.append(.message(m, first: first, last: last))
         }
         return out
     }
 
-    /// 同一個人、同一天、隔不到 5 分鐘
-    private static func sameRun(_ a: XenaConversationMessage?, _ b: XenaConversationMessage?) -> Bool {
-        guard let a, let b, a.role == b.role, a.role != "event", a.author == b.author else { return false }
-        guard let ta = a.at, let tb = b.at else { return true }
-        return abs(tb.timeIntervalSince(ta)) < 300 && Calendar.taipei.isDate(ta, inSameDayAs: tb)
+    private static func sameSender(_ a: XenaConversationMessage?, _ b: XenaConversationMessage?) -> Bool {
+        guard let a, let b, a.role == b.role, a.role != "event" else { return false }
+        return a.role == "user" || a.author == b.author
     }
 }
 
-/// 泡泡的形狀：一組的第一則靠說話的人那一側的上角是尖的（像 LINE）
-private func bubbleShape(mine: Bool, first: Bool) -> UnevenRoundedRectangle {
-    UnevenRoundedRectangle(
-        topLeadingRadius: !mine && first ? 5 : 18,
-        bottomLeadingRadius: 18,
-        bottomTrailingRadius: 18,
-        topTrailingRadius: mine && first ? 5 : 18,
-        style: .continuous
-    )
+/// 泡泡的形狀（iMessage）：圓角 18；組的最後一個在說話的人那一側下角有小尾巴（尾巴佔 4 點寬，沒有尾巴的也留著，泡泡才對齊）
+struct ChatBubbleShape: Shape {
+    var mine: Bool
+    var tail: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        var p = Path()
+        if tail {
+            // 先畫我們這邊（尾巴在右下），客人的再左右翻過來
+            p.move(to: CGPoint(x: 20, y: h))
+            p.addCurve(to: CGPoint(x: 0, y: h - 20), control1: CGPoint(x: 8, y: h), control2: CGPoint(x: 0, y: h - 8))
+            p.addLine(to: CGPoint(x: 0, y: 20))
+            p.addCurve(to: CGPoint(x: 20, y: 0), control1: CGPoint(x: 0, y: 8), control2: CGPoint(x: 8, y: 0))
+            p.addLine(to: CGPoint(x: w - 21, y: 0))
+            p.addCurve(to: CGPoint(x: w - 4, y: 20), control1: CGPoint(x: w - 12, y: 0), control2: CGPoint(x: w - 4, y: 8))
+            p.addLine(to: CGPoint(x: w - 4, y: h - 11))
+            p.addCurve(to: CGPoint(x: w, y: h), control1: CGPoint(x: w - 4, y: h - 1), control2: CGPoint(x: w, y: h))
+            p.addLine(to: CGPoint(x: w + 0.05, y: h - 0.01))
+            p.addCurve(to: CGPoint(x: w - 11, y: h - 4), control1: CGPoint(x: w - 4, y: h + 0.5), control2: CGPoint(x: w - 8, y: h - 1))
+            p.addCurve(to: CGPoint(x: w - 25, y: h), control1: CGPoint(x: w - 16, y: h), control2: CGPoint(x: w - 20, y: h))
+            p.closeSubpath()
+        } else {
+            p.addRoundedRect(in: CGRect(x: 0, y: 0, width: max(w - 4, 0), height: h), cornerSize: CGSize(width: 18, height: 18), style: .continuous)
+        }
+        if !mine {
+            p = p.applying(CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w, ty: 0))
+        }
+        return p.offsetBy(dx: rect.minX, dy: rect.minY)
+    }
 }
 
-/// 一則訊息：客人在左、Xena 與專人在右
+/// 泡泡是誰的：客人的灰底黑字；Xena 紫底白字、專人品牌橘白字（連結也是白的、加底線）
+enum ChatBubbleKind {
+    case customer, xena, staff
+
+    var mine: Bool { self != .customer }
+
+    var fill: Color {
+        switch self {
+        case .customer: Theme.bubbleIn
+        case .xena: Theme.bubbleXena
+        case .staff: Theme.bubbleStaff
+        }
+    }
+
+    var text: Color { mine ? .white : Theme.ink }
+    var link: Color { mine ? .white : Theme.accentText }
+}
+
+/// 一個泡泡（iMessage）
+struct ChatBubble<Content: View>: View {
+    let kind: ChatBubbleKind
+    let tail: Bool
+    let content: Content
+
+    init(_ kind: ChatBubbleKind, tail: Bool = true, @ViewBuilder content: () -> Content) {
+        self.kind = kind
+        self.tail = tail
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .font(.body)
+            .foregroundStyle(kind.text)
+            .tint(kind.link)
+            .padding(.vertical, 9)
+            .padding(.leading, kind.mine ? 13 : 17)
+            .padding(.trailing, kind.mine ? 17 : 13)
+            .frame(minHeight: 38)
+            .background(kind.fill, in: ChatBubbleShape(mine: kind.mine, tail: tail))
+            // 長按時浮起來的是泡泡本身（不是一塊方的）
+            .contentShape(.contextMenuPreview, ChatBubbleShape(mine: kind.mine, tail: tail))
+    }
+}
+
+/// 泡泡裡的字：網址可以點；我們這邊的照 Markdown（粗體、連結）；連結加底線（白字的泡泡上才看得出來）
+func bubbleText(_ s: String, markdown parse: Bool) -> AttributedString {
+    var out = parse ? markdown(s) : VisitorContent.linked(s)
+    if parse {
+        // Markdown 沒標成連結的網址也要能點
+        let plain = String(out.characters)
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            for match in detector.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) {
+                guard let url = match.url, let r = Range(match.range, in: plain), let ar = Range(r, in: out) else { continue }
+                if out[ar].link == nil { out[ar].link = url }
+            }
+        }
+    }
+    let links = out.runs.filter { $0.link != nil }.map(\.range)
+    for range in links {
+        out[range][AttributeScopes.SwiftUIAttributes.UnderlineStyleAttribute.self] = .single
+    }
+    return out
+}
+
+/// 一則訊息：客人在左（灰）、Xena 與專人在右（紫、橘）
 private struct XenaChatRow: View {
     let message: XenaConversationMessage
     let first: Bool
     let last: Bool
     /// 標出「Jev 判斷要找人」
     let jevFlag: Bool
-    let who: String
-    let picture: URL?
     let site: String
     let siteURL: URL?
+    let space: Namespace.ID
     let open: (ViewedMedia) -> Void
 
     var body: some View {
@@ -469,29 +569,18 @@ private struct XenaChatRow: View {
     // MARK: 客人
 
     private var customer: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if first {
-                Avatar(name: who, imageURL: picture, size: 30)
-            } else {
-                Color.clear.frame(width: 30, height: 1)
+        VStack(alignment: .leading, spacing: 4) {
+            VisitorContent(text: message.content, tail: last, space: space, open: open)
+                .contextMenu { menu }
+            if jevFlag, let jev = message.jevHuman {
+                Label("Jev 判斷要找人（\(Int((jev.confidence * 100).rounded()))%）", systemImage: "exclamationmark.bubble.fill")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Theme.warningFG)
+                    .padding(.leading, 8)
             }
-            VStack(alignment: .leading, spacing: 5) {
-                if first, let at = message.at {
-                    Text(at.clockText)
-                        .font(.brand(11.5, .regular, relativeTo: .caption))
-                        .foregroundStyle(Theme.muted)
-                }
-                VisitorContent(text: message.content, first: first, open: open)
-                if jevFlag, let jev = message.jevHuman {
-                    Label("Jev 判斷要找人（\(Int((jev.confidence * 100).rounded()))%）", systemImage: "exclamationmark.bubble.fill")
-                        .font(.brand(11.5, .medium, relativeTo: .caption))
-                        .foregroundStyle(Theme.warningFG)
-                }
-            }
-            .frame(maxWidth: 520, alignment: .leading)
-            .contextMenu { menu }
         }
-        .padding(.trailing, 40)
+        .frame(maxWidth: 520, alignment: .leading)
+        .padding(.trailing, 56)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -500,66 +589,58 @@ private struct XenaChatRow: View {
     private var xena: Bool { message.role == "assistant" }
 
     private var ours: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            if first { oursHeader }
+        VStack(alignment: .trailing, spacing: 4) {
+            if first { sender }
             if !message.content.isEmpty, !message.isOnlyCardLabel {
-                Text(markdown(message.content))
-                    .textRole(.body)
-                    .foregroundStyle(xena ? Theme.ink : Theme.onPrimary)
-                    .tint(xena ? Theme.accentText : Theme.onPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(xena ? Theme.surface : Theme.primary, in: bubbleShape(mine: true, first: first))
-                    .overlay {
-                        if xena {
-                            bubbleShape(mine: true, first: first)
-                                .strokeBorder(Theme.xenaGradient, lineWidth: 1)
-                                .opacity(0.55)
-                        }
-                    }
-                    .contextMenu { menu }
+                ChatBubble(xena ? .xena : .staff, tail: last) {
+                    Text(bubbleText(message.content, markdown: true))
+                }
+                .contextMenu { menu }
             }
             if let nav = message.navigate {
                 NavigateChip(title: nav.title, url: URL(string: nav.path, relativeTo: siteURL)?.absoluteURL)
             }
             if let card = message.card {
                 StaffCardView(card: card)
+                    .contextMenu { menu }
             }
             if !message.products.isEmpty {
                 ProductPicks(site: site, products: message.products)
             }
-            if message.emailed {
+            if message.emailed, last {
                 Text("也寄了 Email 給客人")
-                    .font(.brand(11, .regular, relativeTo: .caption2))
-                    .foregroundStyle(Theme.faint)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.muted)
+                    .padding(.trailing, 8)
             }
         }
         .frame(maxWidth: 520, alignment: .trailing)
-        .padding(.leading, 48)
+        .padding(.leading, 56)
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
-    private var oursHeader: some View {
-        HStack(spacing: 5) {
+    /// 誰說的（我們這邊換人時寫在第一個泡泡上面）
+    private var sender: some View {
+        HStack(spacing: 4) {
             if xena {
                 Circle()
                     .fill(AngularGradient(colors: [Theme.xenaPink, Theme.xenaViolet, Theme.xenaCyan, Theme.xenaPink], center: .center))
-                    .frame(width: 9, height: 9)
-                Text("Xena").foregroundStyle(Theme.ink2)
-            } else {
-                Text(message.author ?? "專人").foregroundStyle(Theme.ink2)
+                    .frame(width: 8, height: 8)
             }
-            if let at = message.at {
-                Text(at.clockText).foregroundStyle(Theme.muted)
-            }
+            Text(xena ? "Xena" : (message.author ?? "專人"))
         }
-        .font(.brand(11.5, .medium, relativeTo: .caption))
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(Theme.muted)
+        .padding(.trailing, 8)
     }
 
     @ViewBuilder
     private var menu: some View {
         Button("複製", systemImage: "doc.on.doc") {
             UIPasteboard.general.string = message.role == "user" ? VisitorContent.plain(message.content) : message.content
+        }
+        if let at = message.at {
+            Text("\(at.dayTitle) \(at.clockText)")
         }
         if message.role == "user", message.tag != nil || message.jevHuman != nil {
             let parts = [message.tag, message.jevHuman.map { "找人 \(Int(($0.confidence * 100).rounded()))%" }].compactMap { $0 }
@@ -568,28 +649,24 @@ private struct XenaChatRow: View {
     }
 }
 
-/// 送出中的回覆（淡一點）
+/// 送出中的回覆（淡一點，下面一行「傳送中…」，像 iMessage 的「傳送中」）
 private struct PendingReply: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 5) {
-            Text(text)
-                .textRole(.body)
-                .foregroundStyle(Theme.onPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Theme.primary, in: bubbleShape(mine: true, first: true))
-                .opacity(0.55)
+        VStack(alignment: .trailing, spacing: 4) {
+            ChatBubble(.staff) { Text(text) }
+                .opacity(0.6)
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)
                 Text("傳送中…")
             }
-            .font(.brand(11, .regular, relativeTo: .caption2))
+            .font(.caption2)
             .foregroundStyle(Theme.muted)
+            .padding(.trailing, 8)
         }
         .frame(maxWidth: 520, alignment: .trailing)
-        .padding(.leading, 48)
+        .padding(.leading, 56)
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
@@ -601,7 +678,10 @@ private struct PendingReply: View {
 /// 「[圖片] 網址」「[貼圖：開心] 網址」「[影片 12 秒] 網址」「[語音 8 秒] 網址」「[檔案] 名稱 網址」「[位置] 地址 網址」
 struct VisitorContent: View {
     let text: String
-    var first = true
+    /// 一組的最後一則：泡泡有小尾巴
+    var tail = true
+    /// 照片放大的轉場（沒有就是一般的全螢幕）
+    var space: Namespace.ID?
     let open: (ViewedMedia) -> Void
 
     @Environment(\.openURL) private var openURL
@@ -711,18 +791,16 @@ struct VisitorContent: View {
     var body: some View {
         let parts = Self.parse(text)
         if !parts.isEmpty, parts.allSatisfy(\.isPicture) {
-            VStack(alignment: .leading, spacing: 4) {
+            // 只有照片、貼圖：不包泡泡（iMessage）
+            VStack(alignment: .leading, spacing: 2) {
                 ForEach(parts) { part($0) }
             }
         } else {
-            let shape = bubbleShape(mine: false, first: first)
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(parts) { part($0) }
+            ChatBubble(.customer, tail: tail) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(parts) { part($0) }
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Theme.surface, in: shape)
-            .overlay { shape.strokeBorder(Theme.line, lineWidth: 1) }
         }
     }
 
@@ -730,7 +808,7 @@ struct VisitorContent: View {
     private func part(_ part: Part) -> some View {
         switch part.kind {
         case .photo(let url):
-            PhotoThumb(url: url) { open(ViewedMedia(url: url, kind: .photo)) }
+            PhotoThumb(url: url, space: space) { open(ViewedMedia(url: url, kind: .photo)) }
         case .sticker(let url):
             AsyncImage(url: url) { phase in
                 if let image = phase.image {
@@ -753,15 +831,12 @@ struct VisitorContent: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                 Text(text)
-                    .textRole(.small)
+                    .font(.subheadline)
                     .foregroundStyle(Theme.ink2)
             }
             .accessibilityLabel("語音內容：\(text)")
         case .text(let s):
-            Text(Self.linked(s))
-                .textRole(.body)
-                .foregroundStyle(Theme.ink)
-                .tint(Theme.accentText)
+            Text(bubbleText(s, markdown: false))
         }
     }
 
@@ -780,6 +855,7 @@ struct VisitorContent: View {
 /// 客人傳的照片：照比例的縮圖（長邊最多 240、高最多 300），點了全螢幕
 private struct PhotoThumb: View {
     let url: URL
+    let space: Namespace.ID?
     let action: () -> Void
 
     @State private var image: UIImage?
@@ -794,8 +870,8 @@ private struct PhotoThumb: View {
                         .resizable()
                         .scaledToFill()
                         .frame(width: size.width, height: size.height)
-                        .clipShape(.rect(cornerRadius: 14, style: .continuous))
-                        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line, lineWidth: 1) }
+                        .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                        .modifier(ZoomSource(id: url, space: space))
                 }
                 .buttonStyle(.press)
                 .accessibilityLabel("客人傳的照片，點一下放大")
@@ -804,8 +880,8 @@ private struct PhotoThumb: View {
                 // 網站沒開圖片儲存時是向 LINE 拿的：LINE 刪掉之後就拿不到了
                 MissingMedia(text: "照片載入不了（LINE 只保留一段時間）")
             } else {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Theme.soft)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.bubbleIn)
                     .frame(width: 220, height: 165)
                     .shimmer()
             }
@@ -829,6 +905,9 @@ private struct PhotoThumb: View {
 /// 對話裡的照片：下載一次、縮成畫面用得到的大小（原圖可能是 1200 萬畫素），捲來捲去不會重抓
 enum ChatImages {
     private static let cache = NSCache<NSURL, UIImage>()
+
+    /// 已經下載過的縮圖（全螢幕先放這張，原圖下載好再換）
+    static func cached(_ url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
 
     static func thumbnail(_ url: URL) async -> UIImage? {
         if let hit = cache.object(forKey: url as NSURL) { return hit }
@@ -981,8 +1060,8 @@ private struct StaffCardView: View {
         }
         .frame(width: 264)
         .background(Theme.surface)
-        .clipShape(.rect(cornerRadius: 16, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line, lineWidth: 1) }
+        .clipShape(.rect(cornerRadius: 18, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.line, lineWidth: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("附上的卡片：\(card.title)")
     }
@@ -1091,31 +1170,29 @@ struct ChatEventRow: View {
 
     var body: some View {
         let d = described
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
                 Image(systemName: d.icon)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                 Text(d.text)
                     .lineLimit(2)
                 if let at = message.at {
-                    Text(at.clockText).foregroundStyle(Theme.faint)
+                    Text("・\(at.clockText)")
                 }
             }
-            .font(.brand(12, .medium, relativeTo: .caption))
+            .font(.caption.weight(.medium))
             .foregroundStyle(Theme.muted)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 5)
-            .background(Theme.press, in: .capsule)
             if let reason, !reason.isEmpty {
                 Button { withAnimation(Motion.fast) { expanded.toggle() } } label: {
-                    Text("原因：\(reason)")
-                        .font(.brand(12, .regular, relativeTo: .caption))
-                        .foregroundStyle(Theme.muted)
+                    Text(reason)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.muted.opacity(0.85))
                         .multilineTextAlignment(.center)
                         .lineLimit(expanded ? nil : 2)
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 28)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("原因：\(reason)")
             }
         }
         .frame(maxWidth: .infinity)
@@ -1124,25 +1201,24 @@ struct ChatEventRow: View {
     }
 }
 
-/// 跨天的日期：今天、昨天、10月2日 星期五
-struct ChatDayDivider: View {
+/// 兩則之間隔了一段時間（或跨天）的那一行時間（iMessage：「**今天** 21:20」）
+struct ChatTimeHeader: View {
     let date: Date
 
     var body: some View {
-        Text(label)
-            .font(.brand(11.5, .medium, relativeTo: .caption))
+        Text("\(Text(day).fontWeight(.semibold)) \(date.clockText)")
+            .font(.caption)
             .foregroundStyle(Theme.muted)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Theme.press, in: .capsule)
             .frame(maxWidth: .infinity)
             .accessibilityAddTraits(.isHeader)
     }
 
-    private var label: String {
+    private var day: String {
         let cal = Calendar.taipei
         if cal.isDateInToday(date) { return "今天" }
         if cal.isDateInYesterday(date) { return "昨天" }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: .now)).day ?? 99
+        if days < 7 { return date.weekdayText }
         if cal.isDate(date, equalTo: .now, toGranularity: .year) { return date.dayTitle }
         return date.dayText
     }
@@ -1305,61 +1381,70 @@ struct ChatComposer<Accessory: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             if focused || !text.isEmpty || hintWarning, let hint, !hint.isEmpty {
                 Label(hint, systemImage: hintWarning ? "exclamationmark.triangle.fill" : "arrow.turn.down.right")
-                    .font(.brand(11.5, .regular, relativeTo: .caption))
+                    .font(.caption2)
                     .foregroundStyle(hintWarning ? Theme.dangerFG : Theme.muted)
                     .lineLimit(2)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, 6)
                     .transition(.opacity)
             }
             accessory
             HStack(alignment: .bottom, spacing: 8) {
                 if let draftWithXena {
                     Button(action: draftWithXena) {
-                        HeroIcon("sparkles", size: 19)
-                            .foregroundStyle(Theme.ink)
-                            .frame(width: 40, height: 40)
-                            .background(Theme.surface, in: .circle)
-                            .overlay { Circle().strokeBorder(Theme.line) }
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.bubbleXena)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.bubbleIn, in: .circle)
                     }
-                    .buttonStyle(PressScale(scale: 0.92))
+                    .buttonStyle(PressScale(scale: 0.9))
                     .accessibilityLabel("請 Xena 擬回覆")
                 }
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .font(.system(size: 16))
-                    .lineLimit(1...8)
-                    .focused($focused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(focused ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 1)
-                    }
-                Button(action: send) {
-                    Group {
-                        if sending {
-                            ProgressView().tint(Theme.onPrimary)
-                        } else {
-                            HeroIcon("arrow-up", size: 18)
+                // 輸入框裡右下角是送出（有字才出現；iMessage）
+                HStack(alignment: .bottom, spacing: 4) {
+                    TextField(placeholder, text: $text, axis: .vertical)
+                        .font(.body)
+                        .lineLimit(1...8)
+                        .focused($focused)
+                        .padding(.leading, 14)
+                        .padding(.vertical, 8)
+                    if !empty || sending {
+                        Button(action: send) {
+                            Group {
+                                if sending {
+                                    ProgressView().controlSize(.small).tint(.white)
+                                } else {
+                                    Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
+                                }
+                            }
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Theme.bubbleStaff, in: .circle)
                         }
+                        .buttonStyle(PressScale(scale: 0.9))
+                        .disabled(sending)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .padding(.trailing, 4)
+                        .padding(.bottom, 4)
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                        .accessibilityLabel("送出")
                     }
-                    .foregroundStyle(Theme.onPrimary)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.primary, in: .circle)
                 }
-                .buttonStyle(PressScale(scale: 0.92))
-                .disabled(empty || sending)
-                .opacity(empty && !sending ? 0.35 : 1)
-                .keyboardShortcut(.return, modifiers: .command)
-                .accessibilityLabel("送出")
+                .frame(minHeight: 38)
+                .background(Theme.page.opacity(0.6), in: .rect(cornerRadius: 19, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 19, style: .continuous)
+                        .strokeBorder(focused ? Theme.ink.opacity(0.28) : Theme.line, lineWidth: 1)
+                }
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .background(Theme.sheet)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(.bar)
         .overlay(alignment: .top) { Rule() }
         .animation(Motion.fast, value: focused)
+        .animation(Motion.fast, value: empty)
     }
 }
 
@@ -1406,7 +1491,23 @@ struct ViewedMedia: Identifiable {
     let kind: Kind
 }
 
-/// 客人傳的照片（可以放大、拖曳、往下拉關掉、分享或存起來）；影片與語音直接播
+/// 照片從縮圖放大的轉場來源（有 namespace 才加）
+private struct ZoomSource: ViewModifier {
+    let id: URL
+    let space: Namespace.ID?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let space {
+            content.matchedTransitionSource(id: id, in: space)
+        } else {
+            content
+        }
+    }
+}
+
+/// 客人傳的照片：從縮圖放大成全螢幕（像 iMessage、照片），兩指放大、點兩下放大縮小、點一下收起上面的按鈕、
+/// 沒放大時往下拉就回去，可以分享或存到照片；影片與語音直接播
 struct MediaViewer: View {
     let media: ViewedMedia
 
@@ -1414,6 +1515,9 @@ struct MediaViewer: View {
     @State private var image: UIImage?
     @State private var failed = false
     @State private var player: AVPlayer?
+    /// 上面的關閉、分享（點一下照片收起來）
+    @State private var chrome = true
+    @State private var zoomed = false
 
     var body: some View {
         ZStack {
@@ -1421,7 +1525,10 @@ struct MediaViewer: View {
             switch media.kind {
             case .photo:
                 if let image {
-                    ZoomableImage(image: image) { dismiss() }
+                    ZoomableImage(image: image, zoomed: $zoomed) {
+                        withAnimation(Motion.fast) { chrome.toggle() }
+                    }
+                    .ignoresSafeArea()
                 } else if failed {
                     unavailable("照片載入不了（LINE 只保留一段時間）")
                 } else {
@@ -1442,8 +1549,12 @@ struct MediaViewer: View {
                 }
             }
         }
-        .overlay(alignment: .top) { bar }
-        .statusBarHidden()
+        .overlay(alignment: .top) {
+            if chrome { bar.transition(.opacity) }
+        }
+        .statusBarHidden(!chrome)
+        // 放大看細節時拖曳是移動照片，不是關掉
+        .interactiveDismissDisabled(zoomed)
         .task { await prepare() }
         .onDisappear { player?.pause() }
     }
@@ -1458,7 +1569,7 @@ struct MediaViewer: View {
             .glassEffect(.regular.interactive(), in: .circle)
             .accessibilityLabel("關閉")
             Spacer()
-            if let image {
+            if media.kind == .photo, let image {
                 let picture = Image(uiImage: image)
                 ShareLink(item: picture, preview: SharePreview("客人傳的照片", image: picture)) {
                     Image(systemName: "square.and.arrow.up")
@@ -1484,7 +1595,7 @@ struct MediaViewer: View {
 
     private func unavailable(_ text: String) -> some View {
         Label(text, systemImage: "photo")
-            .font(.brand(14, .medium))
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(.white.opacity(0.7))
             .padding(24)
     }
@@ -1492,12 +1603,18 @@ struct MediaViewer: View {
     private func prepare() async {
         switch media.kind {
         case .photo:
+            // 先放對話裡的縮圖（轉場馬上有畫面），原圖下載好再換成清楚的
+            image = ChatImages.cached(media.url)
             do {
                 let (data, response) = try await URLSession.shared.data(from: media.url)
                 let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? true
-                if ok, let img = UIImage(data: data) { image = img } else { failed = true }
+                if ok, let full = UIImage(data: data) {
+                    image = full
+                } else if image == nil {
+                    failed = true
+                }
             } catch {
-                failed = true
+                if image == nil { failed = true }
             }
         case .video, .audio:
             let p = AVPlayer(url: media.url)
@@ -1507,10 +1624,11 @@ struct MediaViewer: View {
     }
 }
 
-/// 可以兩指放大、拖曳、點兩下放大縮小；沒放大時往下拉就關掉
+/// 兩指放大、放大後拖曳移動、點兩下放大縮小、點一下收起按鈕
 private struct ZoomableImage: View {
     let image: UIImage
-    let close: () -> Void
+    @Binding var zoomed: Bool
+    let tap: () -> Void
 
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
@@ -1525,40 +1643,36 @@ private struct ZoomableImage: View {
             .offset(offset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.rect)
-            .opacity(scale <= 1 ? 1 - min(abs(offset.height) / 600, 0.5) : 1)
             .gesture(
                 MagnifyGesture()
                     .onChanged { v in scale = min(max(lastScale * v.magnification, 1), 5) }
                     .onEnded { _ in
                         lastScale = scale
-                        if scale <= 1 { withAnimation(Motion.fast) { reset() } }
+                        if scale <= 1.01 { withAnimation(Motion.fast) { reset() } }
+                        zoomed = scale > 1.01
                     }
-                    .simultaneously(with: DragGesture()
-                        .onChanged { v in
-                            offset = scale > 1
-                                ? CGSize(width: lastOffset.width + v.translation.width, height: lastOffset.height + v.translation.height)
-                                : CGSize(width: 0, height: v.translation.height)
-                        }
-                        .onEnded { v in
-                            if scale > 1 {
-                                lastOffset = offset
-                            } else if abs(v.translation.height) > 120 {
-                                close()
-                            } else {
-                                withAnimation(Motion.fast) { offset = .zero }
-                            }
-                        })
+            )
+            // 沒放大時不接拖曳：往下拉交給系統的關閉手勢
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { v in
+                        offset = CGSize(width: lastOffset.width + v.translation.width, height: lastOffset.height + v.translation.height)
+                    }
+                    .onEnded { _ in lastOffset = offset },
+                including: zoomed ? .all : .none
             )
             .onTapGesture(count: 2) {
                 withAnimation(Motion.spring) {
-                    if scale > 1 {
+                    if scale > 1.01 {
                         reset()
                     } else {
                         scale = 2.5
                         lastScale = 2.5
+                        zoomed = true
                     }
                 }
             }
+            .onTapGesture { tap() }
             .accessibilityLabel("客人傳的照片")
             .accessibilityAddTraits(.isImage)
     }
@@ -1568,5 +1682,6 @@ private struct ZoomableImage: View {
         lastScale = 1
         offset = .zero
         lastOffset = .zero
+        zoomed = false
     }
 }

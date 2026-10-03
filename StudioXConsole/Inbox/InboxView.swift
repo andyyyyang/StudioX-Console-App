@@ -530,16 +530,14 @@ struct SupportThreadView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let d = detail {
                     summary(d)
-                    ForEach(Array(d.messages.enumerated()), id: \.element.id) { i, m in
-                        let previous = i > 0 ? d.messages[i - 1] : nil
-                        if let at = m.at, previous?.at.map({ Calendar.taipei.isDate($0, inSameDayAs: at) }) != true {
-                            ChatDayDivider(date: at)
-                                .padding(.top, 22)
+                    ForEach(Self.rows(d.messages), id: \.message.id) { row in
+                        if let at = row.time {
+                            ChatTimeHeader(date: at)
+                                .padding(.top, 20)
                                 .padding(.bottom, 4)
                         }
-                        let first = previous == nil || previous?.fromCustomer != m.fromCustomer || previous?.author != m.author
-                        MessageBubble(message: m, first: first)
-                            .padding(.top, first ? 14 : 3)
+                        MessageBubble(message: row.message, first: row.first, last: row.last)
+                            .padding(.top, row.first ? 10 : 2)
                     }
                     if !d.orders.isEmpty { orders(d) }
                 } else if let error {
@@ -618,6 +616,29 @@ struct SupportThreadView: View {
                 await load()
                 await model.refreshAll()
             }
+        }
+    }
+
+    /// 一則客服信前面要不要放時間、是不是一組（同一邊、同一個人連著寫）的頭尾
+    private struct Row {
+        let message: SupportMessage
+        let time: Date?
+        let first: Bool
+        let last: Bool
+    }
+
+    private static func rows(_ messages: [SupportMessage]) -> [Row] {
+        var times: [Date?] = []
+        var lastAt: Date?
+        for m in messages {
+            times.append(ChatEntry.needsTime(m.at, after: lastAt) ? m.at : nil)
+            if let at = m.at { lastAt = at }
+        }
+        func same(_ a: SupportMessage, _ b: SupportMessage) -> Bool { a.fromCustomer == b.fromCustomer && a.author == b.author }
+        return messages.enumerated().map { i, m in
+            let first = i == 0 || times[i] != nil || !same(messages[i - 1], m)
+            let last = i == messages.count - 1 || times[i + 1] != nil || !same(m, messages[i + 1])
+            return Row(message: m, time: times[i], first: first, last: last)
         }
     }
 
@@ -740,55 +761,46 @@ struct SupportThreadView: View {
     }
 }
 
-/// 客服信的一則：客人在左（白泡泡）、我們在右（品牌色）；一組的第一則放誰、什麼時候
+/// 客服信的一則（iMessage）：客人在左（灰）、我們在右（品牌橘白字）；組的最後一個有小尾巴，我們這邊寫是誰回的
 private struct MessageBubble: View {
     let message: SupportMessage
     var first = true
+    var last = true
 
     private var mine: Bool { !message.fromCustomer }
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: !mine && first ? 5 : 18,
-            bottomLeadingRadius: 18,
-            bottomTrailingRadius: 18,
-            topTrailingRadius: mine && first ? 5 : 18,
-            style: .continuous
-        )
-        VStack(alignment: mine ? .trailing : .leading, spacing: 5) {
-            if first {
-                Text([message.author, message.at?.clockText ?? ""].filter { !$0.isEmpty }.joined(separator: "・"))
-                    .font(.brand(11.5, .medium, relativeTo: .caption))
+        VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
+            if first, mine, !message.author.isEmpty {
+                Text(message.author)
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(Theme.muted)
+                    .padding(.trailing, 8)
             }
             if !message.body.isEmpty {
-                Text(VisitorContent.linked(message.body))
-                    .textRole(.body)
-                    .foregroundStyle(mine ? Theme.onPrimary : Theme.ink)
-                    .tint(mine ? Theme.onPrimary : Theme.accentText)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(mine ? Theme.primary : Theme.surface, in: shape)
-                    .overlay {
-                        if !mine { shape.strokeBorder(Theme.line, lineWidth: 1) }
-                    }
-                    .contextMenu {
-                        Button("複製", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.body }
-                    }
+                ChatBubble(mine ? .staff : .customer, tail: last) {
+                    Text(bubbleText(message.body, markdown: false))
+                }
+                .contextMenu {
+                    Button("複製", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.body }
+                    if let at = message.at { Text("\(at.dayTitle) \(at.clockText)") }
+                }
             }
             ForEach(message.attachments, id: \.self) { name in
                 Label(name, systemImage: "paperclip")
-                    .font(.brand(12, .medium, relativeTo: .caption))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 8)
             }
             if let error = message.emailError, !error.isEmpty {
                 Label("信沒寄出：\(error)", systemImage: "exclamationmark.triangle.fill")
-                    .font(.brand(12, .medium, relativeTo: .caption))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.dangerFG)
+                    .padding(.horizontal, 8)
             }
         }
         .frame(maxWidth: 520, alignment: mine ? .trailing : .leading)
-        .padding(mine ? .leading : .trailing, 48)
+        .padding(mine ? .leading : .trailing, 56)
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
     }
 }

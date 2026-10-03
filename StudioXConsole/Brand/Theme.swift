@@ -62,6 +62,15 @@ enum Theme {
     /// 標誌的摺角（亮暗都一樣的品牌橘）
     static let brandOrange = Color(hex: 0xFF5A1F)
 
+    // MARK: 對話泡泡（照 iMessage：客人的是灰的；我們的實心、白字——Xena 紫、專人品牌橘）
+
+    /// 客人的泡泡（暖灰，配紙色的底）
+    static let bubbleIn = Color(light: 0xE7E4DE, dark: 0x262624)
+    /// 專人的泡泡（白字，對比 4:1 以上）
+    static let bubbleStaff = Color(light: 0xCB3E01, dark: 0xD4521C)
+    /// Xena 的泡泡（白字；Xena 的紫）
+    static let bubbleXena = Color(light: 0x6A4CE0, dark: 0x5D45D2)
+
     // MARK: 反白的帶（.inverse：跑馬燈、行動區塊、頁尾）
 
     static let inverse = Color(light: 0x0F0F0E, dark: 0x181816)
