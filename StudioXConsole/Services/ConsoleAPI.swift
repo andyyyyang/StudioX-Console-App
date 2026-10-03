@@ -40,10 +40,16 @@ final class ConsoleAPI {
 
     init() {
         tokens = Auth.load()
-        #if DEBUG
-        // 示範模式：不用登入，所有請求由 DemoServer 回答
-        if DemoServer.enabled { tokens = Tokens(access: "demo", refresh: "demo", expiresAt: .distantFuture) }
-        #endif
+        // 示範模式（UI 截圖）：不用登入，所有請求由 DemoServer 回答
+        if DemoServer.enabled { tokens = Self.demoTokens }
+    }
+
+    private static let demoTokens = Tokens(access: "demo", refresh: "demo", expiresAt: .distantFuture)
+
+    /// 歡迎頁的「先看看示範」：不用登入，所有請求由 DemoServer 用假資料回答（登出就結束）
+    func enterDemo() {
+        DemoServer.enabled = true
+        tokens = Self.demoTokens
     }
 
     var isSignedIn: Bool { tokens != nil }
@@ -53,6 +59,11 @@ final class ConsoleAPI {
     }
 
     func signOut() async {
+        if DemoServer.enabled {
+            DemoServer.enabled = false
+            tokens = nil
+            return
+        }
         let old = tokens
         tokens = nil
         refreshing?.cancel()
@@ -97,9 +108,7 @@ final class ConsoleAPI {
     /// 讀資料的請求（GET、查詢的工具）連線斷了、逾時：多半是 App 放著一陣子、舊的連線已經死了（下拉重新整理第一次逾時、第二次才好）——
     /// 第一次只等 15 秒，換一條新的連線馬上再試一次，不讓你看到錯誤。寫入的不重送（避免做兩次）。
     private func send(retryable: Bool? = nil, _ makeRequest: () throws -> URLRequest) async throws -> (Data, HTTPURLResponse) {
-        #if DEBUG
         if DemoServer.enabled { return DemoServer.respond(to: try makeRequest()) }
-        #endif
         var refreshedToken = false
         var reconnected = false
         while true {
@@ -455,6 +464,19 @@ final class ConsoleAPI {
         if let thread { body["threadId"] = .string(thread) }
         if let answering { body["answering"] = .string(answering) }
         let payload: JSONValue = .object(body)
+        // 示範模式：Xena 用示範的回答（不連 AI）
+        if DemoServer.enabled {
+            let reply = DemoServer.copilotReply(message)
+            return AsyncThrowingStream { continuation in
+                let task = Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    continuation.yield(.text(reply))
+                    continuation.yield(.done)
+                    continuation.finish()
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        }
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {

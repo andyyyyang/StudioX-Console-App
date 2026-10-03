@@ -122,12 +122,11 @@ final class XenaConversation {
         case .off, .paused, .failed: break
         default: return
         }
-        #if DEBUG
-        if DemoServer.enabled {
+        // UI 截圖：放一段示範的對話（示範模式本身照樣可以用說的，Xena 用示範的回答）
+        if DemoServer.screenshots {
             showDemo()
             return
         }
-        #endif
         state = .preparing
         needsSettings = false
         // 之前的對話不算這一輪
@@ -890,7 +889,6 @@ final class XenaConversation {
 
     // MARK: 示範（截圖）
 
-    #if DEBUG
     private func showDemo() {
         history = [VoiceTurn(id: "demo-0", said: "昨天黃毛丫頭賣得怎麼樣？", reply: "昨天有 12 筆訂單、收款 18,400 元，比前天多兩成。")]
         said = "這週黃毛丫頭整體怎麼樣？"
@@ -903,7 +901,6 @@ final class XenaConversation {
         state = .speaking
         _ = mouth.voice.begin()
     }
-    #endif
 }
 
 /// 太長的回答放的卡片：整段原文＋Apple Intelligence 寫的標題和重點（沒有就只有原文）

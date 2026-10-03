@@ -1,9 +1,9 @@
-#if DEBUG
 import Foundation
 
-/// 示範模式（只有 Debug 版會編進去）：啟動參數 `-demo` 時不連 console，所有請求在這裡用假資料回答，
+/// 示範模式：歡迎頁按「先看看示範」（或啟動參數 `-demo`）時不連 console，所有請求在這裡用假資料回答，
 /// 走的是 App 原本的程式（ConsoleAPI.send 這一個入口），所以每個畫面都會照真的樣子畫出來。
-/// 用在 UI 截圖（.github/workflows/ui-screenshots.yml）；客人的名字、訂單都是編的。
+/// 給還沒有帳號的人、App Store 的審核看（不會碰到任何真的網站和客人），也用在 UI 截圖（.github/workflows/ui-screenshots.yml）；
+/// 客人的名字、訂單都是編的。寫入（回覆、改狀態…）照樣跳確認、回「已完成」，但什麼都不會真的發生。
 ///
 /// 其他啟動參數：
 ///   -demoTab sites|orders|inbox|account|search   打開哪個分頁
@@ -11,7 +11,28 @@ import Foundation
 ///   -demoSheet today|yellowgirl.tw   首頁卡片打開的 sheet
 ///   -demoLock YES   顯示 Face ID 的鎖定畫面
 nonisolated enum DemoServer {
-    static let enabled = ProcessInfo.processInfo.arguments.contains("-demo")
+    /// 現在是示範模式（歡迎頁按了「先看看示範」，登出就結束）
+    nonisolated(unsafe) static var enabled = screenshots
+    /// UI 截圖（啟動參數 -demo）：水珠不動、照參數打開指定的畫面
+    static let screenshots = ProcessInfo.processInfo.arguments.contains("-demo")
+
+    /// 示範模式裡跟 Xena 說話：照關鍵字回一段示範的回答（不連 AI）
+    static func copilotReply(_ message: String) -> String {
+        let m = message
+        if m.contains("訂單") || m.contains("出貨") {
+            return "黃毛丫頭目前有 **6 筆等出貨**、2 筆待付款。最早的一筆是昨天下午的 #20260602-1042（手工蛋捲禮盒 ×2）。\n\n要我把已付款的 6 筆一起標成「已出貨」嗎？（示範模式不會真的改）"
+        }
+        if m.contains("客人") || m.contains("回覆") || m.contains("客服") {
+            return "有 **2 位客人**在等回覆：\n- 陳小姐問蛋捲禮盒的保存期限（等了 3 小時）\n- LINE 上的 Kevin 想訂 20 盒當公司禮品\n\n要我先幫你擬回覆嗎？"
+        }
+        if m.contains("流量") || m.contains("訪客") {
+            return "這週黃毛丫頭有 **3,820 位訪客**，比上週多 12%。從 Instagram 來的最多，其次是 Google 搜尋「蛋捲禮盒」。"
+        }
+        if m.contains("賣") || m.contains("營收") || m.contains("收款") {
+            return "這週黃毛丫頭有 **64 筆訂單**、收款 NT$102,300，比上週多 18%。賣最好的是手工蛋捲禮盒（41 盒），庫存剩 38 盒，照這個速度大約 6 天賣完。"
+        }
+        return "這是示範模式：我用假的網站資料回答。你可以問我「今天有什麼要注意的？」「有誰在等回覆？」「這週賣得怎麼樣？」，或打開各個分頁看看。登入 StudioX 帳號後，我就會看你自己的網站。"
+    }
 
     static func respond(to request: URLRequest) -> (Data, HTTPURLResponse) {
         let url = request.url ?? URL(string: "https://console.studiox.tw")!
@@ -54,7 +75,14 @@ nonisolated enum DemoServer {
         return ["jsonrpc": "2.0", "id": rpc["id"] ?? 1, "result": result]
     }
 
+    /// 只是查資料的工具；其他都是寫入（示範模式：先跳確認，確認後回「已完成」，什麼都不會真的改）
+    private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites"]
+
     private static func tool(_ name: String, site: String, entity: String, args: JSONValue) -> String? {
+        if !readTools.contains(name) {
+            if args["confirmToken"]?.string != nil { return #"{"ok":true,"demo":true}"# }
+            return #"{"needsConfirmation":true,"title":"確認（示範模式）","detail":"這是示範模式：按確認會顯示完成，但不會真的送出或修改任何資料。","confirmToken":"demo"}"#
+        }
         switch (name, entity) {
         case ("ops_report", _): return site == "yellowgirl.tw" ? ops : nil
         case ("traffic_report", _): return traffic(site: site, days: args["days"]?.int ?? 7)
@@ -297,4 +325,3 @@ nonisolated enum DemoServer {
      "images":[]}
     """ }
 }
-#endif

@@ -178,10 +178,18 @@ struct AccountView: View {
                                 .buttonStyle(.brand(.ghost, size: .lg, fullWidth: true))
                                 .transition(.opacity)
                             }
-                            Button {
-                                confirmingSignOut = true
-                            } label: { Text("登出") }
-                            .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
+                            if model.isDemo {
+                                // 示範模式：沒有真的登入，直接離開回到歡迎頁
+                                Button {
+                                    Task { await model.signOut() }
+                                } label: { Text("離開示範模式") }
+                                .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
+                            } else {
+                                Button {
+                                    confirmingSignOut = true
+                                } label: { Text("登出") }
+                                .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
+                            }
                         }
                     }
                     .frame(maxWidth: Metric.readable + 120, alignment: .leading)

@@ -91,6 +91,19 @@ struct WelcomeView: View {
                 .font(.brand(12.5, .regular))
                 .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
+
+            // 還沒有帳號（或 App Store 的審核）：用假的網站資料逛一遍，不會碰到任何真的網站
+            Button {
+                Task { await model.enterDemo() }
+            } label: {
+                Text("先看看示範（不用登入）")
+                    .font(.brand(14, .medium))
+                    .foregroundStyle(Theme.ink)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .disabled(busy)
+            .padding(.top, 2)
         }
         .padding(.horizontal, 22)
         .padding(.top, 22)

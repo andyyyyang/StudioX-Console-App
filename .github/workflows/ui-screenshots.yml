@@ -4,6 +4,8 @@
 # talk＝首頁 Xena 說到一半、home＝說完；account＝設定頁；voice＝用說的（示範的字幕）。
 # 截圖這一步有自己的時限：逾時也會把已經截到的提交回來（看得到卡在哪一張）。
 # 提交訊息有 [screenshots] 才跑（Mac 的分鐘數比較貴），也可以手動 Run workflow。
+# 提交訊息有 [appstore-shots]：App Store 用的截圖——6.9 吋 iPhone（1320×2868）與 13 吋 iPad（2064×2752）、深色、原尺寸，
+# 存到 docs/appstore/raw/（宣傳圖在 docs/appstore/ 合成，見 ci/appstore/）。
 name: UI 截圖
 
 on:
@@ -24,7 +26,7 @@ permissions:
 
 jobs:
   shots:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screenshots]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screenshots]') || contains(github.event.head_commit.message, '[appstore-shots]')
     # 放在 job 上：沒有 [screenshots] 的提交（job 跳過）不會取消正在截的那一次
     concurrency:
       group: ui-screenshots-${{ github.ref }}
@@ -74,6 +76,7 @@ jobs:
               for x in devs:
                   if x["name"].startswith(kind): return x["udid"]
           print("IPHONE=" + pick(["iPhone 17 Pro", "iPhone 16 Pro", "iPhone 17"], "iPhone"))
+          print("IPHONE_MAX=" + pick(["iPhone 17 Pro Max", "iPhone 16 Pro Max", "iPhone Air"], "iPhone"))
           print("IPAD=" + pick(["iPad Pro 13-inch (M5)", "iPad Pro 13-inch (M4)", "iPad Air 13-inch (M3)"], "iPad"))
           PY
 
@@ -82,6 +85,7 @@ jobs:
         continue-on-error: true
         env:
           FULL: ${{ inputs.full && 'yes' || 'no' }}
+          APPSTORE: ${{ contains(github.event.head_commit.message, '[appstore-shots]') && 'yes' || 'no' }}
         run: |
           app="build/Build/Products/Debug-iphonesimulator/StudioXConsole.app"
           mkdir -p shots
@@ -110,6 +114,24 @@ jobs:
               "lock|-demo -demoLock YES"
             )
           fi
+          # App Store 用的畫面（宣傳圖從這些挑）
+          if [ "$APPSTORE" = "yes" ]; then
+            scenes=(
+              "home|-demo|13"
+              "talk|-demo|5"
+              "voice|-demo -demoVoice YES"
+              "line|-demo -demoRoute line"
+              "inbox|-demo -demoTab inbox"
+              "orders|-demo -demoTab orders"
+              "order|-demo -demoRoute order"
+              "site|-demo -demoRoute site"
+              "traffic|-demo -demoRoute traffic"
+              "product|-demo -demoRoute product"
+              "xena|-demo -demoRoute xena"
+              "sheet|-demo -demoSheet today|9"
+              "lock|-demo -demoLock YES"
+            )
+          fi
           # 每個指令都有時限（卡住就跳過，不會整個流程卡到逾時）；log 有時間，看得出慢在哪
           limit() { perl -e 'alarm shift; exec @ARGV' "$@"; }
           shoot() {
@@ -132,7 +154,12 @@ jobs:
             done
             limit 60 xcrun simctl shutdown "$dev" || true
           }
-          shoot "$IPHONE" iphone dark
+          if [ "$APPSTORE" = "yes" ]; then
+            shoot "$IPHONE_MAX" iphone69 dark
+            shoot "$IPAD" ipad13 dark
+          else
+            shoot "$IPHONE" iphone dark
+          fi
           if [ "$FULL" = "yes" ]; then
             shoot "$IPHONE" iphone light
             shoot "$IPAD" ipad dark
@@ -149,16 +176,29 @@ jobs:
 
       - name: 縮小、提交回分支
         if: always()
+        env:
+          APPSTORE: ${{ contains(github.event.head_commit.message, '[appstore-shots]') && 'yes' || 'no' }}
         run: |
           ls shots/*.png >/dev/null 2>&1 || { echo "沒有截到"; exit 0; }
-          mkdir -p docs/screenshots
-          rm -f docs/screenshots/*.jpg
-          for f in shots/*.png; do
-            sips -Z 1000 -s format jpeg -s formatOptions 70 "$f" --out "docs/screenshots/$(basename "${f%.png}").jpg" >/dev/null
-          done
+          if [ "$APPSTORE" = "yes" ]; then
+            # App Store 用：原尺寸（高畫質 JPEG，宣傳圖用它合成）
+            mkdir -p docs/appstore/raw
+            rm -f docs/appstore/raw/*.jpg
+            for f in shots/*.png; do
+              sips -s format jpeg -s formatOptions 92 "$f" --out "docs/appstore/raw/$(basename "${f%.png}").jpg" >/dev/null
+            done
+            target=docs/appstore/raw
+          else
+            mkdir -p docs/screenshots
+            rm -f docs/screenshots/*.jpg
+            for f in shots/*.png; do
+              sips -Z 1000 -s format jpeg -s formatOptions 70 "$f" --out "docs/screenshots/$(basename "${f%.png}").jpg" >/dev/null
+            done
+            target=docs/screenshots
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/screenshots
+          git add "$target"
           if git diff --cached --quiet; then echo "沒有變更"; exit 0; fi
           git commit -m "UI 截圖（自動）[skip ci]"
           for i in 1 2 3; do

@@ -147,12 +147,11 @@ final class AppModel {
         }
         // 還沒登入：歡迎頁不用鎖
         if !api.isSignedIn { lock.reset() }
-        #if DEBUG
-        if DemoServer.enabled {
+        // UI 截圖：水珠不動、照參數顯示鎖定畫面
+        if DemoServer.screenshots {
             if UserDefaults.standard.bool(forKey: "demoLock") { lock.showDemoLock() } else { lock.reset() }
             XenaOrb.frozen = true
         }
-        #endif
     }
 
     var sites: [SiteSummary] { me?.sites ?? [] }
@@ -174,12 +173,9 @@ final class AppModel {
     func start() async {
         guard phase == .loading else { return }
         await loadMe(minimumDuration: .milliseconds(1900))
-        #if DEBUG
-        if DemoServer.enabled { openDemoScreen() }
-        #endif
+        if DemoServer.screenshots { openDemoScreen() }
     }
 
-    #if DEBUG
     /// 示範模式的截圖：-demoTab、-demoRoute 打開指定的畫面
     private func openDemoScreen() {
         let defaults = UserDefaults.standard
@@ -212,7 +208,17 @@ final class AppModel {
             }
         }
     }
-    #endif
+
+    /// 歡迎頁的「先看看示範」：不用登入，用假的網站資料逛一遍（登出就結束）
+    func enterDemo() async {
+        api.enterDemo()
+        lock.reset()
+        phase = .loading
+        await loadMe(minimumDuration: .milliseconds(1200))
+    }
+
+    /// 現在是示範模式（設定頁的登出改成「離開示範模式」）
+    var isDemo: Bool { DemoServer.enabled }
 
     func signIn(using session: WebAuthenticationSession) async throws {
         try await api.signIn(using: session)

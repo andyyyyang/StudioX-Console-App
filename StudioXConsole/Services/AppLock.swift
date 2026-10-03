@@ -137,14 +137,12 @@ final class AppLock {
         return true
     }
 
-    #if DEBUG
     /// 示範模式的截圖：顯示鎖定畫面（模擬器沒有 Face ID 也照樣顯示）
     func showDemoLock() {
         method = .faceID
         locked = true
         promptPending = false
     }
-    #endif
 
     /// 登入、登出：登入的人剛驗證過，不用再鎖
     func reset() {
