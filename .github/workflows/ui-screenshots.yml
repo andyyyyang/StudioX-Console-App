@@ -4,6 +4,7 @@
 # talk＝首頁 Xena 說到一半、home＝說完；account＝設定頁；voice＝用說的（示範的字幕）。
 # 截圖這一步有自己的時限：逾時也會把已經截到的提交回來（看得到卡在哪一張）。
 # 提交訊息有 [screenshots] 才跑（Mac 的分鐘數比較貴），也可以手動 Run workflow。
+# [screenshots-ipad]：iPhone 深色的主要畫面＋iPad 深色的全部畫面（看平板的版面）。
 # 提交訊息有 [appstore-shots]：App Store 用的截圖——6.9 吋 iPhone（1320×2868）與 13 吋 iPad（2064×2752）、深色、原尺寸，
 # 存到 docs/appstore/raw/（宣傳圖在 docs/appstore/ 合成，見 ci/appstore/）。[appstore-shots-ipad] 只重拍 iPad。
 name: UI 截圖
@@ -26,7 +27,7 @@ permissions:
 
 jobs:
   shots:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screenshots]') || contains(github.event.head_commit.message, '[appstore-shots')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[screenshots]') || contains(github.event.head_commit.message, '[screenshots-ipad]') || contains(github.event.head_commit.message, '[appstore-shots')
     # 放在 job 上：沒有 [screenshots] 的提交（job 跳過）不會取消正在截的那一次
     concurrency:
       group: ui-screenshots-${{ github.ref }}
@@ -85,6 +86,7 @@ jobs:
         continue-on-error: true
         env:
           FULL: ${{ inputs.full && 'yes' || 'no' }}
+          IPADSHOTS: ${{ contains(github.event.head_commit.message, '[screenshots-ipad]') && 'yes' || 'no' }}
           APPSTORE: ${{ contains(github.event.head_commit.message, '[appstore-shots') && 'yes' || 'no' }}
           ONLY: ${{ contains(github.event.head_commit.message, '[appstore-shots-ipad]') && 'ipad' || '' }}
         run: |
@@ -106,7 +108,7 @@ jobs:
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )
-          if [ "$FULL" = "yes" ]; then
+          if [ "$FULL" = "yes" ] || [ "$IPADSHOTS" = "yes" ]; then
             scenes+=(
               "welcome|"
               "sites|-demo -demoTab sites"
@@ -171,6 +173,8 @@ jobs:
           fi
           if [ "$FULL" = "yes" ]; then
             shoot "$IPHONE" iphone light
+            shoot "$IPAD" ipad dark
+          elif [ "$IPADSHOTS" = "yes" ]; then
             shoot "$IPAD" ipad dark
           fi
           ls shots | wc -l
