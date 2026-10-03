@@ -385,6 +385,32 @@ final class ConsoleAPI {
         }
     }
 
+    // MARK: LINE（StudioX 官方帳號：Xena 在 LINE 上認得你、傳通知、直接在 LINE 裡對話）
+
+    /// 能不能用、綁定了沒
+    func lineStatus() async throws -> LineStatus {
+        let (data, http) = try await send { try appRequest("api/app/line") }
+        return LineStatus(try appReply(data, http, fallback: "拿不到 LINE 的狀態"))
+    }
+
+    /// 一組綁定碼（10 分鐘、用一次）和打開官方帳號對話的連結（輸入框先填好「綁定 123456」）
+    func lineBindCode() async throws -> (code: String, url: URL?) {
+        let (data, http) = try await send { try appRequest("api/app/line", method: "POST", body: [:]) }
+        let body = try appReply(data, http, fallback: "拿不到綁定碼")
+        return (body["code"]?.string ?? "", body["url"]?.string.flatMap(URL.init(string:)))
+    }
+
+    /// 網站的通知要不要從 LINE 傳
+    func setLineNotify(_ notify: LineStatus.Notify) async throws {
+        let (data, http) = try await send { try appRequest("api/app/line", method: "PATCH", body: ["notify": .string(notify.rawValue)]) }
+        _ = try appReply(data, http, fallback: "沒有存到")
+    }
+
+    func unlinkLine() async throws {
+        let (data, http) = try await send { try appRequest("api/app/line", method: "DELETE") }
+        _ = try appReply(data, http, fallback: "沒有解除")
+    }
+
     /// 他在某個網站的個人通知設定（網站沒有的話 supported＝false）；帶 set 就是改
     func notificationPrefs(site: String, set: JSONValue? = nil) async throws -> NotificationPrefs {
         let (data, http): (Data, HTTPURLResponse)
