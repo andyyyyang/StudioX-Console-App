@@ -411,7 +411,8 @@ struct OrderDetailView: View {
                 .foregroundStyle(link ? Theme.accentText : Theme.ink)
                 .lineLimit(oneLine ? 1 : nil)
                 .minimumScaleFactor(oneLine ? 0.8 : 1)
-                .truncationMode(.middle)
+                // 中間省略只給一行的（多行的文字用了會被擠成一行，例如地址）
+                .truncationMode(oneLine ? .middle : .tail)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
