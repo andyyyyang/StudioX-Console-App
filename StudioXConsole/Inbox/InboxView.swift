@@ -1033,10 +1033,12 @@ private struct VisitorContent: View {
     private enum Line: Identifiable {
         case image(URL, sticker: Bool, id: Int)
         case media(label: String, url: URL, id: Int)
+        /// 客人傳了東西，但原檔沒有存下來（舊的訊息、網站當時沒開圖片儲存）
+        case missing(String, id: Int)
         case text(String, id: Int)
         var id: Int {
             switch self {
-            case .image(_, _, let id), .media(_, _, let id), .text(_, let id): id
+            case .image(_, _, let id), .media(_, _, let id), .missing(_, let id), .text(_, let id): id
             }
         }
     }
@@ -1056,6 +1058,9 @@ private struct VisitorContent: View {
                     return .media(label: [label, rest].filter { !$0.isEmpty }.joined(separator: " "), url: url, id: i)
                 }
             }
+            // 沒有網址的照片、影片（原檔沒存下來）：不顯示「［圖片］（沒有存下來：…）」這種原文
+            if line.hasPrefix("[圖片]") { return .missing("照片沒有存下來", id: i) }
+            if line.hasPrefix("[影片") && !line.contains("https://") { return .missing("影片沒有存下來", id: i) }
             return .text(raw, id: i)
         }
     }
@@ -1066,16 +1071,24 @@ private struct VisitorContent: View {
                 switch line {
                 case .image(let url, let sticker, _):
                     Button { openURL(url) } label: {
-                        AsyncImage(url: url) { image in
-                            image.resizable().scaledToFit()
-                        } placeholder: {
-                            Theme.soft
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFit()
+                            case .failure:
+                                // 網站沒開圖片儲存時是向 LINE 拿的：LINE 刪掉之後就拿不到了
+                                MissingMedia(text: sticker ? "貼圖載入不了" : "照片載入不了（可能已經過期）")
+                            default:
+                                Theme.soft.frame(width: sticker ? 96 : 220, height: sticker ? 96 : 160)
+                            }
                         }
                         .frame(maxWidth: sticker ? 96 : 220, maxHeight: sticker ? 96 : 220, alignment: .leading)
                         .clipShape(.rect(cornerRadius: sticker ? 0 : 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(sticker ? "客人傳的貼圖" : "客人傳的照片")
+                case .missing(let text, _):
+                    MissingMedia(text: text)
                 case .media(let label, let url, _):
                     Button { openURL(url) } label: {
                         Label(label, systemImage: label.hasPrefix("影片") ? "play.rectangle" : label.hasPrefix("語音") ? "waveform" : label.hasPrefix("位置") ? "mappin.and.ellipse" : "doc")
@@ -1102,6 +1115,20 @@ private struct VisitorContent: View {
             out[ar].link = url
         }
         return out
+    }
+}
+
+/// 看不到的照片、影片：一塊淡底、一個圖示、一句說明
+private struct MissingMedia: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "photo")
+            .textRole(.small)
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Theme.soft, in: .rect(cornerRadius: 10, style: .continuous))
     }
 }
 
