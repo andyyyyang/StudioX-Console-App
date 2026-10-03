@@ -474,6 +474,16 @@ final class ConsoleAPI {
         return draft
     }
 
+    /// 回覆建議（Xena 的那一半）：這位客人的分析＋三種下一句。客人同一句話之後再叫拿的是快取，不再算額度
+    func replySuggest(site: String, id: String, refresh: Bool = false) async throws -> XenaReplySuggestion {
+        let payload: JSONValue = ["site": .string(site), "id": .string(id), "refresh": .bool(refresh)]
+        let (data, http) = try await send { try appRequest("api/app/reply-suggest", method: "POST", body: payload) }
+        if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
+        let suggestion = XenaReplySuggestion(try appReply(data, http, fallback: "Xena 想不出建議"))
+        guard !suggestion.replies.isEmpty else { throw APIError.tool("Xena 這次沒有想出建議，再試一次") }
+        return suggestion
+    }
+
     // MARK: Xena（/api/copilot）
 
     private func copilotRequest(_ path: String, method: String = "GET", body: JSONValue? = nil) throws -> URLRequest {

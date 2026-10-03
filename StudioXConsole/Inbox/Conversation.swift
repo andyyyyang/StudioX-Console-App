@@ -48,6 +48,8 @@ struct XenaConversationView: View {
     @State private var showMember = false
     /// 這個網站有哪些資料（有折價券、商品、會員才放那幾格）
     @State private var entities: Set<String> = []
+    /// 輸入框上面的回覆建議（Jev 判斷 → Apple Intelligence 或 Xena，見 ReplySuggestions.swift）
+    @State private var suggest = ReplySuggestions()
 
     /// 這個網站能在 App 裡回覆、接手
     private var desk: Bool { model.site(site)?.hasXenaDesk ?? false }
@@ -106,6 +108,8 @@ struct XenaConversationView: View {
         .toolbar { toolbarItems }
         .task { await load() }
         // 開著的時候每 15 秒看一次有沒有新訊息（客人在 LINE 或網站上又說話了）
+        // 客人說了新的話（又輪到專人回）：想幾句回覆建議
+        .task(id: suggestKey) { await suggestFor(suggestKey) }
         .task(id: conversationID) {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
@@ -373,13 +377,27 @@ struct XenaConversationView: View {
                 sendBlocked: extras.uploading || drafting,
                 send: send
             ) {
-                ReplyAccessory(
-                    extras: $extras,
-                    drafting: drafting,
-                    retry: upload,
-                    editCard: { replySheet = .card },
-                    editProducts: { replySheet = .products }
-                )
+                VStack(alignment: .leading, spacing: 10) {
+                    if showSuggestions {
+                        ReplySuggestionsBar(
+                            state: suggest,
+                            local: XenaLocal.shared.available,
+                            pick: { reply in withAnimation(Motion.ease) { draft = reply } },
+                            again: { Task { await suggestLocal(again: true) } },
+                            askXena: { Task { await suggestXena() } },
+                            hide: { withAnimation(Motion.fast) { suggest.hidden = true } }
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    ReplyAccessory(
+                        extras: $extras,
+                        drafting: drafting,
+                        retry: upload,
+                        editCard: { replySheet = .card },
+                        editProducts: { replySheet = .products }
+                    )
+                }
+                .animation(Motion.fast, value: showSuggestions)
             }
             .overlay(alignment: .topTrailing) {
                 if !atBottom {
@@ -517,6 +535,77 @@ struct XenaConversationView: View {
             } catch {
                 model.show(error.localizedDescription, tone: .danger)
             }
+        }
+    }
+
+    // MARK: 回覆建議
+
+    /// 等專人回的客人最後一句（沒有要回、設定關掉就是空的）
+    private var suggestKey: String {
+        guard desk, AppSettings.shared.replySuggest != .off, let d = detail, let run = ReplySuggestions.waiting(d) else { return "" }
+        return ReplySuggestions.key(run)
+    }
+
+    /// 打字、Xena 擬回覆時收起來；清空輸入框又出現
+    private var showSuggestions: Bool {
+        !suggest.key.isEmpty && !suggest.hidden && !drafting && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 客人說了新的話：Jev 說要查資料（而且設定是 Jev 判斷）才請 Xena，其他在 iPhone 上免費想
+    private func suggestFor(_ key: String) async {
+        guard !key.isEmpty, let d = detail, let run = ReplySuggestions.waiting(d) else {
+            suggest = ReplySuggestions()
+            return
+        }
+        guard key != suggest.key else { return }
+        suggest = ReplySuggestions(key: key)
+        if AppSettings.shared.replySuggest == .auto, ReplySuggestions.needsXena(run) {
+            await suggestXena()
+        } else if XenaLocal.shared.available {
+            await suggestLocal(again: false)
+        }
+    }
+
+    /// Xena 分析這位客人（客人同一句話之後再叫拿的是快取，不再算額度）；不行就退回手機上想
+    private func suggestXena() async {
+        let key = suggest.key
+        guard !key.isEmpty else { return }
+        suggest.loading = .xena
+        suggest.note = nil
+        do {
+            let s = try await model.api.replySuggest(site: site, id: conversationID)
+            guard suggest.key == key else { return }
+            suggest.brief = s.brief
+            suggest.facts = s.facts
+            suggest.replies = s.replies
+            suggest.source = .xena
+            suggest.loading = nil
+        } catch {
+            guard suggest.key == key, !Task.isCancelled else { return }
+            suggest.loading = nil
+            suggest.note = error.localizedDescription
+            if suggest.replies.isEmpty, XenaLocal.shared.available { await suggestLocal(again: false) }
+        }
+    }
+
+    /// iPhone 上的 Apple Intelligence 想三句（免費）；Xena 分析過就照她的分析寫。again：換一批（不要跟剛剛的一樣）
+    private func suggestLocal(again: Bool) async {
+        guard let d = detail, !suggest.key.isEmpty else { return }
+        let key = suggest.key
+        suggest.loading = .local
+        let grounding = (suggest.brief.isEmpty ? [] : ["這位客人：\(suggest.brief)"]) + suggest.facts
+        let replies = await XenaLocal.shared.suggestReplies(
+            siteName: siteName, transcript: ReplySuggestions.transcript(d),
+            grounding: grounding, avoid: again ? suggest.replies : []
+        )
+        guard suggest.key == key else { return }
+        suggest.loading = nil
+        if let replies {
+            suggest.replies = replies
+            suggest.source = .local
+            suggest.note = nil
+        } else if suggest.replies.isEmpty {
+            suggest.note = "這次想不出來，可以按「請 Xena 分析」"
         }
     }
 

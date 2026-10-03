@@ -108,6 +108,26 @@ final class AppSettings {
         }
     }
 
+    /// 客服對話的回覆建議：誰來想下一句
+    enum ReplySuggest: String, CaseIterable, Identifiable {
+        case auto, local, off
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .auto: "Jev 判斷（省錢）"
+            case .local: "只用 Apple Intelligence"
+            case .off: "不要建議"
+            }
+        }
+        var help: String {
+            switch self {
+            case .auto: "客人每一句 Jev 都會先看：打招呼、道謝、補資料這類，iPhone 上的 Apple Intelligence 免費想；要查訂單、商品、報價、客人紀錄的，才請 Xena 分析這位客人（客人同一句話只算一次 Xena 額度）。"
+            case .local: "一律在 iPhone 上想，完全不花錢；想要更準的，在建議列按「請 Xena 分析」。"
+            case .off: "輸入框上面不放建議。「＋」選單裡的「Xena 擬回覆」照樣能用。"
+            }
+        }
+    }
+
     /// 雲端自然語音的三種（console 的 /api/app/tts）
     enum CloudVoice: String, CaseIterable, Identifiable {
         case warm, bright, calm
@@ -171,6 +191,8 @@ final class AppSettings {
     var aiGreeting: Bool { didSet { save(aiGreeting, "ai.greeting") } }
     /// Apple Intelligence 聽懂「打開訂單」這類指令，馬上在手機上做，不用等雲端的 Xena
     var aiCommands: Bool { didSet { save(aiCommands, "ai.commands") } }
+    /// 客服對話輸入框上面的回覆建議（Jev 判斷、Apple Intelligence、Xena）
+    var replySuggest: ReplySuggest { didSet { save(replySuggest.rawValue, "ai.replySuggest") } }
 
     private let defaults: UserDefaults
 
@@ -194,6 +216,7 @@ final class AppSettings {
         cloudVoice = value("voice.cloud", CloudVoice.warm)
         aiGreeting = defaults.object(forKey: "settings.ai.greeting") as? Bool ?? true
         aiCommands = defaults.object(forKey: "settings.ai.commands") as? Bool ?? true
+        replySuggest = value("ai.replySuggest", ReplySuggest.auto)
     }
 
     private func save(_ value: Any, _ key: String) {
@@ -243,12 +266,14 @@ final class AppSettings {
         cloudVoice = .warm
         aiGreeting = true
         aiCommands = true
+        replySuggest = .auto
     }
 
     var isDefault: Bool {
         appearance == .system && textSize == .standard && greeting == .launch && pace == .normal
             && orbMotion && haptics && startTab == .today && hiddenSections.isEmpty
             && speakReplies && voiceID.isEmpty && voiceSource == .iphone && cloudVoice == .warm && aiGreeting && aiCommands
+            && replySuggest == .auto
     }
 }
 

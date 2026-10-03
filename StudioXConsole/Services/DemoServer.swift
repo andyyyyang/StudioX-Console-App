@@ -56,6 +56,7 @@ nonisolated enum DemoServer {
         case "/api/app/account": body = ["ok": true, "demo": true]
         case "/api/app/decisions": body = request.httpMethod == "POST" ? ["ok": true] : parse(decisions)
         case "/api/app/reply-draft": body = ["text": .string(replyDraft(request.httpBody))]
+        case "/api/app/reply-suggest": body = parse(replySuggestion)
         default:
             status = 404
             body = ["error": "not_found", "message": "示範模式沒有這個資料"]
@@ -64,6 +65,15 @@ nonisolated enum DemoServer {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["content-type": "application/json"])!
         return (data, response)
     }
+
+    // MARK: 回覆建議（Xena 分析過這位客人）
+
+    private static let replySuggestion = #"""
+    {"brief":"老客（買過 2 次蛋捲禮盒），這次收到的禮盒壓扁、有兩條碎掉，想換一盒；語氣還算客氣但很失望。",
+     "facts":["#CM-24100607 已送達・原味蛋捲禮盒 × 3","上次用了 3 盒 9 折券"],
+     "replies":["小雯真的很抱歉！壓壞的那盒我們直接幫你換一盒新的，這兩天寄出，舊的不用寄回。","不好意思讓你收到這樣的禮盒！方便拍一張盒子和蛋捲的照片給我嗎？我馬上幫你安排換貨。","真的很抱歉！我請同事今天就補寄一盒新的給你，到貨後再跟我說一聲，有任何問題我都在。"],
+     "at":null,"cached":false}
+    """#
 
     // MARK: 長文草稿（確認卡片的「看完整內容」）
 
@@ -310,8 +320,8 @@ nonisolated enum DemoServer {
        "card":{"title":"蛋捲禮盒 3 盒 9 折","body":"中秋前下單，3 盒以上結帳輸入優惠碼就打 9 折，寄台北隔天到。","couponCode":"MOON10","buttonLabel":"去訂購","url":"https://chenmai.studiox.tw/products/egg-roll-gift"}},
       {"role":"user","content":"太好了，謝謝！","at":"\(ago(hours: 49.5))","tag":"閒聊","jev":{"human":false,"confidence":0}},
       {"role":"event","content":"這段對話已經結束。還有問題的話，直接再問就好。","at":"\(ago(hours: 49.4))","event":"closed"},
-      {"role":"user","content":"蛋捲禮盒收到的時候盒子壓扁了","at":"\(ago(hours: 0.32))","tag":"收貨問題","jev":{"human":true,"confidence":0.93}},
-      {"role":"user","content":"[語音 6 秒] https://chenmai.studiox.tw/api/line/media/demo-voice?s=demo\\n（語音內容：裡面有兩條碎掉了，可以換一盒嗎？）","at":"\(ago(hours: 0.31))","tag":"收貨問題","jev":{"human":true,"confidence":0.9}},
+      {"role":"user","content":"蛋捲禮盒收到的時候盒子壓扁了","at":"\(ago(hours: 0.32))","tag":"收貨問題","jev":{"human":true,"confidence":0.93,"assist":"xena"}},
+      {"role":"user","content":"[語音 6 秒] https://chenmai.studiox.tw/api/line/media/demo-voice?s=demo\\n（語音內容：裡面有兩條碎掉了，可以換一盒嗎？）","at":"\(ago(hours: 0.31))","tag":"收貨問題","jev":{"human":true,"confidence":0.9,"assist":"xena"}},
       {"role":"assistant","content":"真的很抱歉讓你收到壓壞的禮盒！我已經請專人來處理，方便的話可以拍一張照片傳給我們。","at":"\(ago(hours: 0.3))"},
       {"role":"event","content":"已經通知專人，專人會在這裡回覆你。","at":"\(ago(hours: 0.3))","event":"handoff"}
      ]}

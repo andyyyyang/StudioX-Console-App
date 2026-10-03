@@ -121,6 +121,14 @@ struct AccountView: View {
                             .opacity(XenaLocal.shared.available ? 1 : 0.45)
                         }
 
+                        // 客服對話：輸入框上面的回覆建議
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("Reply *suggestions*", aside: "回覆客人時，輸入框上面先放幾句可以直接用的", role: .h3)
+                            RuledList {
+                                ChoiceRow(label: "下一句誰來想", help: settings.replySuggest.help, options: AppSettings.ReplySuggest.allCases, selection: $settings.replySuggest) { $0.label }
+                            }
+                        }
+
                         // 首頁：打開 App 先看哪一頁、首頁放哪些
                         VStack(alignment: .leading, spacing: 20) {
                             SectionHead("*Home*", role: .h3)

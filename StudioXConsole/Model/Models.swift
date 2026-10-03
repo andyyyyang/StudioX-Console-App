@@ -591,6 +591,8 @@ struct XenaConversationMessage: Identifiable {
     var tag: String?
     /// Jev 判斷這一句要不要找人（機率 0–1）
     var jevHuman: (yes: Bool, confidence: Double)?
+    /// Jev 判斷專人回這一句要不要 Xena 查資料：xena（請 Xena 分析）／quick（手機上的 Apple Intelligence 就夠）；舊的網站沒有
+    var jevAssist: String?
     /// Xena 這一輪帶客人去的頁面（客人看到的是一顆按鈕）
     var navigate: (path: String, title: String)?
     /// 專人附的行銷卡片（LINE 上是品牌樣式的 Flex 卡片）
@@ -612,6 +614,7 @@ struct XenaConversationMessage: Identifiable {
         if let jev = m["jev"], let yes = jev["human"]?.bool {
             jevHuman = (yes, jev["confidence"]?.double ?? 0)
         }
+        jevAssist = m["jev"]?["assist"]?.string
         if let nav = m["navigate"], let path = nav["path"]?.string, !path.isEmpty {
             navigate = (path, nav["title"]?.string ?? path)
         }
@@ -629,6 +632,29 @@ struct XenaConversationMessage: Identifiable {
         guard card != nil else { return false }
         let t = content.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty || t.hasPrefix("［卡片］") || t.hasPrefix("[卡片]")
+    }
+}
+
+/// Xena 想的回覆建議（console 的 /api/app/reply-suggest）：這位客人的分析、回覆用得到的事實、三種下一句
+struct XenaReplySuggestion: Equatable {
+    var brief: String
+    var facts: [String]
+    var replies: [String]
+    /// 客人同一句話之後已經分析過（這次不算額度）
+    var cached: Bool
+
+    init(brief: String, facts: [String], replies: [String], cached: Bool = false) {
+        self.brief = brief
+        self.facts = facts
+        self.replies = replies
+        self.cached = cached
+    }
+
+    init(_ json: JSONValue) {
+        brief = json["brief"]?.string ?? ""
+        facts = (json["facts"]?.array ?? []).compactMap(\.string)
+        replies = (json["replies"]?.array ?? []).compactMap(\.string).filter { !$0.isEmpty }
+        cached = json["cached"]?.bool ?? false
     }
 }
 
