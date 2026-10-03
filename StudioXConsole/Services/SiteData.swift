@@ -188,6 +188,27 @@ extension ConsoleAPI {
         return try await propose("reply_xena", site: site, args)
     }
 
+    /// 專人回覆：文字＋附的照片、檔案（先上傳好的）、行銷卡片、商品卡片（網站的 reply_xena）
+    func proposeXenaReply(site: String, id: String, text: String, attachments: [UploadedAttachment], card: StaffCard?, products: [String]) async throws -> WriteOutcome {
+        var args: [String: JSONValue] = ["id": .string(id), "action": "reply"]
+        if !text.isEmpty { args["text"] = .string(text) }
+        if !attachments.isEmpty { args["attachments"] = .array(attachments.map(\.json)) }
+        if let card { args["card"] = card.json }
+        if !products.isEmpty { args["products"] = .array(products.map { .string($0) }) }
+        return try await propose("reply_xena", site: site, args)
+    }
+
+    /// 附件的一次性上傳連結（reply_xena 的 attach：只是上傳，不用確認、不會傳給客人）
+    func xenaAttachLink(site: String, id: String, name: String, mime: String, size: Int) async throws -> URL {
+        let r = try await tool("reply_xena", site: site, [
+            "id": .string(id), "action": "attach", "name": .string(name), "mime": .string(mime), "size": .number(Double(size)),
+        ])
+        guard let s = r["uploadUrl"]?.string, let url = URL(string: s) else {
+            throw APIError.tool(r["message"]?.string ?? "網站沒有給上傳連結（可能還沒更新）")
+        }
+        return url
+    }
+
     /// 客服信的狀態：open / answered / closed
     func proposeThreadStatus(site: String, id: String, status: String) async throws -> WriteOutcome {
         try await propose("update", site: site, ["entity": "support_thread", "id": .string(id), "fields": ["status": .string(status)]])

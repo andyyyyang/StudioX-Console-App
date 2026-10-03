@@ -1,4 +1,5 @@
 import AVKit
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -31,6 +32,22 @@ struct XenaConversationView: View {
     @State private var atBottom = true
     /// 捲在上面時進來的新訊息
     @State private var unseen = 0
+    /// 回覆裡附的照片、檔案、卡片、商品（輸入框上面一排）
+    @State private var extras = ReplyExtras()
+    /// Xena 正在擬回覆／潤飾
+    @State private var drafting = false
+    /// 「＋」選單，和它打開的東西
+    @State private var showTools = false
+    @State private var pendingTool: ReplyTool?
+    @State private var replySheet: ReplySheet?
+    @State private var showPhotos = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showCamera = false
+    @State private var showFiles = false
+    @State private var pickingOrder = false
+    @State private var showMember = false
+    /// 這個網站有哪些資料（有折價券、商品、會員才放那幾格）
+    @State private var entities: Set<String> = []
 
     /// 這個網站能在 App 裡回覆、接手
     private var desk: Bool { model.site(site)?.hasXenaDesk ?? false }
@@ -124,6 +141,48 @@ struct XenaConversationView: View {
             Task {
                 await load()
                 await model.refreshAll()
+            }
+        }
+        // 「＋」選單：選了之後選單先收起來，再打開要用的東西（相簿、相機、檔案、折價券…）
+        .sheet(isPresented: $showTools, onDismiss: runTool) {
+            ReplyMenuSheet(options: toolOptions) { tool in
+                pendingTool = tool
+                showTools = false
+            }
+        }
+        .sheet(item: $replySheet) { sheet in replySheetView(sheet) }
+        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: max(1, room), matching: .images)
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            Task { await stagePhotos(items) }
+        }
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: ReplyMedia.fileTypes, allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { stageFiles(urls) }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { image in
+                showCamera = false
+                if let image { Task { await stageCamera(image) } }
+            }
+            .ignoresSafeArea()
+        }
+        .confirmationDialog("附上哪一筆訂單的進度？", isPresented: $pickingOrder, titleVisibility: .visible) {
+            ForEach(detail?.orders ?? []) { order in
+                Button("#\(order.number)・\(order.statusLabel)") { Task { await insertTrack(order) } }
+            }
+        }
+        .navigationDestination(isPresented: $showMember) {
+            if let id = detail?.memberID { MemberView(site: site, memberID: id) }
+        }
+        .task {
+            if let schema = await model.schema(for: site) {
+                entities = Set(schema.entities.filter(\.canList).map(\.key))
+            }
+            // UI 截圖（-demoTools YES）：打開「＋」選單
+            if DemoServer.screenshots, UserDefaults.standard.bool(forKey: "demoTools") {
+                try? await Task.sleep(for: .seconds(1.5))
+                showTools = true
             }
         }
     }
@@ -265,7 +324,10 @@ struct XenaConversationView: View {
                     Button("重新開啟", systemImage: "arrow.uturn.backward.circle") { act("reopen") }
                 }
             }
-            Button("請 Xena 擬回覆", systemImage: "sparkles") { askXenaForDraft() }
+            if desk, status != "closed" {
+                Button("請 Xena 擬回覆", systemImage: "sparkles") { xenaWrite(polish: false) }
+            }
+            Button("跟 Xena 討論這段對話", systemImage: "bubble.left.and.text.bubble.right") { askXenaForDraft() }
             if let url = detail?.adminURL ?? model.site(site)?.adminURL {
                 Button("在後台打開", systemImage: "arrow.up.right.square") { openURL(url) }
             }
@@ -278,7 +340,7 @@ struct XenaConversationView: View {
 
     private func askXenaForDraft() {
         let from = detail?.channel == .line ? "LINE 上" : "官網上"
-        model.askXena("幫我看\(siteName)\(from)這段 Xena 客服對話（\(conversationID)），擬一段給客人的回覆")
+        model.askXena("幫我看\(siteName)\(from)這段 Xena 客服對話（\(conversationID)），我想跟你討論怎麼回覆")
     }
 
     // MARK: 下方：回覆
@@ -302,13 +364,23 @@ struct XenaConversationView: View {
         } else {
             ChatComposer(
                 text: $draft,
-                placeholder: status == "human" ? "回覆客人…" : "回覆客人（送出就由你接手）",
+                placeholder: drafting ? "Xena 正在寫…" : status == "human" ? "回覆客人…" : "回覆客人（送出就由你接手）",
                 hint: detail?.replyGoesTo ?? detail?.channel.replyHint,
                 hintWarning: detail?.lineBlocked == true,
                 sending: pending != nil,
-                draftWithXena: askXenaForDraft,
+                plus: { showTools = true },
+                canSendEmpty: !extras.isEmpty,
+                sendBlocked: extras.uploading || drafting,
                 send: send
-            )
+            ) {
+                ReplyAccessory(
+                    extras: $extras,
+                    drafting: drafting,
+                    retry: upload,
+                    editCard: { replySheet = .card },
+                    editProducts: { replySheet = .products }
+                )
+            }
             .overlay(alignment: .topTrailing) {
                 if !atBottom {
                     JumpToLatest(count: unseen) {
@@ -325,16 +397,234 @@ struct XenaConversationView: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, pending == nil else { return }
-        pending = text
+        guard pending == nil, !text.isEmpty || !extras.isEmpty else { return }
+        if extras.uploading {
+            model.show("照片、檔案還在上傳，等一下下", tone: .warning)
+            return
+        }
+        if extras.failed {
+            model.show("有附件沒傳上去：點一下重試，或拿掉再送", tone: .warning)
+            return
+        }
+        let staged = extras
+        pending = text.isEmpty ? "📎 \(staged.summary)" : text
         draft = ""
+        extras = ReplyExtras()
         withAnimation(Motion.ease) { position.scrollTo(edge: .bottom) }
         Task {
-            let sent = await propose(reply: true) { try await model.api.proposeXena(site: site, id: conversationID, action: "reply", text: text) }
-            // 沒送出（出錯、要另外確認）：字放回輸入框，不會不見
-            if !sent, draft.isEmpty { draft = text }
+            let sent = await propose(reply: true) {
+                try await model.api.proposeXenaReply(
+                    site: site, id: conversationID, text: text,
+                    attachments: staged.uploaded, card: staged.card, products: staged.products.map(\.id)
+                )
+            }
+            // 沒送出（出錯、要另外確認）：字和附的東西放回去，不會不見
+            if !sent {
+                if draft.isEmpty { draft = text }
+                if extras.isEmpty { extras = staged }
+            }
             pending = nil
         }
+    }
+
+    // MARK: 「＋」選單
+
+    /// 還能附幾個照片、檔案
+    private var room: Int { (detail?.attach?.max ?? 4) - extras.files.count }
+
+    private var toolOptions: ReplyMenuOptions {
+        let replyWith = detail?.replyWith ?? ["card"]
+        return ReplyMenuOptions(
+            hasDraft: !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            canRelease: status == "human" || status == "waiting",
+            attach: replyWith.contains("attachments") ? detail?.attach : nil,
+            room: room,
+            coupons: entities.contains("coupon") && replyWith.contains("card"),
+            issueCoupon: detail?.memberID != nil && model.site(site)?.tools.contains("issue_coupons") == true,
+            products: replyWith.contains("products") && entities.contains("product"),
+            card: replyWith.contains("card"),
+            orders: !(detail?.orders.isEmpty ?? true),
+            member: detail?.memberID != nil && entities.contains("user")
+        )
+    }
+
+    /// 選單收起來之後才打開選的那一個（同一時間只能有一個畫面蓋上來）
+    private func runTool() {
+        guard let tool = pendingTool else { return }
+        pendingTool = nil
+        switch tool {
+        case .xenaDraft: xenaWrite(polish: false)
+        case .xenaPolish: xenaWrite(polish: true)
+        case .release: act("release")
+        case .photos: showPhotos = true
+        case .camera: showCamera = true
+        case .files: showFiles = true
+        case .coupon: replySheet = .coupons
+        case .issueCoupon: replySheet = .issue
+        case .products: replySheet = .products
+        case .card: replySheet = .card
+        case .saved: replySheet = .saved
+        case .track:
+            let orders = detail?.orders ?? []
+            if orders.count == 1, let order = orders.first {
+                Task { await insertTrack(order) }
+            } else {
+                pickingOrder = true
+            }
+        case .member: showMember = true
+        }
+    }
+
+    @ViewBuilder
+    private func replySheetView(_ sheet: ReplySheet) -> some View {
+        switch sheet {
+        case .coupons:
+            CouponPickerSheet(site: site) { extras.card = $0 }
+        case .issue:
+            IssueCouponSheet(site: site, userIDs: [detail?.memberID].compactMap { $0 }, to: who) { codes in
+                guard let code = codes.first else { return }
+                extras.card = StaffCard(title: "給你的專屬優惠", body: "結帳時輸入優惠碼就能使用。", couponCode: code, buttonLabel: "去逛逛", url: model.site(site)?.url)
+                model.show("折價券發好了，已經附在回覆裡（點卡片可以改）")
+            }
+        case .products:
+            ProductPickerSheet(site: site, initial: extras.products) { extras.products = $0 }
+        case .card:
+            CardEditorSheet(initial: extras.card, siteURL: model.site(site)?.url) { extras.card = $0 }
+        case .saved:
+            SavedRepliesSheet(current: draft) { insertText($0) }
+        }
+    }
+
+    /// 放進輸入框：原本有字就接在後面
+    private func insertText(_ text: String) {
+        let current = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = current.isEmpty ? text : current + "\n" + text
+    }
+
+    /// Xena 讀整段對話擬一段回覆（輸入框有字就當重點），或潤飾輸入框裡的那段；放進輸入框，不會自己送出
+    private func xenaWrite(polish: Bool) {
+        guard !drafting else { return }
+        let input = draft
+        drafting = true
+        Task {
+            defer { drafting = false }
+            do {
+                let text = try await model.api.replyDraft(site: site, id: conversationID, polish: polish, text: input)
+                withAnimation(Motion.ease) {
+                    // 寫的時候又打了字：接在後面，不蓋掉
+                    draft = draft == input ? text : draft + "\n\n" + text
+                }
+            } catch {
+                model.show(error.localizedDescription, tone: .danger)
+            }
+        }
+    }
+
+    /// 訂單的進度和追蹤頁（客人不用登入就看得到）放進輸入框
+    private func insertTrack(_ order: CustomerOrder) async {
+        do {
+            let o = try await model.api.order(site: site, id: order.id)
+            let state = o.summary.status.label
+            if let url = o.trackURL {
+                insertText("你的訂單 #\(order.number) 目前是「\(state)」，最新進度可以在這裡看：\(url.absoluteString)")
+            } else {
+                insertText("你的訂單 #\(order.number) 目前是「\(state)」。")
+            }
+        } catch {
+            model.show(error.localizedDescription, tone: .danger)
+        }
+    }
+
+    // MARK: 照片、檔案（一選就開始傳到網站）
+
+    private func stagePhotos(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            guard let raw = try? await item.loadTransferable(type: Data.self) else {
+                model.show("有一張照片讀不到", tone: .warning)
+                continue
+            }
+            await stageImage(raw, name: "photo.jpg")
+        }
+    }
+
+    private func stageCamera(_ image: UIImage) async {
+        guard let raw = image.jpegData(compressionQuality: 0.95) else { return }
+        await stageImage(raw, name: "photo.jpg")
+    }
+
+    /// 照片轉成 JPEG、壓到網站的上限以內（LINE 的預覽圖最多 1MB），再開始傳
+    private func stageImage(_ raw: Data, name: String) async {
+        guard room > 0 else {
+            model.show("一次最多附 \(detail?.attach?.max ?? 4) 個", tone: .warning)
+            return
+        }
+        let limit = detail?.attach?.imageBytes ?? 1_048_576
+        let jpeg = await Task.detached(priority: .userInitiated) { ReplyMedia.jpeg(from: raw, limit: limit) }.value
+        guard let jpeg else {
+            model.show("這張照片轉不過來，換一張試試", tone: .warning)
+            return
+        }
+        let base = (name as NSString).deletingPathExtension
+        let file = StagedFile(
+            name: "\(base.isEmpty ? "photo" : base).jpg",
+            mime: "image/jpeg",
+            data: jpeg,
+            thumbnail: UIImage(data: jpeg)?.preparingThumbnail(of: CGSize(width: 160, height: 160))
+        )
+        withAnimation(Motion.fast) { extras.files.append(file) }
+        upload(file.id)
+    }
+
+    private func stageFiles(_ urls: [URL]) {
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else {
+                model.show("讀不到「\(url.lastPathComponent)」", tone: .warning)
+                continue
+            }
+            let mime = ReplyMedia.mime(for: url)
+            // 從檔案選的照片（HEIC、PNG…）也轉成 JPEG，LINE 上才是一張照片
+            if mime.hasPrefix("image/") {
+                let name = url.lastPathComponent
+                Task { await stageImage(data, name: name) }
+                continue
+            }
+            guard room > 0 else {
+                model.show("一次最多附 \(detail?.attach?.max ?? 4) 個", tone: .warning)
+                break
+            }
+            let limit = detail?.attach?.fileBytes ?? 20_971_520
+            guard data.count <= limit else {
+                model.show("「\(url.lastPathComponent)」太大了（最多 \(ReplyMedia.size(limit))）", tone: .warning)
+                continue
+            }
+            let file = StagedFile(name: url.lastPathComponent, mime: mime, data: data)
+            withAnimation(Motion.fast) { extras.files.append(file) }
+            upload(file.id)
+        }
+    }
+
+    /// 傳到網站：先拿一次性上傳連結（reply_xena 的 attach），再把檔案送過去；失敗的點一下重試
+    private func upload(_ id: StagedFile.ID) {
+        guard let i = extras.files.firstIndex(where: { $0.id == id }) else { return }
+        extras.files[i].state = .uploading
+        let file = extras.files[i]
+        Task {
+            do {
+                let link = try await model.api.xenaAttachLink(site: site, id: conversationID, name: file.name, mime: file.mime, size: file.data.count)
+                let uploaded = try await model.api.uploadAttachment(to: link, data: file.data, mime: file.mime, filename: file.name)
+                setState(id, .ready(uploaded))
+            } catch {
+                setState(id, .failed(error.localizedDescription))
+            }
+        }
+    }
+
+    private func setState(_ id: StagedFile.ID, _ state: StagedFile.State) {
+        // 傳的時候拿掉了就不管它
+        guard let i = extras.files.firstIndex(where: { $0.id == id }) else { return }
+        extras.files[i].state = state
     }
 
     private func load(quiet: Bool = false) async {
@@ -349,6 +639,7 @@ struct XenaConversationView: View {
     /// 回覆送出了：照網站回報的說有沒有真的傳到客人的 LINE、有沒有寄信（沒傳到要讓專人知道）
     private func announceReply(_ result: JSONValue) {
         draft = ""
+        extras = ReplyExtras()
         if result["lineSent"]?.bool == false {
             model.show("回覆存下來了，但沒有傳到客人的 LINE（可能封鎖了官方帳號，或本月訊息量用完）", tone: .warning)
         } else if let error = result["emailError"]?.string, !error.isEmpty {
@@ -562,6 +853,8 @@ private struct XenaChatRow: View {
     let space: Namespace.ID
     let open: (ViewedMedia) -> Void
 
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
         if message.role == "user" { customer } else { ours }
     }
@@ -588,14 +881,35 @@ private struct XenaChatRow: View {
 
     private var xena: Bool { message.role == "assistant" }
 
+    /// 專人附的照片、檔案（一行「[圖片] 網址」「[檔案] 檔名 網址」）拆出來另外畫；剩下的字放在泡泡裡
+    private var staffParts: (text: String, media: [VisitorContent.Part]) {
+        guard message.role == "staff", message.content.contains("https://") else { return (message.content, []) }
+        let parts = VisitorContent.parse(message.content)
+        let media = parts.filter { part in
+            if case .text = part.kind { return false }
+            return true
+        }
+        guard !media.isEmpty else { return (message.content, []) }
+        let text = parts.compactMap { part -> String? in
+            if case .text(let s) = part.kind { return s }
+            return nil
+        }
+        return (text.joined(separator: "\n\n"), media)
+    }
+
     private var ours: some View {
         VStack(alignment: .trailing, spacing: 4) {
             if first { sender }
-            if !message.content.isEmpty, !message.isOnlyCardLabel {
-                ChatBubble(xena ? .xena : .staff, tail: last) {
-                    Text(bubbleText(message.content, markdown: true))
+            let split = staffParts
+            // 只附卡片沒打字的（內容是「［卡片］標題」）：只畫卡片
+            if !split.text.isEmpty, !message.isOnlyCardLabel, !(message.card != nil && split.text.hasPrefix("［卡片］")) {
+                ChatBubble(xena ? .xena : .staff, tail: last && split.media.isEmpty) {
+                    Text(bubbleText(split.text, markdown: true))
                 }
                 .contextMenu { menu }
+            }
+            ForEach(split.media) { part in
+                staffMedia(part)
             }
             if let nav = message.navigate {
                 NavigateChip(title: nav.title, url: URL(string: nav.path, relativeTo: siteURL)?.absoluteURL)
@@ -617,6 +931,24 @@ private struct XenaChatRow: View {
         .frame(maxWidth: 520, alignment: .trailing)
         .padding(.leading, 56)
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// 專人附的照片（點了放大）、檔案（點了打開）
+    @ViewBuilder
+    private func staffMedia(_ part: VisitorContent.Part) -> some View {
+        switch part.kind {
+        case .photo(let url):
+            PhotoThumb(url: url, space: space) { open(ViewedMedia(url: url, kind: .photo)) }
+                .contextMenu { menu }
+        case .media(let kind, let title, let url, let location):
+            MediaRow(kind: kind, title: title, location: location) {
+                if let kind { open(ViewedMedia(url: url, kind: kind)) } else { openURL(url) }
+            }
+        case .missing(let text):
+            MissingMedia(text: text)
+        default:
+            EmptyView()
+        }
     }
 
     /// 誰說的（我們這邊換人時寫在第一個泡泡上面）
@@ -1014,7 +1346,7 @@ private struct NavigateChip: View {
 }
 
 /// 專人附的行銷卡片：照客人在 LINE 上看到的畫（大圖、標題、說明、優惠碼、按鈕）
-private struct StaffCardView: View {
+struct StaffCardView: View {
     let card: StaffCard
     @Environment(\.openURL) private var openURL
     @State private var copied = false
@@ -1353,6 +1685,12 @@ struct ChatComposer<Accessory: View>: View {
     var hintWarning: Bool
     var sending: Bool
     var draftWithXena: (() -> Void)?
+    /// 左邊的「＋」：打開附件、Xena、折價券…的選單（Xena 對話）
+    var plus: (() -> Void)?
+    /// 沒打字也送得出去（附了照片、卡片）
+    var canSendEmpty: Bool
+    /// 先不能送（照片還在上傳、Xena 還在寫）
+    var sendBlocked: Bool
     let send: () -> Void
     let accessory: Accessory
 
@@ -1360,7 +1698,8 @@ struct ChatComposer<Accessory: View>: View {
 
     init(
         text: Binding<String>, placeholder: String, hint: String? = nil, hintWarning: Bool = false, sending: Bool = false,
-        draftWithXena: (() -> Void)? = nil, send: @escaping () -> Void, @ViewBuilder accessory: () -> Accessory
+        draftWithXena: (() -> Void)? = nil, plus: (() -> Void)? = nil, canSendEmpty: Bool = false, sendBlocked: Bool = false,
+        send: @escaping () -> Void, @ViewBuilder accessory: () -> Accessory
     ) {
         _text = text
         self.placeholder = placeholder
@@ -1368,11 +1707,15 @@ struct ChatComposer<Accessory: View>: View {
         self.hintWarning = hintWarning
         self.sending = sending
         self.draftWithXena = draftWithXena
+        self.plus = plus
+        self.canSendEmpty = canSendEmpty
+        self.sendBlocked = sendBlocked
         self.send = send
         self.accessory = accessory()
     }
 
     private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var showSend: Bool { !empty || canSendEmpty || sending }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1386,7 +1729,17 @@ struct ChatComposer<Accessory: View>: View {
             }
             accessory
             HStack(alignment: .bottom, spacing: 8) {
-                if let draftWithXena {
+                if let plus {
+                    Button(action: plus) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.ink2)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.bubbleIn, in: .circle)
+                    }
+                    .buttonStyle(PressScale(scale: 0.9))
+                    .accessibilityLabel("加照片、檔案、折價券，或請 Xena 幫忙")
+                } else if let draftWithXena {
                     Button(action: draftWithXena) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 16, weight: .semibold))
@@ -1405,7 +1758,7 @@ struct ChatComposer<Accessory: View>: View {
                         .focused($focused)
                         .padding(.leading, 14)
                         .padding(.vertical, 8)
-                    if !empty || sending {
+                    if showSend {
                         Button(action: send) {
                             Group {
                                 if sending {
@@ -1419,7 +1772,8 @@ struct ChatComposer<Accessory: View>: View {
                             .background(Theme.bubbleStaff, in: .circle)
                         }
                         .buttonStyle(PressScale(scale: 0.9))
-                        .disabled(sending)
+                        .disabled(sending || sendBlocked)
+                        .opacity(sendBlocked && !sending ? 0.45 : 1)
                         .keyboardShortcut(.return, modifiers: .command)
                         .padding(.trailing, 4)
                         .padding(.bottom, 4)
@@ -1441,16 +1795,19 @@ struct ChatComposer<Accessory: View>: View {
         .background(.bar)
         .overlay(alignment: .top) { Rule() }
         .animation(Motion.fast, value: focused)
-        .animation(Motion.fast, value: empty)
+        .animation(Motion.fast, value: showSend)
     }
 }
 
 extension ChatComposer where Accessory == EmptyView {
     init(
         text: Binding<String>, placeholder: String, hint: String? = nil, hintWarning: Bool = false, sending: Bool = false,
-        draftWithXena: (() -> Void)? = nil, send: @escaping () -> Void
+        draftWithXena: (() -> Void)? = nil, plus: (() -> Void)? = nil, canSendEmpty: Bool = false, sendBlocked: Bool = false, send: @escaping () -> Void
     ) {
-        self.init(text: text, placeholder: placeholder, hint: hint, hintWarning: hintWarning, sending: sending, draftWithXena: draftWithXena, send: send) { EmptyView() }
+        self.init(
+            text: text, placeholder: placeholder, hint: hint, hintWarning: hintWarning, sending: sending,
+            draftWithXena: draftWithXena, plus: plus, canSendEmpty: canSendEmpty, sendBlocked: sendBlocked, send: send
+        ) { EmptyView() }
     }
 }
 

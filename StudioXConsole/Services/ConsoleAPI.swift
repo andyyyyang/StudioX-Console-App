@@ -284,6 +284,29 @@ final class ConsoleAPI {
     /// 換圖：網站給的一次性上傳連結（set_images 的 requestUpload），直接把檔案送到網站
     /// （和手機上點連結上傳是同一條路：存恢復點、通知店主、稽核）。回傳新的圖片清單
     func upload(to link: URL, data: Data, mime: String, filename: String) async throws -> [String] {
+        let result = try await postUpload(to: link, data: data, mime: mime, filename: filename)
+        return result["images"]?.array.compactMap(\.string) ?? []
+    }
+
+    /// 對話的附件：用 reply_xena 給的一次性連結把檔案送到網站（存進網站的儲存），回存好的網址
+    func uploadAttachment(to link: URL, data: Data, mime: String, filename: String) async throws -> UploadedAttachment {
+        if DemoServer.enabled {
+            try? await Task.sleep(for: .milliseconds(600))
+            let kind = mime.hasPrefix("image/") ? "image" : "file"
+            return UploadedAttachment(kind: kind, url: "https://demo.studiox.tw/xena/staff/\(UUID().uuidString.prefix(8)).\(kind == "image" ? "jpg" : "pdf")", name: filename, size: data.count, mime: mime)
+        }
+        let result = try await postUpload(to: link, data: data, mime: mime, filename: filename)
+        guard let url = result["url"]?.string else { throw APIError.tool("網站沒有回存好的網址") }
+        return UploadedAttachment(
+            kind: result["kind"]?.string ?? (mime.hasPrefix("image/") ? "image" : "file"),
+            url: url,
+            name: result["name"]?.string ?? filename,
+            size: result["size"]?.int ?? data.count,
+            mime: result["mime"]?.string ?? mime
+        )
+    }
+
+    private func postUpload(to link: URL, data: Data, mime: String, filename: String) async throws -> JSONValue {
         let token = link.lastPathComponent
         guard var c = URLComponents(url: link, resolvingAgainstBaseURL: false), !token.isEmpty else { throw APIError.tool("上傳連結不正確") }
         c.path = "/api/upload/\(token)"
@@ -291,7 +314,9 @@ final class ConsoleAPI {
         guard let url = c.url else { throw APIError.tool("上傳連結不正確") }
         let boundary = "studiox-\(UUID().uuidString)"
         var body = Data()
-        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: \(mime)\r\n\r\n".utf8))
+        // 檔名放在標頭裡：拿掉引號、換行（中文檔名照原樣，網站收得到）
+        let safeName = filename.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\r", with: "").replacingOccurrences(of: "\n", with: " ")
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\nContent-Type: \(mime)\r\n\r\n".utf8))
         body.append(data)
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))
         var r = URLRequest(url: url)
@@ -308,7 +333,7 @@ final class ConsoleAPI {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let result = (try? json(reply)) ?? .null
         guard status == 200, result["ok"]?.bool == true else { throw APIError.tool(result["error"]?.string ?? "上傳失敗（\(status)）") }
-        return result["images"]?.array.compactMap(\.string) ?? []
+        return result
     }
 
     enum WriteOutcome {
@@ -434,6 +459,19 @@ final class ConsoleAPI {
         let payload: JSONValue = ["id": .string(id), "action": .string(action.rawValue)]
         let (data, http) = try await send { try appRequest("api/app/decisions", method: "POST", body: payload) }
         _ = try appReply(data, http, fallback: "沒有存起來")
+    }
+
+    // MARK: 客服對話的「Xena 擬回覆／潤飾」（/api/app/reply-draft）
+
+    /// console 的 Xena 讀整段對話寫一段回覆（draft：notes 是專人交代的重點；polish：text 是要潤飾的那段）。只回草稿，不會送出
+    func replyDraft(site: String, id: String, polish: Bool, text: String) async throws -> String {
+        let payload: JSONValue = ["site": .string(site), "id": .string(id), "mode": .string(polish ? "polish" : "draft"), "text": .string(text)]
+        let (data, http) = try await send { try appRequest("api/app/reply-draft", method: "POST", body: payload) }
+        if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
+        guard let draft = try appReply(data, http, fallback: "Xena 寫不出來")["text"]?.string, !draft.isEmpty else {
+            throw APIError.tool("Xena 這次沒有寫出東西，再試一次")
+        }
+        return draft
     }
 
     // MARK: Xena（/api/copilot）

@@ -101,6 +101,7 @@ jobs:
             "site|-demo -demoRoute site"
             "xena|-demo -demoRoute xena"
             "line|-demo -demoRoute line"
+            "tools|-demo -demoRoute line -demoTools YES|10"
             "thread|-demo -demoRoute thread"
             "order|-demo -demoRoute order -demoScroll amounts"
             "member|-demo -demoRoute member"

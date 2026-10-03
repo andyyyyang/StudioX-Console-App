@@ -650,6 +650,54 @@ struct StaffCard {
         buttonLabel = json["buttonLabel"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         url = json["url"]?.string.flatMap(URL.init(string:))
     }
+
+    init(title: String, body: String? = nil, imageURL: URL? = nil, couponCode: String? = nil, buttonLabel: String? = nil, url: URL? = nil) {
+        self.title = title
+        self.body = body
+        self.imageURL = imageURL
+        self.couponCode = couponCode
+        self.buttonLabel = buttonLabel
+        self.url = url
+    }
+
+    /// 送給網站的 reply_xena 的 card（空的欄位不送）
+    var json: JSONValue {
+        var o: [String: JSONValue] = ["title": .string(title)]
+        if let body, !body.isEmpty { o["body"] = .string(body) }
+        if let imageURL { o["imageUrl"] = .string(imageURL.absoluteString) }
+        if let couponCode, !couponCode.isEmpty { o["couponCode"] = .string(couponCode) }
+        if let buttonLabel, !buttonLabel.isEmpty { o["buttonLabel"] = .string(buttonLabel) }
+        if let url { o["url"] = .string(url.absoluteString) }
+        return .object(o)
+    }
+}
+
+/// 傳到網站儲存的附件（reply_xena 的 attach → /api/upload/<token>），回覆時放進 attachments
+struct UploadedAttachment: Hashable, Sendable {
+    /// image | file
+    var kind: String
+    var url: String
+    var name: String
+    var size: Int
+    var mime: String
+
+    var json: JSONValue {
+        ["kind": .string(kind), "url": .string(url), "name": .string(name), "size": .number(Double(size)), "mime": .string(mime)]
+    }
+}
+
+/// 網站讓專人附照片、檔案的上限（get assistant_conversation 的 attach；網站沒開圖片儲存是 nil）
+struct AttachLimits {
+    var max: Int
+    var imageBytes: Int
+    var fileBytes: Int
+
+    init?(_ json: JSONValue?) {
+        guard let json, !json.isNull else { return nil }
+        max = json["max"]?.int ?? 4
+        imageBytes = json["imageBytes"]?.int ?? 1_048_576
+        fileBytes = json["fileBytes"]?.int ?? 20_971_520
+    }
 }
 
 /// 同一位 LINE 好友之前的一段對話
@@ -684,6 +732,12 @@ struct XenaConversationDetail {
     /// 會員最近的訂單（黃毛丫頭：登入的會員、綁了 LINE 的客人）
     var orders: [CustomerOrder]
     var adminURL: URL?
+    /// 專人回覆除了文字還能附什麼：card（行銷卡片）、products（商品卡片）、attachments（照片、檔案）
+    var replyWith: Set<String>
+    /// 照片、檔案的上限（網站沒開圖片儲存是 nil）
+    var attach: AttachLimits?
+    /// 登入的會員（黃毛丫頭）：可以點進會員頁、發專屬折價券
+    var memberID: String?
 
     init(_ json: JSONValue) {
         status = json["status"]?.string
@@ -717,6 +771,10 @@ struct XenaConversationDetail {
             )
         }
         adminURL = json["adminUrl"]?.string.flatMap(URL.init(string:))
+        // 還沒更新的網站沒有 replyWith：只確定能附行銷卡片
+        replyWith = Set((json["replyWith"]?.array ?? ["card"]).compactMap(\.string))
+        attach = AttachLimits(json["attach"])
+        memberID = json["member"]?["id"]?.string
     }
 }
 

@@ -166,6 +166,8 @@ struct IssueCouponSheet: View {
     let site: String
     let userIDs: [String]
     let to: String
+    /// 發好了：發出去的折價碼（對話裡發的會附在回覆裡）
+    var onIssued: (([String]) -> Void)?
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -218,8 +220,9 @@ struct IssueCouponSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
             }
             .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
-                let issued = result["issued"]?.array.count ?? 0
-                model.show(issued > 0 ? "已發出 \(issued) 張折價券" : "已送出")
+                let codes = (result["issued"]?.array ?? []).compactMap { $0["code"]?.string }
+                model.show(codes.isEmpty ? "已送出" : "已發出 \(codes.count) 張折價券")
+                onIssued?(codes)
                 dismiss()
             }
         }

@@ -10,6 +10,7 @@ import Foundation
 ///   -demoRoute site|traffic|order|member|thread|line|products|product|xena   打開哪一頁（line：LINE 來的 Xena 對話）
 ///   -demoSheet today|chenmai.studiox.tw   首頁卡片打開的 sheet
 ///   -demoLock YES   顯示 Face ID 的鎖定畫面
+///   -demoTools YES   對話頁打開輸入列的「＋」選單（配 -demoRoute line）
 nonisolated enum DemoServer {
     /// 現在是示範模式（歡迎頁按了「先看看示範」，登出就結束）
     nonisolated(unsafe) static var enabled = screenshots
@@ -54,6 +55,7 @@ nonisolated enum DemoServer {
         case "/api/app/notifications": body = ["supported": false]
         case "/api/app/account": body = ["ok": true, "demo": true]
         case "/api/app/decisions": body = request.httpMethod == "POST" ? ["ok": true] : parse(decisions)
+        case "/api/app/reply-draft": body = ["text": .string(replyDraft(request.httpBody))]
         default:
             status = 404
             body = ["error": "not_found", "message": "示範模式沒有這個資料"]
@@ -138,6 +140,10 @@ nonisolated enum DemoServer {
     private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites"]
 
     private static func tool(_ name: String, site: String, entity: String, args: JSONValue) -> String? {
+        // 附件的上傳連結（只是上傳，不用確認；示範模式的上傳不會真的送出去）
+        if name == "reply_xena", args["action"]?.string == "attach" {
+            return #"{"uploadUrl":"https://demo.studiox.tw/u/img/demo-upload-token","expiresInMinutes":30}"#
+        }
         if !readTools.contains(name) {
             if args["confirmToken"]?.string != nil { return #"{"ok":true,"demo":true}"# }
             return #"{"needsConfirmation":true,"title":"確認（示範模式）","detail":"這是示範模式：按確認會顯示完成，但不會真的送出或修改任何資料。","confirmToken":"demo"}"#
@@ -148,7 +154,8 @@ nonisolated enum DemoServer {
         case ("search_report", _): return search
         case ("list", "order"): return orders(status: args["status"]?.string)
         case ("get", "order"): return order(id: args["id"]?.string ?? "o1")
-        case ("get", "user"): return member
+        case ("get", "user"): return member(id: args["id"]?.string ?? "u1")
+        case ("list", "coupon"): return coupons
         case ("list", "support_thread"): return site == "chenmai.studiox.tw" ? threads : #"{"threads":[]}"#
         case ("get", "support_thread"): return thread
         case ("list", "assistant_conversation"):
@@ -235,8 +242,8 @@ nonisolated enum DemoServer {
      "trackUrl":null}
     """ }
 
-    private static var member: String { """
-    {"user":{"id":"u1","name":"林小涵","email":"demo-customer@example.com","phone":"0912-000-000","phoneVerified":"\(ago(hours: 2000))","role":"customer","tier":"金卡會員",
+    private static func member(id: String) -> String { """
+    {"user":{"id":"\(id)","name":"\(id == "u2" ? "小雯" : "林小涵")","email":"demo-customer@example.com","phone":"0912-000-000","phoneVerified":"\(ago(hours: 2000))","role":"customer","tier":"金卡會員",
       "lifetimeSpendCents":684000,"lifetimeSpendLabel":"NT$6,840","invitedCount":2,"createdAt":"\(ago(hours: 4300))"},
      "rfm":{"segment":"loyal","orderCount":4,"recencyDays":0,"frequency90d":2,"monetaryCents":236000},
      "recentOrders":[{"id":"o1","orderNumber":"CM-24100612","status":"paid","total":112000,"totalLabel":"NT$1,120","createdAt":"\(ago(hours: 3))"},
@@ -285,7 +292,8 @@ nonisolated enum DemoServer {
 
     /// LINE 上的一位客人：前天問禮盒（Xena 帶她看商品、專人給了優惠卡片），今天收到時盒子壓扁了（Jev 判斷要找人、她也傳了語音）
     private static var lineConversation: String { """
-    {"id":"yc1","status":"waiting","channel":"line","line":{"name":"小雯","following":true},"member":{"name":"小雯"},
+    {"id":"yc1","status":"waiting","channel":"line","line":{"name":"小雯","following":true},"member":{"id":"u2","name":"小雯"},
+     "replyWith":["card","products","attachments"],"attach":{"max":4,"imageBytes":1048576,"fileBytes":20971520},
      "startedAt":"\(ago(hours: 50))","tagLabels":["商品詢問","優惠","收貨問題"],
      "orders":[{"id":"o1","orderNumber":"CM-24100607","statusLabel":"已送達","totalLabel":"NT$1,134","itemSummary":"原味蛋捲禮盒 × 3"}],
      "handoff":{"at":"\(ago(hours: 0.3))","reason":"客人說蛋捲禮盒收到時盒子壓扁、有兩條碎掉，想換一盒"},
@@ -432,6 +440,24 @@ nonisolated enum DemoServer {
             entities = [simple("news", "最新消息"), simple("page_seo", "頁面 SEO")]
         }
         return #"{"site":{"name":"\#(site)","host":"\#(site)"},"level":"owner","tools":[],"entities":[\#(entities.joined(separator: ","))]}"#
+    }
+
+    private static var coupons: String { """
+    {"items":[
+     {"id":"cp1","code":"MOON10","name":"中秋禮盒 9 折","discountLabel":"9 折","type":"percentage","value":10,"isActive":true,"usageCount":42,"usageLimit":500,"expiresAt":"\(ago(hours: -240))"},
+     {"id":"cp3","code":"SHIPFREE","name":"滿千免運","discountLabel":"免運","type":"free_shipping","value":0,"isActive":true,"usageCount":118,"usageLimit":1000},
+     {"id":"cp4","code":"WELCOME100","name":"新朋友折 100","discountLabel":"NT$100","type":"fixed","value":100,"isActive":true,"usageCount":63,"usageLimit":1000}
+    ]}
+    """ }
+
+    /// 示範的「Xena 擬回覆／潤飾」
+    private static func replyDraft(_ body: Data?) -> String {
+        let json = body.flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) } ?? .null
+        let text = json["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if json["mode"]?.string == "polish" {
+            return "不好意思讓你久等了！" + text + "\n有任何問題都可以直接在這裡跟我說 🙏"
+        }
+        return "真的很抱歉讓你收到壓扁的禮盒 😣 我們馬上補寄一盒新的給你，今天下午寄出、明天就會到。碎掉的那盒不用寄回，可以直接留著吃沒關係！之後如果還有任何問題，直接在這裡跟我說就好。"
     }
 
     private static func record(entity: String, id: String?) -> String {
