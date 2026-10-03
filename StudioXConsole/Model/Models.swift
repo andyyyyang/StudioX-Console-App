@@ -178,12 +178,85 @@ struct BankTransferInfo {
     var awaiting: Bool
 }
 
+/// 訂單上的一筆折扣：用了哪張券（碼、名稱、優惠）、折了多少（網站 order.get 的 discounts）
+struct OrderDiscount: Identifiable {
+    let id: String
+    var couponID: String?
+    var code: String?
+    var name: String?
+    var note: String?
+    /// fixed | percentage | free_shipping；對不上的差額是 other
+    var type: String
+    /// 網站的 AI 依客人的購物車給的專屬券
+    var personalized: Bool
+    /// 免運、9 折、88 折、折 NT$100
+    var offer: String
+    var cents: Int
+
+    init(index: Int, _ json: JSONValue) {
+        couponID = json["couponId"]?.string
+        id = "\(index)-\(couponID ?? "other")"
+        code = json["code"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        name = json["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        note = json["description"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        type = json["type"]?.string ?? ""
+        personalized = json["personalized"]?.bool ?? false
+        offer = json["offer"]?.string ?? ""
+        cents = json["amount"]?.int ?? 0
+    }
+
+    /// 這筆折扣叫什麼：券的名稱；沒取名的照種類
+    var title: String {
+        if let name { return name }
+        if personalized { return "專屬優惠" }
+        return switch type {
+        case "free_shipping": "免運券"
+        case "other": "其他折扣"
+        default: "折價券"
+        }
+    }
+
+    /// 小字：折價碼・優惠・AI 專屬券
+    var detail: String {
+        [code, offer.isEmpty || offer == title ? nil : offer, personalized ? "AI 專屬券" : nil]
+            .compactMap { $0 }
+            .joined(separator: "・")
+    }
+}
+
+/// 下單的會員（訪客結帳沒有）
+struct OrderMember {
+    var id: String
+    var name: String?
+    var email: String?
+    var tier: String?
+    /// 付款完成的訂單數（含這張，如果這張已付款）
+    var paidOrderCount: Int
+    var lifetimeSpendCents: Int
+
+    init?(_ json: JSONValue?) {
+        guard let json, let id = json["id"]?.string else { return nil }
+        self.id = id
+        name = json["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        email = json["email"]?.string
+        tier = json["tier"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        paidOrderCount = json["paidOrderCount"]?.int ?? 0
+        lifetimeSpendCents = json["lifetimeSpendCents"]?.int ?? 0
+    }
+}
+
 struct OrderDetail {
     var summary: OrderSummary
     var lines: [OrderLine]
     var subtotalCents: Int
     var shippingFeeCents: Int
     var discountCents: Int
+    /// 每一筆折扣的名目；舊版網站沒有這欄時是空的，只顯示總折扣
+    var discounts: [OrderDiscount]
+    /// 下單的會員；nil 是訪客結帳（isGuest）或網站還沒提供
+    var member: OrderMember?
+    /// 訪客結帳（沒有登入會員）
+    var isGuest: Bool
     var totalCents: Int
     var refundCents: Int
     var phone: String
@@ -223,6 +296,11 @@ struct OrderDetail {
         subtotalCents = o["subtotal"]?.int ?? 0
         shippingFeeCents = o["shippingFee"]?.int ?? 0
         discountCents = o["discountAmount"]?.int ?? 0
+        discounts = (json["discounts"]?.array ?? []).enumerated()
+            .map { OrderDiscount(index: $0, $1) }
+            .filter { $0.cents > 0 }
+        member = OrderMember(json["member"])
+        isGuest = o["userId"].map(\.isNull) ?? false
         totalCents = o["total"]?.int ?? 0
         refundCents = o["refundAmount"]?.int ?? 0
         phone = o["shippingPhone"]?.string ?? ""

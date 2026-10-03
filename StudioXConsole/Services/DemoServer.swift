@@ -7,7 +7,7 @@ import Foundation
 ///
 /// 其他啟動參數：
 ///   -demoTab sites|orders|inbox|account|search   打開哪個分頁
-///   -demoRoute site|traffic|order|thread|line|products|product|xena   打開哪一頁（line：LINE 來的 Xena 對話）
+///   -demoRoute site|traffic|order|member|thread|line|products|product|xena   打開哪一頁（line：LINE 來的 Xena 對話）
 ///   -demoSheet today|chenmai.studiox.tw   首頁卡片打開的 sheet
 ///   -demoLock YES   顯示 Face ID 的鎖定畫面
 nonisolated enum DemoServer {
@@ -148,6 +148,7 @@ nonisolated enum DemoServer {
         case ("search_report", _): return search
         case ("list", "order"): return orders(status: args["status"]?.string)
         case ("get", "order"): return order(id: args["id"]?.string ?? "o1")
+        case ("get", "user"): return member
         case ("list", "support_thread"): return site == "chenmai.studiox.tw" ? threads : #"{"threads":[]}"#
         case ("get", "support_thread"): return thread
         case ("list", "assistant_conversation"):
@@ -216,19 +217,32 @@ nonisolated enum DemoServer {
     private static func orders(status: String?) -> String {
         let s = status ?? "paid"
         let rows = (0..<6).map { i -> String in
-            let total = [1280, 860, 2140, 640, 1590, 990][i]
+            let total = [1120, 860, 2140, 640, 1590, 990][i]
             return #"{"id":"o\#(i + 1)","orderNumber":"CM-2410\#(String(format: "%04d", 612 - i))","status":"\#(s)","total":\#(total * 100),"totalLabel":"NT$\#(total.formatted())","shippingName":"\#(customers[i])","createdAt":"\#(ago(hours: Double(3 + i * 5)))","paidAt":"\#(ago(hours: Double(2 + i * 5)))","paymentProvider":"\#(i == 2 ? "bank_transfer" : "payuni")"}"#
         }
         return #"{"orders":[\#(rows.joined(separator: ","))]}"#
     }
 
     private static func order(id: String) -> String { """
-    {"order":{"id":"\(id)","orderNumber":"CM-24100612","status":"paid","total":128000,"totalLabel":"NT$1,280","subtotal":118000,"shippingFee":10000,"discountAmount":0,
+    {"order":{"id":"\(id)","orderNumber":"CM-24100612","status":"paid","total":112000,"totalLabel":"NT$1,120","subtotal":118000,"shippingFee":10000,"discountAmount":16000,"userId":"u1","couponId":"cp1",
       "shippingName":"林小涵","shippingPhone":"0912-000-000","email":"demo-customer@example.com","shippingMethod":"home","shippingAddress":"台南市中西區民族路二段 1 號",
       "paymentProvider":"payuni","createdAt":"\(ago(hours: 3))","paidAt":"\(ago(hours: 2))","note":"請下午送達，謝謝"},
      "items":[{"id":"i1","productName":"手工蛋捲禮盒","variantName":"原味・12 入","quantity":2,"unitPrice":45000},
               {"id":"i2","productName":"芝麻薄餅","variantName":"罐裝","quantity":1,"unitPrice":28000}],
+     "discounts":[{"couponId":"cp1","code":"MOON10","name":"中秋禮盒 9 折","type":"percentage","personalized":false,"offer":"9 折","amount":11800,"amountLabel":"NT$118"},
+                  {"couponId":"cp2","code":"YG-K7Q2M9","name":"林小涵 專屬折價","type":"percentage","personalized":true,"offer":"85 折","amount":4200,"amountLabel":"NT$42"}],
+     "member":{"id":"u1","name":"林小涵","email":"demo-customer@example.com","tier":"金卡會員","paidOrderCount":4,"lifetimeSpendCents":684000,"lifetimeSpendLabel":"NT$6,840"},
      "trackUrl":null}
+    """ }
+
+    private static var member: String { """
+    {"user":{"id":"u1","name":"林小涵","email":"demo-customer@example.com","phone":"0912-000-000","phoneVerified":"\(ago(hours: 2000))","role":"customer","tier":"金卡會員",
+      "lifetimeSpendCents":684000,"lifetimeSpendLabel":"NT$6,840","invitedCount":2,"createdAt":"\(ago(hours: 4300))"},
+     "rfm":{"segment":"loyal","orderCount":4,"recencyDays":0,"frequency90d":2,"monetaryCents":236000},
+     "recentOrders":[{"id":"o1","orderNumber":"CM-24100612","status":"paid","total":112000,"totalLabel":"NT$1,120","createdAt":"\(ago(hours: 3))"},
+                     {"id":"o9","orderNumber":"CM-24090388","status":"completed","total":124000,"totalLabel":"NT$1,240","createdAt":"\(ago(hours: 900))"},
+                     {"id":"o10","orderNumber":"CM-24061205","status":"completed","total":228000,"totalLabel":"NT$2,280","createdAt":"\(ago(hours: 2600))"}],
+     "coupons":[]}
     """ }
 
     // MARK: 客服、Xena、詢問
@@ -420,9 +434,21 @@ nonisolated enum DemoServer {
         return #"{"site":{"name":"\#(site)","host":"\#(site)"},"level":"owner","tools":[],"entities":[\#(entities.joined(separator: ","))]}"#
     }
 
-    private static func record(entity: String, id: String?) -> String { """
+    private static func record(entity: String, id: String?) -> String {
+        if entity == "coupon" { return coupon(id: id) }
+        return """
     {"entity":"\(entity)","id":"\(id ?? "p1")","title":"手工蛋捲禮盒",
      "values":{"title":"手工蛋捲禮盒","price":45000,"stock":38,"isPublished":true,"category":"禮盒","description":"每天早上現烤，奶油香、不甜膩。一盒 12 入，附提袋。"},
      "images":[]}
+    """ }
+
+    /// 訂單上用的兩張券：中秋 9 折（通用碼）、網站 AI 給這位會員的 85 折專屬券
+    private static func coupon(id: String?) -> String {
+        let personal = id == "cp2"
+        return """
+    {"entity":"coupon","id":"\(id ?? "cp1")","title":"\(personal ? "YG-K7Q2M9" : "MOON10")",
+     "values":{"code":"\(personal ? "YG-K7Q2M9" : "MOON10")","name":"\(personal ? "林小涵 專屬折價" : "中秋禮盒 9 折")","type":"percentage","value":\(personal ? 15 : 10),
+               "description":"\(personal ? "芝麻薄餅搭配蛋捲禮盒一起買打 85 折" : "中秋前下單，3 盒以上打 9 折")","usageLimit":\(personal ? 1 : 500),"perUserLimit":1,"isActive":true,"channel":"online"},
+     "images":null}
     """ }
 }

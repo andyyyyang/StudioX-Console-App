@@ -15,37 +15,48 @@ struct OrderDetailView: View {
     @State private var shipping = false
     @State private var refunding = false
     @State private var working = false
+    /// 這個人在這個網站看得到會員、折價券（看不到就不放連結）
+    @State private var canOpenMember = true
+    @State private var canOpenCoupon = true
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 44) {
-                if let d = detail {
-                    header(d)
-                    actions(d)
-                    if sizeClass == .regular {
-                        HStack(alignment: .top, spacing: 48) {
-                            items(d).frame(maxWidth: .infinity, alignment: .topLeading)
-                            VStack(alignment: .leading, spacing: 44) {
-                                customer(d)
-                                payment(d)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 44) {
+                    if let d = detail {
+                        header(d)
+                        actions(d)
+                        if sizeClass == .regular {
+                            HStack(alignment: .top, spacing: 48) {
+                                items(d).frame(maxWidth: .infinity, alignment: .topLeading)
+                                VStack(alignment: .leading, spacing: 44) {
+                                    customer(d)
+                                    payment(d)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                             }
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        } else {
+                            items(d)
+                            customer(d)
+                            payment(d)
                         }
+                        links(d)
+                    } else if let error {
+                        ErrorNote(message: error) { Task { await load() } }
                     } else {
-                        items(d)
-                        customer(d)
-                        payment(d)
+                        SkeletonRows(rows: 6)
                     }
-                    links(d)
-                } else if let error {
-                    ErrorNote(message: error) { Task { await load() } }
-                } else {
-                    SkeletonRows(rows: 6)
                 }
+                .pageWidth()
+                .padding(.top, 16)
+                .padding(.bottom, 64)
             }
-            .pageWidth()
-            .padding(.top, 16)
-            .padding(.bottom, 64)
+            // UI 截圖（-demoScroll amounts）：捲到金額（折扣的名目）與會員
+            .task(id: detail != nil) {
+                guard DemoServer.screenshots, detail != nil, UserDefaults.standard.string(forKey: "demoScroll") == "amounts" else { return }
+                try? await Task.sleep(for: .milliseconds(600))
+                proxy.scrollTo("amounts", anchor: .top)
+            }
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
@@ -79,6 +90,10 @@ struct OrderDetailView: View {
             detail = try await model.api.order(site: site, id: orderID)
         } catch {
             self.error = error.localizedDescription
+        }
+        if let schema = await model.schema(for: site) {
+            canOpenMember = schema.entity("user")?.canGet == true
+            canOpenCoupon = schema.entity("coupon")?.canGet == true
         }
     }
 
@@ -200,9 +215,14 @@ struct OrderDetailView: View {
             VStack(spacing: 8) {
                 amountRow("小計", d.subtotalCents)
                 amountRow("運費", d.shippingFeeCents, zero: "免運")
-                if d.discountCents > 0 { amountRow("折扣", -d.discountCents) }
+                if d.discounts.isEmpty {
+                    if d.discountCents > 0 { amountRow("折扣", -d.discountCents) }
+                } else {
+                    ForEach(d.discounts) { discountRow($0) }
+                }
                 if d.refundCents > 0 { amountRow("已退款", -d.refundCents) }
             }
+            .id("amounts")
             HStack(alignment: .firstTextBaseline) {
                 Text("合計").textRole(.h4)
                 Spacer()
@@ -224,12 +244,52 @@ struct OrderDetailView: View {
         .foregroundStyle(Theme.ink2)
     }
 
+    /// 一筆折扣：名稱、折價碼・優惠，金額；點了看那張折價券（誰用過、還剩幾次）
+    @ViewBuilder
+    private func discountRow(_ x: OrderDiscount) -> some View {
+        let label = HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HeroIcon(x.type == "free_shipping" ? "truck" : x.personalized ? "sparkles" : "ticket", size: 14)
+                .foregroundStyle(Theme.accentText)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(x.title)
+                    .foregroundStyle(Theme.ink)
+                if !x.detail.isEmpty {
+                    Text(x.detail)
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            Spacer(minLength: 12)
+            Text("−" + ntd(cents: x.cents))
+                .monospacedDigit()
+            if x.couponID != nil && canOpenCoupon {
+                HeroIcon("chevron-right", size: 12)
+                    .foregroundStyle(Theme.faint)
+            }
+        }
+        .textRole(.small)
+        .foregroundStyle(Theme.ink2)
+        .padding(.vertical, 2)
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+
+        if let id = x.couponID, canOpenCoupon {
+            NavigationLink(value: Route.record(site: site, entity: "coupon", id: id)) { label }
+                .buttonStyle(.row)
+                .accessibilityHint("看這張折價券")
+        } else {
+            label
+        }
+    }
+
     // MARK: 收件
 
     private func customer(_ d: OrderDetail) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Eyebrow("收件")
             RuledList(color: Theme.hair) {
+                memberRow(d)
                 infoRow("姓名", d.summary.customer)
                 if !d.phone.isEmpty, let tel = URL(string: "tel:\(d.phone.filter { $0.isNumber || $0 == "+" })") {
                     Button { openURL(tel) } label: { infoRow("電話", d.phone, link: true) }
@@ -243,6 +303,52 @@ struct OrderDetailView: View {
                 if let code = d.cvsPaymentNo { infoRow("7-11 取貨單號", code) }
                 if let note = d.note { infoRow("備註", note) }
             }
+        }
+    }
+
+    /// 下單的會員：頭像、名字、等級、買過幾次；點了看會員頁（消費、分群、其他訂單、發折價券）
+    @ViewBuilder
+    private func memberRow(_ d: OrderDetail) -> some View {
+        if let m = d.member {
+            let facts = [
+                m.tier,
+                m.paidOrderCount > 0 ? "買過 \(m.paidOrderCount) 次" : nil,
+                m.lifetimeSpendCents > 0 ? "累積 " + ntd(cents: m.lifetimeSpendCents) : nil,
+            ].compactMap { $0 }
+            let label = HStack(spacing: 12) {
+                Avatar(name: m.name ?? m.email ?? "?", size: 40)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(m.name ?? m.email ?? "會員")
+                        .textRole(.body)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                    Text(facts.isEmpty ? "會員" : facts.joined(separator: "・"))
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if canOpenMember {
+                    Text("會員頁")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.accentText)
+                    HeroIcon("chevron-right", size: 12)
+                        .foregroundStyle(Theme.accentText)
+                }
+            }
+            .padding(.vertical, 12)
+            .contentShape(.rect)
+            .accessibilityElement(children: .combine)
+
+            if canOpenMember {
+                NavigationLink(value: Route.member(site: site, id: m.id)) { label }
+                    .buttonStyle(.row)
+                    .accessibilityHint("打開會員頁")
+            } else {
+                label
+            }
+        } else if d.isGuest {
+            infoRow("會員", "訪客結帳（沒有登入會員）")
         }
     }
 

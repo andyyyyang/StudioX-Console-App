@@ -100,6 +100,8 @@ jobs:
             "xena|-demo -demoRoute xena"
             "line|-demo -demoRoute line"
             "thread|-demo -demoRoute thread"
+            "order|-demo -demoRoute order -demoScroll amounts"
+            "member|-demo -demoRoute member"
             "inbox|-demo -demoTab inbox"
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"

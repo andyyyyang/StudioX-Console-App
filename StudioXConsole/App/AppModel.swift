@@ -196,6 +196,7 @@ final class AppModel {
         case "site": open(.site(shop))
         case "traffic": open(.traffic(site: shop))
         case "order": open(.order(site: shop, id: "o1"))
+        case "member": open(.member(site: shop, id: "u1"))
         case "thread": open(.thread(site: shop, id: "t1"))
         case "line": open(.xenaConversation(site: shop, id: "yc1"))
         case "products": open(.collection(site: shop, entity: "product"))
