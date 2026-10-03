@@ -20,6 +20,8 @@ enum Theme {
     static let panelHighlight = Color(light: .rgba(255, 255, 255, 0.8), dark: .rgba(255, 255, 255, 0.06))
     /// 底部面板（AuthScreen 的 sheet：#faf9f6 / #151513）
     static let sheet = Color(light: 0xFAF9F6, dark: 0x151513)
+    /// 視窗本身的底（UIKit）：狀態列後面、iPad 分欄之間露出來的地方也是暖紙色，不會一塊純黑、一塊品牌色
+    static let pageUIColor = UIColor(light: .rgb(0xF2F0EB), dark: .rgb(0x0D0D0C))
 
     // MARK: 字
 
@@ -150,6 +152,14 @@ nonisolated struct RGBA: Sendable {
     }
 
     nonisolated var uiColor: UIColor { UIColor(red: r, green: g, blue: b, alpha: a) }
+}
+
+extension UIColor {
+    /// 亮色、暗色各一個值（跟著裝置或 App 設定的外觀切換）
+    nonisolated convenience init(light: RGBA, dark: RGBA) {
+        let l = light.uiColor, d = dark.uiColor
+        self.init { traits in traits.userInterfaceStyle == .dark ? d : l }
+    }
 }
 
 extension Color {

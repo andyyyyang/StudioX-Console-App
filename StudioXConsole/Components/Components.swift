@@ -428,6 +428,13 @@ extension View {
     func brandPage() -> some View {
         background(Theme.page.ignoresSafeArea())
             .scrollContentBackground(.hidden)
+            // 導覽容器（NavigationStack、iPad 分欄的每一欄）本身的底也是暖紙色：推頁、分欄之間不會露出系統的黑／白
+            .containerBackground(Theme.page, for: .navigation)
+    }
+
+    /// iPad 的分欄（NavigationSplitView）整個的底：欄與欄之間、浮起來的側欄四周也是暖紙色
+    func brandSplitView() -> some View {
+        containerBackground(Theme.page, for: .navigationSplitView)
     }
 
     /// 頁面內容的左右留白與最大寬度（iPad 上置中、不貼滿）

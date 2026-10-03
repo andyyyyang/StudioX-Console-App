@@ -135,6 +135,7 @@ struct SiteWorkspace: View {
                         .navigationDestination(for: Route.self) { RouteView(route: $0) }
                 }
                 .id(section)
+                .brandSplitView()
             }
             .navigationSplitViewStyle(.balanced)
             .onChange(of: section) { model.sitePaths[siteID] = [] }
@@ -222,6 +223,7 @@ private struct SiteSectionSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .brandPage()
         .task { schema = await model.schema(for: site.id) }
     }
 }

@@ -32,6 +32,7 @@ struct OrdersView: View {
                     }
                     .navigationDestination(for: Route.self) { RouteView(route: $0) }
                 }
+                .brandSplitView()
             }
         } else {
             NavigationStack(path: Bindable(model).ordersPath) {

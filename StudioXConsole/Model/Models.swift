@@ -10,6 +10,14 @@ func ntd(cents: Int) -> String {
     "NT$" + Int((Double(cents) / 100).rounded()).formatted(.number)
 }
 
+/// 分 → 窄的地方用的短寫法：NT$9,860、NT$1.3萬、NT$12萬（一萬以上用「萬」）
+func ntdShort(cents: Int) -> String {
+    let amount = Double(cents) / 100
+    guard abs(amount) >= 10_000 else { return ntd(cents: cents) }
+    let wan = amount / 10_000
+    return "NT$" + wan.formatted(.number.precision(.fractionLength(0...(abs(wan) < 10 ? 1 : 0)))) + "萬"
+}
+
 // MARK: - 登入的人與網站（GET /api/app/me）
 
 struct Me {

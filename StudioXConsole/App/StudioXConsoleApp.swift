@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct StudioXConsoleApp: App {
@@ -93,7 +94,12 @@ struct RootView: View {
         .haptic(.success, trigger: model.successTick)
         .haptic(.warning, trigger: model.warningTick)
         .haptic(.error, trigger: model.errorTick)
-        .background { SceneProbe { cover.scene = $0 } }
+        .background {
+            // 視窗本身也塗成暖紙色：狀態列後面、iPad 分欄之間、轉場的一瞬間都不會露出純黑／純白
+            Theme.page.ignoresSafeArea()
+            WindowPaint()
+            SceneProbe { cover.scene = $0 }
+        }
         .onChange(of: covered, initial: true) { _, value in
             cover.show(value, model: model)
         }
@@ -161,32 +167,32 @@ struct MainView: View {
         let regular = sizeClass == .regular
         TabView(selection: $model.tab) {
             Tab("今天", image: "hi-home", value: AppTab.xena) {
-                XenaHomeView()
+                XenaHomeView().tabPage()
             }
             Tab("網站", image: "hi-globe-alt", value: AppTab.sites) {
-                SitesView()
+                SitesView().tabPage()
             }
             .hidden(regular)
             if !model.orderSites.isEmpty {
                 Tab("訂單", image: "hi-shopping-bag", value: AppTab.orders) {
-                    OrdersView()
+                    OrdersView().tabPage()
                 }
             }
             Tab("收件匣", image: "hi-inbox-stack", value: AppTab.inbox) {
-                InboxView()
+                InboxView().tabPage()
             }
             .badge(model.inboxCount)
             Tab("設定", image: "hi-cog-6-tooth", value: AppTab.account) {
-                AccountView()
+                AccountView().tabPage()
             }
             .hidden(!regular)
             Tab(value: AppTab.search, role: .search) {
-                SearchView()
+                SearchView().tabPage()
             }
             TabSection("網站") {
                 ForEach(model.sites) { site in
                     Tab(site.name, image: site.hasOrders ? "hi-building-storefront" : "hi-globe-alt", value: AppTab.site(site.id)) {
-                        SiteWorkspace(siteID: site.id)
+                        SiteWorkspace(siteID: site.id).tabPage()
                     }
                 }
             }
@@ -195,22 +201,36 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
         .tabViewSidebarHeader {
-            HStack(spacing: 10) {
-                BrandMark()
-                    .foregroundStyle(Theme.ink)
-                    .frame(width: 22, height: 22)
-                Text("\(Text("studiox").foregroundStyle(Theme.ink))\(Text(".").foregroundStyle(Theme.accent))")
-                    .font(.brand(22, .semibold))
-                    .tracking(-0.9)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    BrandMark()
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 22, height: 22)
+                    Text("\(Text("studiox").foregroundStyle(Theme.ink))\(Text(".").foregroundStyle(Theme.accent))")
+                        .font(.brand(22, .semibold))
+                        .tracking(-0.9)
+                }
+                .accessibilityElement()
+                .accessibilityLabel("StudioX")
+                // iPad：Xena 的狀態放在這裡（手機在 tab bar 上面）
+                XenaSidebarStatus()
             }
             .padding(.vertical, 6)
-            .accessibilityElement()
-            .accessibilityLabel("StudioX")
         }
-        // tab bar 上面的 Xena：首頁本身就有會動的水滴，那一頁不重複出現；對話畫面（回覆框在底部）也收起來
-        .tabViewBottomAccessory(isEnabled: model.tab != .xena && (regular || model.openChats == 0)) {
+        // 手機：tab bar 上面的 Xena。首頁本身就有會動的水滴，那一頁不重複出現；對話畫面（回覆框在底部）也收起來
+        .tabViewBottomAccessory(isEnabled: !regular && model.tab != .xena && model.openChats == 0) {
             XenaAccessory()
         }
+        // iPad：整條太搶眼，改成右下角一顆小水珠（狀態在側欄上面）；同樣首頁、對話畫面不出現
+        .overlay(alignment: .bottomTrailing) {
+            if regular && model.tab != .xena && model.openChats == 0 {
+                XenaFloatingButton()
+                    .padding(.trailing, 28)
+                    .padding(.bottom, 24)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(Motion.spring, value: regular && model.tab != .xena && model.openChats == 0)
         .sheet(isPresented: $model.showXena) {
             XenaChatView()
                 .presentationDragIndicator(.visible)
@@ -261,5 +281,31 @@ struct RouteView: View {
         case .searchConsole(let site): SearchConsoleView(siteID: site)
         case .member(let site, let id): MemberView(site: site, memberID: id)
         }
+    }
+}
+
+/// 把這個畫面所在的視窗塗成暖紙色（狀態列後面、iPad 分欄之間、轉場時露出來的地方）。
+/// 只塗主畫面自己的視窗：鎖定畫面在另一個透明的視窗，不能動它
+struct WindowPaint: UIViewRepresentable {
+    func makeUIView(context: Context) -> PaintView {
+        let view = PaintView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: PaintView, context: Context) {}
+
+    final class PaintView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            window?.backgroundColor = Theme.pageUIColor
+        }
+    }
+}
+
+private extension View {
+    /// 分頁的底（TabView 每一頁後面）：暖紙色
+    func tabPage() -> some View {
+        containerBackground(Theme.page, for: .tabView)
     }
 }

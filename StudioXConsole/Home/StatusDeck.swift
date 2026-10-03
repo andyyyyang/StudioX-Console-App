@@ -134,7 +134,7 @@ private struct TodaySheet: View {
                     HStack(spacing: 0) {
                         DeckFigure(value: "\(live)", label: "在線", live: live > 0)
                         if !model.orderSites.isEmpty {
-                            DeckFigure(value: ntd(cents: revenue), label: "昨天收款")
+                            DeckFigure(value: ntdShort(cents: revenue), label: "昨天收款")
                             DeckFigure(value: "\(ship)", label: "等出貨", highlight: ship > 0)
                         }
                         if !b.awaiting.isEmpty {
@@ -243,7 +243,7 @@ private struct TodayCard: View {
                 HStack(spacing: 0) {
                     DeckFigure(value: "\(live)", label: "在線", live: live > 0)
                     if !model.orderSites.isEmpty {
-                        DeckFigure(value: ntd(cents: revenue), label: "昨天收款")
+                        DeckFigure(value: ntdShort(cents: revenue), label: "昨天收款")
                         DeckFigure(value: "\(ship)", label: "等出貨")
                     }
                 }
@@ -299,7 +299,7 @@ private struct SiteStatusCard: View {
                 HStack(spacing: 0) {
                     if let report {
                         DeckFigure(value: "\(report.createdTotal)", label: "昨天訂單")
-                        DeckFigure(value: ntd(cents: report.revenueCents), label: "昨天收款")
+                        DeckFigure(value: ntdShort(cents: report.revenueCents), label: "昨天收款")
                     }
                     if site.hasOrders { DeckFigure(value: "\(ship)", label: "等出貨", highlight: ship > 0) }
                     if site.hasSupport { DeckFigure(value: "\(waiting)", label: "在等回覆", highlight: waiting > 0) }
@@ -325,11 +325,15 @@ private struct DeckFigure: View {
                     .monospacedDigit()
                     .foregroundStyle(highlight ? Theme.accent : Theme.ink)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    // 窄的卡片（iPad 一排三張）數字縮小也不會壓到隔壁那一格
+                    .minimumScaleFactor(0.55)
+                    .allowsTightening(true)
             }
             Text(label)
                 .textRole(.xs)
                 .foregroundStyle(Theme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

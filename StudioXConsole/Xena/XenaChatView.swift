@@ -770,20 +770,41 @@ private struct ThreadListView: View {
     }
 }
 
-/// tab bar 上面常駐的 Xena（首頁以外的每一頁）：會動的小水珠＋輪播她正在看著的事，點了打開對話；右邊的麥克風是用說的
+/// Xena 現在看著的事（手機 tab bar 上的 Xena、iPad 側欄上面輪播）
+private func xenaStatusLines(_ model: AppModel) -> [String] {
+    let b = model.briefing
+    var out = ["值班中・看著 \(model.sites.count) 個網站"]
+    if !b.awaiting.isEmpty { out.append("\(b.awaiting.count) 位客人在等回覆") }
+    let ship = b.toShip.values.reduce(0) { $0 + $1.count }
+    if ship > 0 { out.append("\(ship) 筆訂單等出貨") }
+    let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
+    if live > 0 { out.append("現在 \(live) 人在你的網站上") }
+    return out
+}
+
+/// 輪播 Xena 看著的事（4 秒換一句）；她在忙的時候說她在做什麼
+private struct XenaStatusText: View {
+    @Environment(AppModel.self) private var model
+    var font: Font = .system(size: 14, weight: .medium)
+    var color: Color = Theme.ink
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 4)) { context in
+            let all = xenaStatusLines(model)
+            let index = Int(context.date.timeIntervalSinceReferenceDate / 4) % max(all.count, 1)
+            Text(model.xena.isBusy ? model.xena.mood.label : all[index])
+                .font(font)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .contentTransition(.opacity)
+                .animation(.smooth, value: index)
+        }
+    }
+}
+
+/// 手機 tab bar 上面常駐的 Xena（首頁以外的每一頁）：會動的小水珠＋輪播她正在看著的事，點了打開對話；右邊的麥克風是用說的
 struct XenaAccessory: View {
     @Environment(AppModel.self) private var model
-
-    private var lines: [String] {
-        let b = model.briefing
-        var out = ["值班中・看著 \(model.sites.count) 個網站"]
-        if !b.awaiting.isEmpty { out.append("\(b.awaiting.count) 位客人在等回覆") }
-        let ship = b.toShip.values.reduce(0) { $0 + $1.count }
-        if ship > 0 { out.append("\(ship) 筆訂單等出貨") }
-        let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
-        if live > 0 { out.append("現在 \(live) 人在你的網站上") }
-        return out
-    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -793,16 +814,7 @@ struct XenaAccessory: View {
                 HStack(spacing: 6) {
                     XenaOrb(mood: model.xena.mood, size: 20, pulse: model.xena.pulse)
                         .padding(.vertical, -6)
-                    TimelineView(.periodic(from: .now, by: 4)) { context in
-                        let all = lines
-                        let index = Int(context.date.timeIntervalSinceReferenceDate / 4) % max(all.count, 1)
-                        Text(model.xena.isBusy ? model.xena.mood.label : all[index])
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.ink)
-                            .lineLimit(1)
-                            .contentTransition(.opacity)
-                            .animation(.smooth, value: index)
-                    }
+                    XenaStatusText()
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 8)
@@ -823,6 +835,48 @@ struct XenaAccessory: View {
             .padding(.trailing, 4)
             .accessibilityLabel("用說的問Xena")
         }
+    }
+}
+
+/// iPad 的 Xena：收在右下角的一顆小水珠（不佔整條、不搶內容的眼），點了打開對話，按住可以用說的。
+/// 她在忙（想、查資料）的時候水珠會動；首頁本身就有大水滴、對話畫面（回覆框在底部）時收起來
+struct XenaFloatingButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button { model.showXena = true } label: {
+            XenaOrb(mood: model.xena.mood, size: 30, pulse: model.xena.pulse)
+                .frame(width: 56, height: 56)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .hoverEffect(.lift)
+        .contextMenu {
+            Button("問問Xena", systemImage: "sparkles") { model.showXena = true }
+            Button("用說的問Xena", systemImage: "mic") { model.showVoice = true }
+        }
+        .help("問問Xena（⌘K）")
+        .accessibilityLabel("問問Xena")
+        .accessibilityHint("按住可以用說的")
+    }
+}
+
+/// iPad 側欄上面（品牌名稱下面）：Xena 的狀態，輪播她看著的事；點了打開對話
+struct XenaSidebarStatus: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button { model.showXena = true } label: {
+            HStack(spacing: 8) {
+                XenaOrb(mood: model.xena.mood, size: 16, pulse: model.xena.pulse)
+                XenaStatusText(font: .system(size: 13, weight: .medium), color: Theme.ink2)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("問問Xena")
     }
 }
 
