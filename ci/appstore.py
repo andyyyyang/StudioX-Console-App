@@ -8,7 +8,7 @@ App Store 上架（.github/workflows/appstore.yml）：用 App Store Connect API
   1. 這一版（App Store 版本）：沒有就建一個，版本號照 Xcode 的 MARKETING_VERSION；審核通過後由你手動發布
   2. 文字：副標題、描述、宣傳文字、關鍵字、支援網址、行銷網址、隱私權政策網址、版權、分類（ci/appstore/metadata.json）
   3. 年齡分級：都選「無」（商用工具，沒有成人內容）
-  4. 截圖：docs/appstore/iphone69/*.png（6.9 吋 iPhone）、docs/appstore/ipad13/*.png（13 吋 iPad），照檔名順序、整組換掉
+  4. 截圖：docs/appstore/iphone69/（6.9 吋 iPhone）、docs/appstore/ipad13/（13 吋 iPad）的 .jpg／.png，照檔名順序、整組換掉
   5. 這一版的 build：最新一個處理好的
   6. 審核說明（示範模式怎麼進去、刪除帳號在哪）
   7. 價格：免費；上架地區：全部國家與地區（中國大陸要 ICP 備案，先不上），之後新開的地區自動上架
@@ -270,7 +270,7 @@ def upload_shot(set_id, path):
 def screenshots(loc_id):
     sets = data(call("GET", f"/appStoreVersionLocalizations/{loc_id}/appScreenshotSets", query={"limit": 50}))
     for folder, display, label in SHOT_SETS:
-        files = sorted(glob.glob(os.path.join(ROOT, "docs", "appstore", folder, "*.png")))[:10]
+        files = sorted(glob.glob(os.path.join(ROOT, "docs", "appstore", folder, "*.png")) + glob.glob(os.path.join(ROOT, "docs", "appstore", folder, "*.jpg")))[:10]
         if not files:
             summary(f"- ⚠️ 沒有 {label} 的截圖（docs/appstore/{folder}/）")
             continue

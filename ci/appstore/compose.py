@@ -1,6 +1,6 @@
 """
 App Store 宣傳圖：把 App 的截圖（docs/appstore/raw/，ui-screenshots.yml 的 [appstore-shots] 截的）合成宣傳圖，
-存到 docs/appstore/iphone69/、docs/appstore/ipad13/（ci/appstore.py 上傳的就是這兩個資料夾）。
+存成 JPEG 到 docs/appstore/iphone69/、docs/appstore/ipad13/（ci/appstore.py 上傳的就是這兩個資料夾）。
 
   python3 ci/appstore/compose.py --fonts <放 Noto Sans CJK TC 的資料夾>
 
@@ -33,11 +33,14 @@ GLOW = [(132, 92, 255), (64, 204, 255), (255, 107, 209), (255, 90, 31)]  # 光�
 
 # 畫面代號、編號旁的小標、標題（\n 換行，*重點* 用彩虹漸層）、說明、版型、放大的地方
 #   版型 top：字在上、手機在下（超出下緣）；bottom：手機在上（超出上緣）、字在下
-#   zoom：(x0, y0, x1, y1) 是截圖上的比例，side 是浮在手機的哪一邊、y 是放在畫面的高度（比例）
+#   zoom：box 是截圖上要放大的那一塊（比例）、width 是放大後佔畫面多寬；
+#         pop＝從手機原本的位置浮出來，不然用 side（左右）、y（高度比例）擺在旁邊
 SLIDES = [
     {"key": "home", "eyebrow": "AI 店長 Xena", "title": "每天一打開，\n就知道*該做什麼*", "sub": "訂單、客人、詢問，Xena 都整理好了", "hero": True},
     {"key": "voice", "eyebrow": "用說的", "title": "問一句，\n*Xena* 直接回答", "sub": "今天賣得怎樣、誰在等回覆，像跟店長講話", "layout": "bottom"},
-    {"key": "xena", "eyebrow": "交代 Xena", "title": "交代她做事，\n*你點頭*才執行", "sub": "標出貨、回客人、改商品，動手前一定先問你"},
+    {"key": "xena", "eyebrow": "交代 Xena", "title": "交代她做事，\n*你點頭*才執行", "sub": "標出貨、回客人、改商品，動手前一定先問你",
+     "zoom": {"iphone69": {"box": (0.0364, 0.3605, 0.9636, 0.5279), "width": 0.90, "radius": 0.034, "pop": True},
+              "ipad13": {"box": (0.219, 0.3125, 0.775, 0.567), "width": 0.76, "pop": True}}},
     {"key": "line", "eyebrow": "客服收件匣", "title": "官網和 LINE 的客人，\n*一個地方*回", "sub": "Xena 先回答，需要真人時才轉給你", "layout": "bottom"},
     {"key": "orders", "eyebrow": "訂單", "title": "等出貨、待付款，\n*一眼*看完", "sub": "勾一勾，一次標好出貨", "shot": {"ipad13": "order"}},
     {"key": "traffic", "eyebrow": "流量與成效", "title": "生意好不好，\n*隨時*看得到", "sub": "即時訪客、Google 搜尋、每天的重點變化", "layout": "bottom"},
@@ -327,14 +330,21 @@ def callout(canvas, shot, zoom, dev_box, screen, d):
     cw = int(canvas.width * zoom.get("width", 0.62))
     ch = round(crop.height * cw / crop.width)
     crop = crop.resize((cw, ch), Image.LANCZOS).convert("RGBA")
-    rad = round(cw * 0.06)
+    rad = round(cw * zoom.get("radius", 0.05))
     crop.putalpha(rounded_mask((cw, ch), rad))
     border = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
     ImageDraw.Draw(border).rounded_rectangle((0, 0, cw - 1, ch - 1), radius=rad, outline=(255, 255, 255, 40), width=3)
     crop.alpha_composite(border)
     W = canvas.width
-    x = int(W * 0.045) if zoom.get("side") == "left" else W - cw - int(W * 0.045)
-    y = int(canvas.height * zoom["y"])
+    if zoom.get("pop"):
+        # 從手機裡「浮出來」：放大後的中心對準原本那一塊在手機上的位置
+        sx, sy, sw, sh = screen
+        cx = dev_box[0] + sx + (zx0 + zx1) / 2 * sw
+        cy = dev_box[1] + sy + (zy0 + zy1) / 2 * sh
+        x, y = int(cx - cw / 2), int(cy - ch / 2 + zoom.get("dy", 0) * canvas.height)
+    else:
+        x = int(W * 0.045) if zoom.get("side") == "left" else W - cw - int(W * 0.045)
+        y = int(canvas.height * zoom["y"])
     canvas = shadow(canvas, (x, y, x + cw, y + ch), rad, blur=60, alpha=230, dy=40)
     canvas = shadow(canvas, (x, y, x + cw, y + ch), rad, blur=18, alpha=140, dy=10)
     place(canvas, crop, x, y)
@@ -429,8 +439,9 @@ def compose(device_key, slide, index, background, fonts, raw_dir, out_dir):
         canvas = callout(canvas, shot, zoom, box, screen, d)
 
     os.makedirs(out_dir, exist_ok=True)
-    out = os.path.join(out_dir, f"{index:02d}-{slide['key']}.png")
-    canvas.convert("RGB").save(out, "PNG", optimize=True)
+    # 高畫質 JPEG（色彩不降採樣，字的邊緣不糊）：一張約 1MB，PNG 要 4MB
+    out = os.path.join(out_dir, f"{index:02d}-{slide['key']}.jpg")
+    canvas.convert("RGB").save(out, "JPEG", quality=95, subsampling=0, optimize=True)
     return out
 
 
@@ -449,7 +460,7 @@ def main():
         out_dir = os.path.join(args.out, key)
         if not only:
             for f in os.listdir(out_dir) if os.path.isdir(out_dir) else []:
-                if f.endswith(".png"):
+                if f.endswith((".png", ".jpg")):
                     os.remove(os.path.join(out_dir, f))
         background = grain(panorama(d["size"], len(SLIDES)))
         for i, slide in enumerate(SLIDES, start=1):
