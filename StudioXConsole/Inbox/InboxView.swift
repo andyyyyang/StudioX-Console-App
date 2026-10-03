@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 收件匣：所有網站、所有管道（官網、LINE、Email、聯絡表單）放在同一個清單，照「要不要你」分段：
 ///   要你處理：等專人的 Xena 對話、客人在等回覆的客服信、新的專案詢問（等最久的在上面）
@@ -74,7 +75,7 @@ struct InboxItem: Identifiable {
     var source: Source
     /// 類別（Jev 自動判斷的；客服信是它的問題分類）
     var topic: String?
-    /// 這一列要說的狀態（等專人、客人又傳了訊息、新詢問…）
+    /// 這一列要特別說的狀態（客人又傳了訊息、留了聯絡資料、未讀）；分段已經說了的不重複
     var status: (text: String, tone: Tone)?
     /// 其他標籤（訂單編號、附件）
     var extra: (text: String, tone: Tone)?
@@ -93,10 +94,9 @@ struct InboxItem: Identifiable {
         since = c.at
         source = c.channel == .line ? .line : .web
         topic = c.topic
-        if needsYou {
-            status = (c.attentionLabel, c.status == "waiting" ? .warning : .gold)
-        } else if c.status == "human" {
-            status = ("專人接手", .gold)
+        // 等專人的不用再說（在「要你處理」裡就是在等你）
+        if needsYou && c.status != "waiting" {
+            status = (text: c.attentionLabel, tone: Tone.gold)
         }
         live = c.status == "ai" && (c.at.map { Date.now.timeIntervalSince($0) < 180 } ?? false)
     }
@@ -112,8 +112,7 @@ struct InboxItem: Identifiable {
         at = since
         source = .email
         topic = t.categoryLabel.isEmpty ? nil : t.categoryLabel
-        status = ("等回覆", .warning)
-        extra = t.orderNumber.map { ("#\($0)", .gold) }
+        extra = t.orderNumber.map { (text: "#\($0)", tone: Tone.gold) }
     }
 
     /// 專案詢問（聯絡表單）
@@ -127,8 +126,7 @@ struct InboxItem: Identifiable {
         since = q.at
         source = .form
         topic = "專案詢問"
-        status = ("新詢問", .gold)
-        extra = q.budget.map { ($0, .neutral) }
+        extra = q.budget.map { (text: $0, tone: Tone.neutral) }
     }
 
     /// 信箱裡還沒分的信
@@ -142,8 +140,8 @@ struct InboxItem: Identifiable {
         since = m.row.date
         source = .email
         topic = "信件"
-        if m.row.raw["unread"]?.bool == true { status = ("未讀", .gold) }
-        extra = m.row.raw["attachmentCount"]?.int.flatMap { $0 > 0 ? ("附件 \($0)", .neutral) : nil }
+        if m.row.raw["unread"]?.bool == true { status = (text: "未讀", tone: Tone.gold) }
+        if let n = m.row.raw["attachmentCount"]?.int, n > 0 { extra = (text: "附件 \(n)", tone: Tone.neutral) }
     }
 }
 
@@ -326,10 +324,10 @@ struct InboxList: View {
     }
 }
 
-/// 收件匣的一列：頭像、名字、最新的一句、來源、類別、狀態、哪個網站（只有一個網站時不寫）
+/// 收件匣的一列：頭像、名字、哪個網站（只有一個網站時不放）、多久了；最新的一句；來源、類別、狀態
 private struct InboxRow: View {
     let item: InboxItem
-    /// 在「要你處理」：狀態後面加上等了多久
+    /// 在「要你處理」：右上角寫等了多久（不是最後的動靜）
     var waiting = false
     let site: SiteSummary?
 
@@ -347,10 +345,16 @@ private struct InboxRow: View {
                             .accessibilityLabel("Xena 正在回答")
                     }
                     Spacer(minLength: 6)
-                    if let at = item.at {
-                        Text(at.relativeText)
+                    if let site {
+                        SiteIconView(site: site, size: 16)
+                            .accessibilityLabel(site.name)
+                    }
+                    if let when {
+                        Text(when.text)
                             .textRole(.xs)
-                            .foregroundStyle(Theme.muted)
+                            .foregroundStyle(when.urgent ? Theme.warningFG : Theme.muted)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                 }
                 Text(item.text)
@@ -358,16 +362,12 @@ private struct InboxRow: View {
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                HStack(spacing: 6) {
+                // 放不下就換行，不截字
+                FlowLayout(spacing: 6) {
                     StatusBadge(item.source.label, tone: item.source == .line ? .active : .neutral)
                     if let topic = item.topic { Chip(topic) }
-                    if let status = item.status { StatusBadge(statusText(status.text), tone: status.tone) }
+                    if let status = item.status { StatusBadge(status.text, tone: status.tone) }
                     if let extra = item.extra { StatusBadge(extra.text, tone: extra.tone) }
-                    Spacer(minLength: 0)
-                    if let site {
-                        SiteIconView(site: site, size: 18)
-                            .accessibilityLabel(site.name)
-                    }
                 }
             }
         }
@@ -375,10 +375,13 @@ private struct InboxRow: View {
         .contentShape(.rect)
     }
 
-    private func statusText(_ text: String) -> String {
-        guard waiting, let since = item.since else { return text }
-        let hours = Date.now.timeIntervalSince(since) / 3600
-        return hours < 1 / 60 ? text : "\(text)・\(Briefing.hours(hours))"
+    /// 右上角：要你處理的寫等了多久（超過一小時標橘色）；其他寫最後的動靜
+    private var when: (text: String, urgent: Bool)? {
+        if waiting, let since = item.since {
+            let hours = Date.now.timeIntervalSince(since) / 3600
+            return hours < 1 / 60 ? (text: "剛剛", urgent: false) : (text: "等了 \(Briefing.hours(hours))", urgent: hours >= 1)
+        }
+        return item.at.map { (text: $0.relativeText, urgent: false) }
     }
 }
 
