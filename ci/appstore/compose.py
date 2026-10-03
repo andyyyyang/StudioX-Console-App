@@ -34,14 +34,18 @@ GLOW = [(132, 92, 255), (64, 204, 255), (255, 107, 209), (255, 90, 31)]  # 光�
 # 畫面代號、編號旁的小標、標題（\n 換行，*重點* 用彩虹漸層）、說明、版型、放大的地方
 #   版型 top：字在上、手機在下（超出下緣）；bottom：手機在上（超出上緣）、字在下
 #   zoom：box 是截圖上要放大的那一塊（比例）、width 是放大後佔畫面多寬；
-#         pop＝從手機原本的位置浮出來，不然用 side（左右）、y（高度比例）擺在旁邊
+#         pop＝從手機原本的位置浮出來，不然用 side（left／right／center）、y（高度比例）擺
+#   layout_by：某個裝置用不同的版型（iPad 的畫面比例不一樣，重點的位置也不同）
 SLIDES = [
     {"key": "home", "eyebrow": "AI 店長 Xena", "title": "每天一打開，\n就知道*該做什麼*", "sub": "訂單、客人、詢問，Xena 都整理好了", "hero": True},
-    {"key": "voice", "eyebrow": "用說的", "title": "問一句，\n*Xena* 直接回答", "sub": "今天賣得怎樣、誰在等回覆，像跟店長講話", "layout": "bottom"},
+    {"key": "voice", "eyebrow": "用說的", "title": "問一句，\n*Xena* 直接回答", "sub": "今天賣得怎樣、誰在等回覆，像跟店長講話", "layout": "bottom",
+     "layout_by": {"ipad13": "top"},
+     "zoom": {"ipad13": {"box": (0.209, 0.783, 0.791, 0.923), "width": 0.76, "radius": 0.03, "side": "center", "y": 0.812}}},
     {"key": "xena", "eyebrow": "交代 Xena", "title": "交代她做事，\n*你點頭*才執行", "sub": "標出貨、回客人、改商品，動手前一定先問你",
      "zoom": {"iphone69": {"box": (0.0364, 0.3605, 0.9636, 0.5279), "width": 0.90, "radius": 0.034, "pop": True},
               "ipad13": {"box": (0.219, 0.3125, 0.775, 0.567), "width": 0.76, "pop": True}}},
-    {"key": "line", "eyebrow": "客服收件匣", "title": "官網和 LINE 的客人，\n*一個地方*回", "sub": "Xena 先回答，需要真人時才轉給你", "layout": "bottom"},
+    {"key": "line", "eyebrow": "客服收件匣", "title": "官網和 LINE 的客人，\n*一個地方*回", "sub": "Xena 先回答，需要真人時才轉給你", "layout": "bottom",
+     "zoom": {"ipad13": {"box": (0.428, 0.405, 0.962, 0.585), "width": 0.60, "radius": 0.03, "pop": True, "dy": 0.02}}},
     {"key": "orders", "eyebrow": "訂單", "title": "等出貨、待付款，\n*一眼*看完", "sub": "勾一勾，一次標好出貨", "shot": {"ipad13": "order"}},
     {"key": "traffic", "eyebrow": "流量與成效", "title": "生意好不好，\n*隨時*看得到", "sub": "即時訪客、Google 搜尋、每天的重點變化", "layout": "bottom"},
     {"key": "product", "eyebrow": "商品與內容", "title": "商品、內容，\n*手機上*就能改", "sub": "名稱、價格、庫存、上架，改完網站馬上更新"},
@@ -343,7 +347,8 @@ def callout(canvas, shot, zoom, dev_box, screen, d):
         cy = dev_box[1] + sy + (zy0 + zy1) / 2 * sh
         x, y = int(cx - cw / 2), int(cy - ch / 2 + zoom.get("dy", 0) * canvas.height)
     else:
-        x = int(W * 0.045) if zoom.get("side") == "left" else W - cw - int(W * 0.045)
+        side = zoom.get("side", "center")
+        x = int(W * 0.045) if side == "left" else W - cw - int(W * 0.045) if side == "right" else (W - cw) // 2
         y = int(canvas.height * zoom["y"])
     canvas = shadow(canvas, (x, y, x + cw, y + ch), rad, blur=60, alpha=230, dy=40)
     canvas = shadow(canvas, (x, y, x + cw, y + ch), rad, blur=18, alpha=140, dy=10)
@@ -405,7 +410,7 @@ def compose(device_key, slide, index, background, fonts, raw_dir, out_dir):
     canvas = background.crop(((index - 1) * W, 0, index * W, H)).convert("RGBA")
     shot = Image.open(src).convert("RGB")
     dev, screen = device(shot, d)
-    layout = slide.get("layout", "top")
+    layout = slide.get("layout_by", {}).get(device_key, slide.get("layout", "top"))
 
     if layout == "top":
         text_bottom = text_block(canvas, fonts, d, slide, index, d["top"])
