@@ -103,7 +103,7 @@ nonisolated enum DemoServer {
     {"thread":{"id":"demo-thread","title":"標出貨","view":[
      {"kind":"user","text":"已付款的訂單幫我全部標成已出貨"},
      {"kind":"tool","id":"demo-tool","name":"list","label":"查詢晨麥手作的訂單","args":"{}","status":"ok","ms":420},
-     {"kind":"assistant","text":"晨麥手作有 **6 筆已付款**、還沒出貨的訂單，最早一筆是昨天下午的 CM-24100612（林小涵，NT$1,280）。\n\n我會把這 6 筆一起標成「已出貨」，客人會收到出貨通知。確認一下："},
+     {"kind":"assistant","text":"晨麥手作有 **6 筆已付款**、還沒出貨的訂單：\n\n| 訂單 | 客人 | 金額 |\n| --- | --- | --- |\n| CM-24100612 | 林小涵 | NT$1,280 |\n| CM-24100611 | 陳柏宇 | NT$860 |\n| CM-24100610 | 王怡君 | NT$2,140 |\n\n另外 3 筆是今天早上的。我會把這 6 筆一起標成「已出貨」，客人會收到出貨通知。確認一下："},
      {"kind":"confirm","id":"demo-confirm","title":"6 筆訂單標成已出貨","detail":"晨麥手作・CM-24100607～CM-24100612\n標好後寄出貨通知給 6 位客人","danger":false,"status":"pending"}
     ]}}
     """#
