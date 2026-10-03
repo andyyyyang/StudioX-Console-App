@@ -437,11 +437,11 @@ extension View {
         containerBackground(Theme.page, for: .navigationSplitView)
     }
 
-    /// iPad 分欄的左欄：清單一直開著——上面的分頁列已經有側欄鈕，不再放第二個收合鈕。
-    /// hidesBar：欄裡已經有大標（Your inbox、Orders）時，導覽列整條拿掉，不再重複寫一次小標題
-    func splitListColumn(hidesBar: Bool = true) -> some View {
-        toolbar(removing: .sidebarToggle)
-            .toolbar(hidesBar ? .hidden : .automatic, for: .navigationBar)
+    /// iPad 分欄的左欄（欄裡已經有大標：Your inbox、Orders）：導覽列整條拿掉——不再重複寫一次小標題，
+    /// 收合鈕在這條導覽列上，也一起不見（上面的分頁列已經有側欄鈕）。
+    /// 不用 toolbar(removing: .sidebarToggle)：它會讓 navigationSplitViewColumnWidth 失效，左欄變回系統預設的 320 點
+    func splitListColumn() -> some View {
+        toolbar(.hidden, for: .navigationBar)
     }
 
     /// 頁面內容的左右留白與最大寬度（iPad 上置中、不貼滿）
@@ -659,13 +659,18 @@ struct Stat: View {
         VStack(alignment: .leading, spacing: 8) {
             Group {
                 if let compact {
+                    // 完整的放得下就寫完整的；放不下寫短的（NT$1.3萬）；還放不下就用小一號的字（不會截成「NT$1…」）
                     ViewThatFits(in: .horizontal) {
                         CountUp(value: value, format: format)
                             .lineLimit(1)
                             .fixedSize()
                         CountUp(value: value, format: compact)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.6)
+                            .fixedSize()
+                        CountUp(value: value, format: compact)
+                            .font(.brand(26, .medium).monospacedDigit())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
                     }
                 } else {
                     CountUp(value: value, format: format)

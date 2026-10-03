@@ -129,7 +129,6 @@ struct SiteWorkspace: View {
                 SiteSectionSidebar(site: site, selection: $section)
                     .navigationTitle(site.name)
                     .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
-                    .splitListColumn(hidesBar: false)
             } detail: {
                 NavigationStack(path: path) {
                     sectionView(site)
