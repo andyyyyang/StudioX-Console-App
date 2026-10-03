@@ -123,6 +123,8 @@ struct SpecField: View {
             StringListField(label: spec.displayLabel, help: spec.help, values: $value.strings)
         case .json:
             JSONField(label: spec.displayLabel, help: spec.help, value: $value)
+        case .text where RichTextField.isRich(spec.key):
+            RichTextField(label: spec.displayLabel, help: spec.help, limit: spec.maxLen, required: required, value: $value)
         case .text:
             TextBlock(label: spec.displayLabel, help: spec.help, limit: spec.maxLen, required: required, multiline: true, value: $value)
         case .string, .slug, .url:
@@ -695,109 +697,55 @@ struct MarkdownField: View {
     }
 }
 
-/// Markdown 的文章排版（news/[slug] 的內文：h2 600、行高 1.95；引言左邊一條橘線）
+/// 長文（公告、主題頁的內文 contentZh／contentEn：HTML 或 Markdown）：編輯／預覽切換，預覽照網頁排版
+struct RichTextField: View {
+    let label: String
+    var help: String?
+    var limit: Int?
+    var required = false
+    @Binding var value: JSONValue
+    @State private var preview = false
+
+    /// 哪些欄位是長文（內文）
+    static func isRich(_ key: String) -> Bool { key.hasPrefix("content") || key == "body" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                if preview {
+                    Text(label)
+                        .textRole(.small)
+                        .foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    FilterChip(title: "編輯", selected: !preview) { preview = false }
+                    FilterChip(title: "預覽", selected: preview) { preview = true }
+                }
+            }
+            if preview {
+                let text = value.string ?? ""
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("還沒有內容")
+                        .textRole(.small)
+                        .foregroundStyle(Theme.muted)
+                } else {
+                    DraftBody(text: text, format: text.contains("</") || text.contains("<p") ? "html" : "markdown")
+                        .padding(.vertical, 8)
+                }
+            } else {
+                TextBlock(label: label, help: help, limit: limit, required: required, multiline: true, value: $value)
+            }
+        }
+    }
+}
+
+/// Markdown 的文章排版（news/[slug] 的內文）：標題、段落、清單、引言、表格、程式碼、圖片與圖說都照網站畫（MarkdownView）
 struct MarkdownArticle: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .heading(let level, let s):
-                    Text(markdown(s))
-                        .font(.brand(level == 2 ? 22 : 18, .semibold))
-                        .tracking(-0.3)
-                        .foregroundStyle(Theme.ink)
-                        .padding(.top, 10)
-                case .quote(let s):
-                    Text(markdown(s))
-                        .textRole(.body)
-                        .foregroundStyle(Theme.ink2)
-                        .padding(.leading, 14)
-                        .overlay(alignment: .leading) { Rectangle().fill(Theme.accent).frame(width: 3) }
-                case .bullet(let s):
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("—").foregroundStyle(Theme.accent)
-                        Text(markdown(s)).foregroundStyle(Theme.ink)
-                    }
-                    .textRole(.body)
-                case .image(let alt, let url):
-                    VStack(alignment: .leading, spacing: 6) {
-                        RemoteImage(url: URL(string: url), aspect: 1600 / 1000, radius: Metric.radiusLg)
-                        if !alt.isEmpty {
-                            Text(alt).textRole(.xs).foregroundStyle(Theme.muted)
-                        }
-                    }
-                case .table(let s):
-                    Text(s)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.ink2)
-                case .paragraph(let s):
-                    Text(markdown(s))
-                        .textRole(.body)
-                        .lineHeight(.multiple(factor: 1.8))
-                        .foregroundStyle(Theme.ink)
-                }
-            }
-        }
-        .tint(Theme.accentText)
-        .textSelection(.enabled)
-    }
-
-    enum Block {
-        case heading(Int, String)
-        case quote(String)
-        case bullet(String)
-        case image(String, String)
-        case table(String)
-        case paragraph(String)
-    }
-
-    /// ![說明](網址 "圖說") → 圖說（沒有就用說明）與網址
-    static func image(_ line: String) -> (caption: String, url: String)? {
-        guard line.hasPrefix("!["), line.hasSuffix(")"), let close = line.range(of: "](") else { return nil }
-        let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<close.lowerBound])
-        let inside = String(line[close.upperBound..<line.index(before: line.endIndex)])
-        let parts = inside.split(separator: " ", maxSplits: 1)
-        guard let url = parts.first.map(String.init), !url.isEmpty else { return nil }
-        var caption = alt
-        if parts.count > 1 {
-            let rest = parts[1].trimmingCharacters(in: .whitespaces)
-            if rest.hasPrefix("\""), rest.hasSuffix("\""), rest.count >= 2 { caption = String(rest.dropFirst().dropLast()) }
-        }
-        return (caption, url)
-    }
-
-    private var blocks: [Block] {
-        var out: [Block] = []
-        var paragraph: [String] = []
-        var table: [String] = []
-        func flush() {
-            if !paragraph.isEmpty { out.append(.paragraph(paragraph.joined(separator: "\n"))); paragraph = [] }
-            if !table.isEmpty { out.append(.table(table.joined(separator: "\n"))); table = [] }
-        }
-        for raw in text.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty { flush(); continue }
-            if line.hasPrefix("|") { if !paragraph.isEmpty { flush() }; table.append(line); continue }
-            if line.hasPrefix("### ") { flush(); out.append(.heading(3, String(line.dropFirst(4)))); continue }
-            if line.hasPrefix("## ") { flush(); out.append(.heading(2, String(line.dropFirst(3)))); continue }
-            if line.hasPrefix("> ") { flush(); out.append(.quote(String(line.dropFirst(2)))); continue }
-            if line.hasPrefix("- ") || line.hasPrefix("* ") { flush(); out.append(.bullet(String(line.dropFirst(2)))); continue }
-            if let image = Self.image(line) {
-                flush()
-                out.append(.image(image.caption, image.url))
-                continue
-            }
-            if let dot = line.firstIndex(of: "."), dot > line.startIndex, line[..<dot].allSatisfy(\.isNumber), line[line.index(after: dot)...].hasPrefix(" ") {
-                flush()
-                out.append(.bullet(line))
-                continue
-            }
-            paragraph.append(line)
-        }
-        flush()
-        return out
+        MarkdownView(text: text, style: .article)
     }
 }
 

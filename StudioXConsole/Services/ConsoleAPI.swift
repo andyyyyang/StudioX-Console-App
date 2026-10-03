@@ -485,6 +485,21 @@ final class ConsoleAPI {
         return try JSONDecoder().decode(ConfirmResponseDTO.self, from: data)
     }
 
+    /// 上傳一份文件給 Xena（App 在對話裡附上 .md／.txt）：存成草稿，對話裡帶草稿編號
+    func uploadDraft(text: String, name: String) async throws -> DraftUpload {
+        let payload: JSONValue = ["text": .string(text), "name": .string(name)]
+        let (data, http) = try await send { try copilotRequest("api/copilot/drafts", method: "POST", body: payload) }
+        guard http.statusCode == 200 else { throw copilotError(data, http.statusCode) }
+        return try JSONDecoder().decode(DraftUpload.self, from: data)
+    }
+
+    /// 一份草稿的全文與「改了哪些」（確認卡片的「看完整內容」）
+    func draftDocument(_ id: String) async throws -> DraftDocument {
+        let (data, http) = try await send { try copilotRequest("api/copilot/drafts/\(id)") }
+        guard http.statusCode == 200 else { throw copilotError(data, http.statusCode) }
+        return try JSONDecoder().decode(DraftDocument.self, from: data)
+    }
+
     /// 跟 Xena 說一句話：SSE 串流（每個事件一行 data: JSON），和網頁版同一個端點
     func copilotChat(message: String, thread: String?, answering: String?) -> AsyncThrowingStream<CopilotEvent, any Error> {
         var body: [String: JSONValue] = [

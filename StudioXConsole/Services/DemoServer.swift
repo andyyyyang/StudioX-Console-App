@@ -48,6 +48,8 @@ nonisolated enum DemoServer {
         case "/api/copilot": body = screenshots ? parse(copilotThread) : ["thread": .null]
         case "/api/copilot/confirm": body = parse(confirmed(request.httpBody))
         case "/api/copilot/threads": body = ["threads": []]
+        case "/api/copilot/drafts": body = ["id": "d_demo_upload_0001", "title": "上傳的文件", "format": "markdown", "chars": 1200]
+        case let path where path.hasPrefix("/api/copilot/drafts/"): body = parse(draftDocument)
         case "/api/app/devices": body = ["configured": false, "device": .null]
         case "/api/app/notifications": body = ["supported": false]
         case "/api/app/account": body = ["ok": true, "demo": true]
@@ -60,6 +62,21 @@ nonisolated enum DemoServer {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["content-type": "application/json"])!
         return (data, response)
     }
+
+    // MARK: 長文草稿（確認卡片的「看完整內容」）
+
+    private static let draftDocument = #"""
+    {"id":"d_demo_draft_0001","title":"手工蛋捲怎麼保存才不會軟掉","format":"markdown","chars":420,
+     "text":"# 手工蛋捲怎麼保存才不會軟掉\n\n蛋捲最怕**濕氣**。開封後照下面的方法放，可以多脆好幾天。\n\n## 開封前\n\n- 放在陰涼、不會曬到太陽的地方\n- 常溫可以放 **30 天**\n\n## 開封後\n\n1. 用夾子把袋口夾緊\n2. 放進密封罐，放一包乾燥劑\n3. 一週內吃完最好吃\n\n> 軟掉了也別丟：烤箱 150°C 烤 3 分鐘，放涼就會恢復酥脆。\n\n| 放法 | 可以放多久 |\n| --- | --- |\n| 未開封常溫 | 30 天 |\n| 開封後密封 | 7 天 |\n",
+     "hunks":[
+      {"op":"=","lines":["# 手工蛋捲怎麼保存才不會軟掉","","蛋捲最怕**濕氣**。開封後照下面的方法放，可以多脆好幾天。","","## 開封前",""]},
+      {"op":"-","lines":["- 放在陰涼處"]},
+      {"op":"+","lines":["- 放在陰涼、不會曬到太陽的地方","- 常溫可以放 **30 天**"]},
+      {"op":"=","lines":["","## 開封後",""]},
+      {"op":"+","lines":["1. 用夾子把袋口夾緊","2. 放進密封罐，放一包乾燥劑","3. 一週內吃完最好吃","","> 軟掉了也別丟：烤箱 150°C 烤 3 分鐘，放涼就會恢復酥脆。"]},
+      {"op":"=","lines":["","| 放法 | 可以放多久 |","| --- | --- |","| 未開封常溫 | 30 天 |","| 開封後密封 | 7 天 |"]}
+     ]}
+    """#
 
     // MARK: 等你決定（console 看數據找到的優化）
 

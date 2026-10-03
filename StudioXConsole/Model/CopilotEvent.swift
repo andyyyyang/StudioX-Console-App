@@ -17,6 +17,19 @@ nonisolated struct ConfirmCard: Codable, Hashable, Identifiable, Sendable {
     var typed: String?
     var status: ConfirmStatus
     var result: String?
+    /// 長文草稿存回網站（apply_draft）：可以先看完整新版、改了哪些
+    var draft: DraftInfo?
+}
+
+/// 確認卡片附的長文草稿
+nonisolated struct DraftInfo: Codable, Hashable, Sendable {
+    var id: String
+    var title: String
+    /// markdown / html / text
+    var format: String
+    var chars: Int
+    var added: Int
+    var removed: Int
 }
 
 nonisolated enum ToolStatus: String, Codable, Sendable {
@@ -183,4 +196,32 @@ nonisolated struct ConfirmResponseDTO: Decodable, Sendable {
     var card: ConfirmCard
     var next: ConfirmCard?
     var tool: ToolRecord?
+}
+
+// MARK: - 長文草稿（/api/copilot/drafts）
+
+/// 草稿和打開時的原文比較的一段：= 沒變、+ 新增、- 刪掉
+nonisolated struct DraftHunk: Codable, Hashable, Sendable {
+    var op: String
+    var lines: [String]
+}
+
+/// 一份草稿的全文（確認卡片的「看完整內容」）
+nonisolated struct DraftDocument: Codable, Hashable, Sendable {
+    var id: String
+    var title: String
+    /// markdown / html / text
+    var format: String
+    var chars: Int
+    var text: String
+    /// 和原文比較（新寫的、上傳的沒有）
+    var hunks: [DraftHunk]?
+}
+
+/// 上傳一份文件給 Xena 之後拿到的草稿
+nonisolated struct DraftUpload: Codable, Hashable, Sendable {
+    var id: String
+    var title: String
+    var format: String
+    var chars: Int
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 跟 Xena 的對話（和網頁版同一個 Xena、同一份對話紀錄；樣式照 copilot/styles.ts 的 CHAT_CSS）：
 /// 自己的訊息是主色橘的泡泡，Xena 的回答是一般文字；查了什麼用一行淡淡的小字；要動手前出確認卡片。
@@ -7,6 +8,10 @@ struct XenaChatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
     @State private var showThreads = false
+    /// 附上的文件（.md／.txt）：先上傳成草稿，送出時訊息裡帶草稿編號，Xena 用 read_draft 看
+    @State private var attachment: DraftUpload?
+    @State private var importing = false
+    @State private var uploading = false
     /// 一打開對話，Xena 說自我介紹時水珠跟著說
     @State private var voice = XenaVoice()
     @FocusState private var focused: Bool
@@ -112,63 +117,147 @@ struct XenaChatView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Button {
-                model.showXena = false
-                Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    model.showVoice = true
+        VStack(alignment: .leading, spacing: 8) {
+            if let attachment {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.fill")
+                        .foregroundStyle(Theme.accentText)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(attachment.title)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.ink)
+                            .lineLimit(1)
+                        Text("\(attachment.chars.formatted()) 字・Xena 可以讀完整份、存到文章")
+                            .font(.caption)
+                            .foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 4)
+                    Button { withAnimation(Motion.fast) { self.attachment = nil } } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("拿掉附件")
                 }
-            } label: {
-                HeroIcon("microphone", size: 20)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Theme.surface, in: .rect(cornerRadius: 14, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line) }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button("附上文件（.md、.txt）", systemImage: "doc.badge.plus") { importing = true }
+                    Button("改用說的", systemImage: "mic") {
+                        model.showXena = false
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(400))
+                            model.showVoice = true
+                        }
+                    }
+                } label: {
+                    Group {
+                        if uploading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            HeroIcon("plus", size: 20)
+                        }
+                    }
                     .foregroundStyle(Theme.ink)
                     .frame(width: 40, height: 40)
                     .background(Theme.surface, in: .circle)
                     .overlay { Circle().strokeBorder(Theme.line) }
-            }
-            .buttonStyle(PressScale(scale: 0.92))
-            .accessibilityLabel("改用說的")
-            TextField("跟 Xena 說…", text: $draft, axis: .vertical)
-                .font(.system(size: 16))
-                .lineLimit(1...6)
-                .focused($focused)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(focused ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 1)
                 }
-            Button {
-                if session.isBusy {
-                    session.stop()
-                } else {
-                    let text = draft
-                    draft = ""
-                    session.send(text)
-                }
-            } label: {
-                Group {
-                    if session.isBusy {
-                        HeroIcon("stop", size: 18)
-                    } else {
-                        HeroIcon("arrow-up", size: 18)
+                .disabled(uploading)
+                .accessibilityLabel("附上文件或改用說的")
+                TextField(attachment == nil ? "跟 Xena 說…" : "要 Xena 怎麼用這份文件？", text: $draft, axis: .vertical)
+                    .font(.system(size: 16))
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(focused ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 1)
                     }
+                Button {
+                    if session.isBusy {
+                        session.stop()
+                    } else {
+                        send()
+                    }
+                } label: {
+                    Group {
+                        if session.isBusy {
+                            HeroIcon("stop", size: 18)
+                        } else {
+                            HeroIcon("arrow-up", size: 18)
+                        }
+                    }
+                    .foregroundStyle(Theme.onPrimary)
+                    .frame(width: 40, height: 40)
+                    .background(Theme.primary, in: .circle)
                 }
-                .foregroundStyle(Theme.onPrimary)
-                .frame(width: 40, height: 40)
-                .background(Theme.primary, in: .circle)
+                .buttonStyle(PressScale(scale: 0.92))
+                .disabled(!session.isBusy && !canSend)
+                .opacity(!session.isBusy && !canSend ? 0.35 : 1)
+                .accessibilityLabel(session.isBusy ? "停止" : "送出")
             }
-            .buttonStyle(PressScale(scale: 0.92))
-            .disabled(!session.isBusy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .opacity(!session.isBusy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
-            .accessibilityLabel(session.isBusy ? "停止" : "送出")
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 12)
         .background(Theme.sheet)
         .overlay(alignment: .top) { Theme.line.frame(height: 1) }
+        .animation(Motion.fast, value: attachment?.id)
+        .fileImporter(isPresented: $importing, allowedContentTypes: Self.documentTypes) { result in
+            if case .success(let url) = result { Task { await upload(url) } }
+        }
+    }
+
+    private var canSend: Bool {
+        attachment != nil || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 送出：有附件就在訊息後面帶上草稿編號
+    private func send() {
+        var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let attachment {
+            let note = "（附上文件「\(attachment.title)」：草稿 \(attachment.id)，\(attachment.chars) 字）"
+            text = text.isEmpty ? "幫我看這份文件。\(note)" : "\(text)\n\n\(note)"
+        }
+        guard !text.isEmpty else { return }
+        draft = ""
+        attachment = nil
+        session.send(text)
+    }
+
+    /// Markdown、純文字（.md 有些 App 存成 public.plain-text，有些是 net.daringfireball.markdown）
+    private static let documentTypes: [UTType] = {
+        var types: [UTType] = [.plainText, .utf8PlainText, .text]
+        if let md = UTType(filenameExtension: "md") { types.append(md) }
+        if let md = UTType("net.daringfireball.markdown") { types.append(md) }
+        return types
+    }()
+
+    private func upload(_ url: URL) async {
+        uploading = true
+        defer { uploading = false }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            model.show("讀不了這個檔案（要是 UTF-8 的文字檔）", tone: .danger)
+            return
+        }
+        do {
+            let up = try await model.api.uploadDraft(text: text, name: url.lastPathComponent)
+            withAnimation(Motion.fast) { attachment = up }
+            focused = true
+        } catch {
+            model.show(error.localizedDescription, tone: .danger)
+        }
     }
 }
 
@@ -254,13 +343,10 @@ struct ChatItemView: View {
                     .textSelection(.enabled)
             }
         case .assistant(_, let text):
-            Text(markdown(text))
-                .font(.system(size: 15))
-                .lineSpacing(5)
+            // 標題、清單、表格、程式碼都照 Markdown 排（和網頁版的 Xena 一樣是 GFM）
+            MarkdownView(text: text, style: .chat)
                 .foregroundStyle(Theme.ink)
-                .tint(Theme.accent)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .tint(Theme.accentText)
         case .notice(_, let text):
             Text(text)
                 .font(.system(size: 13))
@@ -327,6 +413,7 @@ struct XenaConfirmCard: View {
     var onDecide: (Bool, String?) -> Void
 
     @State private var typed = ""
+    @State private var showDraft = false
 
     private var typedOK: Bool {
         guard let word = card.typed else { return true }
@@ -347,6 +434,34 @@ struct XenaConfirmCard: View {
                 .lineSpacing(3)
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+            if let draft = card.draft {
+                Button { showDraft = true } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("看完整內容")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("\(draft.chars.formatted()) 字・新增 \(draft.added) 行、刪掉 \(draft.removed) 行")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 4)
+                        HeroIcon("chevron-right", size: 14)
+                            .foregroundStyle(Theme.faint)
+                    }
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line) }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(PressScale(scale: 0.98))
+                .sheet(isPresented: $showDraft) {
+                    DraftPreviewView(draftID: draft.id, title: draft.title)
+                        .presentationDragIndicator(.visible)
+                }
+            }
 
             switch card.status {
             case .pending:
