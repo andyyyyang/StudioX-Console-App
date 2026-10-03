@@ -113,9 +113,14 @@ nonisolated enum DemoServer {
         case ("get", "order"): return order(id: args["id"]?.string ?? "o1")
         case ("list", "support_thread"): return site == "chenmai.studiox.tw" ? threads : #"{"threads":[]}"#
         case ("get", "support_thread"): return thread
-        case ("list", "assistant_conversation"): return site == "studiox.tw" ? conversations : site == "chenmai.studiox.tw" ? shopConversations : nil
+        case ("list", "assistant_conversation"):
+            // 和網站一樣照 status 篩：open＝等專人＋專人接手、ai＝Xena 回答中
+            let all = site == "studiox.tw" ? conversations : site == "chenmai.studiox.tw" ? shopConversations : nil
+            return all.map { filtered($0, status: args["status"]?.string) }
         case ("get", "assistant_conversation"): return args["id"]?.string == "yc1" ? lineConversation : conversation
         case ("list", "inquiry"): return site == "studiox.tw" ? inquiries : nil
+        case ("get", "inquiry"): return inquiryDetail
+        case ("list", "mailbox"): return site == "chenmai.studiox.tw" ? mailbox : #"{"items":[]}"#
         case ("list", "product"): return products
         case ("list", _): return #"{"items":[]}"#
         default: return nil
@@ -212,15 +217,18 @@ nonisolated enum DemoServer {
 
     private static var conversations: String { """
     {"items":[
-     {"id":"c1","at":"\(ago(hours: 0.6))","status":"waiting","tags":["quote"],"contact":{"name":"Sarah"},"turns":6,"questions":["想做一個品牌官網，大概的費用與時程？"]},
-     {"id":"c2","at":"\(ago(hours: 7))","status":"human","tags":[],"contact":null,"signedIn":"demo-visitor@example.com","turns":4,"questions":["你們有做電商網站嗎？"]}
+     {"id":"c1","at":"\(ago(hours: 0.6))","status":"waiting","attention":true,"tags":["費用報價"],"contact":{"name":"Sarah"},"turns":6,"questions":["想做一個品牌官網，大概的費用與時程？","sarah@example.com，謝謝"],"last":{"role":"user","text":"sarah@example.com，謝謝"}},
+     {"id":"c2","at":"\(ago(hours: 7))","status":"human","attention":false,"tags":["服務內容"],"contact":null,"signedIn":"Daniel","turns":4,"questions":["你們有做電商網站嗎？"],"last":{"role":"staff","text":"有的，我把幾個電商案例整理給你。"}},
+     {"id":"c3","at":"\(ago(hours: 0.02))","status":"ai","attention":false,"channel":"line","line":{"name":"Ivy"},"tags":["合作流程"],"turns":3,"questions":["官網從開始到上線大概要多久？"],"last":{"role":"user","text":"官網從開始到上線大概要多久？"}}
     ]}
     """ }
 
     private static var shopConversations: String { """
     {"items":[
      {"id":"yc1","at":"\(ago(hours: 0.2))","status":"waiting","channel":"line","line":{"name":"小雯"},"attention":true,"tags":["收貨問題"],"contact":{"name":"小雯"},"turns":3,"questions":["蛋捲禮盒收到的時候盒子壓扁了"]},
-     {"id":"yc2","at":"\(ago(hours: 3))","status":"human","channel":"web","attention":false,"tags":["改單退款"],"contact":{"name":"王先生"},"turns":5,"questions":["可以改收件地址嗎？"]}
+     {"id":"yc2","at":"\(ago(hours: 3))","status":"human","channel":"web","attention":false,"tags":["改單退款"],"contact":{"name":"王先生"},"turns":5,"questions":["可以改收件地址嗎？"],"last":{"role":"staff","text":"已經幫你改好了，明天出貨。"}},
+     {"id":"yc3","at":"\(ago(hours: 0.03))","status":"ai","channel":"line","line":{"name":"阿凱"},"attention":false,"tags":["商品詢問"],"contact":{"name":"阿凱"},"turns":2,"questions":["芝麻薄餅還有貨嗎？想訂三盒"],"last":{"role":"assistant","text":"芝麻薄餅還有貨！三盒一起買可以用組合價，要幫你放進購物車嗎？"}},
+     {"id":"yc4","at":"\(ago(hours: 1.5))","status":"ai","channel":"web","attention":false,"tags":["訂單查詢"],"contact":{"name":"林小姐"},"turns":4,"questions":["我的訂單到哪了？"],"last":{"role":"assistant","text":"你的訂單已經出貨，預計明天送達。"}}
     ]}
     """ }
 
@@ -244,6 +252,26 @@ nonisolated enum DemoServer {
      {"role":"assistant","content":"品牌官網通常 6–10 週。費用依頁數與功能而定，我先幫你請專人聯絡，方便留下 Email 嗎？","at":"\(ago(hours: 0.85))"},
      {"role":"user","content":"sarah@example.com，謝謝","at":"\(ago(hours: 0.6))"}
     ]}
+    """ }
+
+    /// 照 status 篩對話清單（示範資料）
+    private static func filtered(_ json: String, status: String?) -> String {
+        guard let status, case .object(var o) = parse(json), let items = o["items"]?.array else { return json }
+        let keep: (String) -> Bool = status == "open" ? { $0 == "waiting" || $0 == "human" } : { $0 == status }
+        o["items"] = .array(items.filter { keep($0["status"]?.string ?? "") })
+        guard let data = try? JSONEncoder().encode(JSONValue.object(o)) else { return json }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static var mailbox: String { """
+    {"box":"inbox","items":[
+     {"id":"mb1","from":"好日子選物 <buyer@example.com>","subject":"團購合作邀約：中秋禮盒 200 組","receivedAt":"\(ago(hours: 26))","unread":true,"preview":"您好，我們是好日子選物，想洽談中秋禮盒團購…","attachmentCount":1}
+    ]}
+    """ }
+
+    private static var inquiryDetail: String { """
+    {"id":"q1","createdAt":"\(ago(hours: 20))","status":"new","name":"Kevin","company":"小路咖啡","email":"demo-inquiry@example.com","types":["品牌官網","電商"],"budget":"30–60 萬",
+     "message":"我們想把門市的訂購搬到線上，需要會員與訂閱制。目前每月大約 800 筆外帶訂單，希望明年第一季上線。","sourcePath":"/contact"}
     """ }
 
     private static var inquiries: String { """

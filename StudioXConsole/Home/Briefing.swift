@@ -5,14 +5,20 @@ import SwiftUI
 ///   - 昨天的營運報表（有商店的網站：ops_report，昨天的訂單、收款、異常）
 ///   - 已付款等出貨的訂單
 ///   - 客人在等回覆的客服信（support_thread）
-///   - Xena 轉給專人的網站客服對話（assistant_conversation）、新的專案詢問（inquiry）
+///   - Xena 轉給專人的網站客服對話（assistant_conversation）、她正在回答的對話、新的專案詢問（inquiry）
+///   - 信箱裡還沒分的信（mailbox）
 @Observable
 final class Briefing {
     private(set) var ops: [String: OpsReport] = [:]
     private(set) var toShip: [String: [OrderSummary]] = [:]
     private(set) var awaiting: [SupportThreadSummary] = []
+    /// 等專人、專人接手中的 Xena 對話
     private(set) var handoffs: [XenaConversationSummary] = []
+    /// Xena 正在回答的對話（24 小時內有動靜的）
+    private(set) var live: [XenaConversationSummary] = []
     private(set) var inquiries: [InquirySummary] = []
+    /// 寄到網站信箱、還沒分的信
+    private(set) var mail: [MailSummary] = []
     /// 拿不到資料的網站（網站代號 → 原因）
     private(set) var failures: [String: String] = [:]
     private(set) var loading = false
@@ -34,7 +40,9 @@ final class Briefing {
         toShip = [:]
         awaiting = []
         handoffs = []
+        live = []
         inquiries = []
+        mail = []
         failures = [:]
         updatedAt = nil
     }
@@ -45,7 +53,9 @@ final class Briefing {
         var toShip: [OrderSummary] = []
         var awaiting: [SupportThreadSummary] = []
         var handoffs: [XenaConversationSummary] = []
+        var live: [XenaConversationSummary] = []
         var inquiries: [InquirySummary] = []
+        var mail: [MailSummary] = []
         var failure: String?
     }
 
@@ -79,7 +89,9 @@ final class Briefing {
         toShip = Dictionary(results.map { ($0.site, $0.toShip) }, uniquingKeysWith: { first, _ in first })
         awaiting = results.flatMap(\.awaiting).sorted { ($0.waitingHours ?? 0) > ($1.waitingHours ?? 0) }
         handoffs = results.flatMap(\.handoffs).sorted { ($0.at ?? .distantPast) > ($1.at ?? .distantPast) }
+        live = results.flatMap(\.live).sorted { ($0.at ?? .distantPast) > ($1.at ?? .distantPast) }
         inquiries = results.flatMap(\.inquiries).sorted { ($0.at ?? .distantPast) > ($1.at ?? .distantPast) }
+        mail = results.flatMap(\.mail).sorted { ($0.row.date ?? .distantPast) > ($1.row.date ?? .distantPast) }
         failures = Dictionary(results.compactMap { r in r.failure.map { (r.site, $0) } }, uniquingKeysWith: { first, _ in first })
         updatedAt = .now
     }
@@ -97,9 +109,18 @@ final class Briefing {
         }
         if site.hasSupport {
             do { r.awaiting = try await api.supportThreads(site: site.id) } catch { note(error) }
+            // 信箱：沒有（或不給看）就是沒有
+            if let box = try? await api.list(site: site.id, entity: "mailbox", filters: ["limit": 30]) {
+                r.mail = box.rows.map { MailSummary(site: site.id, row: $0) }
+            }
         }
         if site.tools.contains("list") {
             do { r.handoffs = try await api.xenaConversations(site: site.id).filter { $0.status == "waiting" || $0.status == "human" } } catch { note(error) }
+            // Xena 正在回答的（黃毛丫頭的網站不認得 ai，回全部：這裡再篩）；太久沒動靜的不算
+            let since = Date.now.addingTimeInterval(-24 * 3600)
+            if let live = try? await api.xenaConversations(site: site.id, status: "ai") {
+                r.live = live.filter { $0.status == "ai" && ($0.at ?? .distantPast) > since }
+            }
             do { r.inquiries = try await api.inquiries(site: site.id, status: "new") } catch { note(error) }
         }
         collected[id] = r
@@ -136,7 +157,7 @@ final class Briefing {
                 id: "handoffs", site: handoffs[0].site, icon: "chat-bubble-oval-left-ellipsis", tone: .warning,
                 title: "Xena 轉給專人的對話 \(handoffs.count) 段",
                 detail: handoffs.prefix(2).map { $0.contactName ?? $0.firstQuestion ?? "訪客" }.joined(separator: "、"),
-                action: .inboxSegment("handoffs")
+                action: .inbox
             ))
         }
         if !inquiries.isEmpty {
@@ -159,8 +180,6 @@ final class Briefing {
 struct AttentionItem: Identifiable {
     enum Action {
         case inbox
-        /// 收件匣的某個分段（Xena 轉來的對話…）
-        case inboxSegment(String)
         case orders(site: String, status: String)
         case askXena(String)
     }
@@ -172,4 +191,11 @@ struct AttentionItem: Identifiable {
     var title: String
     var detail: String
     var action: Action
+}
+
+/// 信箱裡的一封信（寄到網站信箱、還沒轉成客服對話也還沒收起來的）
+struct MailSummary: Identifiable {
+    var site: String
+    var row: RecordSummary
+    var id: String { "\(site)|\(row.id)" }
 }

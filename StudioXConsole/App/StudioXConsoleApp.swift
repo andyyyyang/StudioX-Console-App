@@ -253,6 +253,7 @@ struct RouteView: View {
         case .order(let site, let id): OrderDetailView(site: site, orderID: id)
         case .thread(let site, let id): SupportThreadView(site: site, threadID: id)
         case .xenaConversation(let site, let id): XenaConversationView(site: site, conversationID: id)
+        case .inquiry(let site, let id): InquiryView(site: site, inquiryID: id)
         case .collection(let site, let entity): CollectionView(site: site, entity: entity)
         case .record(let site, let entity, let id): RecordView(site: site, entity: entity, id: id)
         case .create(let site, let entity): RecordEditor(site: site, entity: entity, mode: .create)

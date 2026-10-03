@@ -98,6 +98,7 @@ jobs:
             "site|-demo -demoRoute site"
             "xena|-demo -demoRoute xena"
             "line|-demo -demoRoute line"
+            "inbox|-demo -demoTab inbox"
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )
@@ -110,7 +111,6 @@ jobs:
               "product|-demo -demoRoute product"
               "orders|-demo -demoTab orders"
               "order|-demo -demoRoute order"
-              "inbox|-demo -demoTab inbox"
               "thread|-demo -demoRoute thread"
               "lock|-demo -demoLock YES"
             )

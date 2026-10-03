@@ -425,8 +425,12 @@ struct XenaConversationSummary: Identifiable, Hashable {
     var attention: Bool
     var tags: [String]
     var contactName: String?
+    /// LINE 好友的頭像
+    var picture: URL?
     var turns: Int
     var firstQuestion: String?
+    /// 最新的一句（收件匣的預覽）：客人說的照原樣，Xena、專人說的前面標出是誰
+    var preview: String?
 
     init(site: String, _ json: JSONValue) {
         id = json["id"]?.string ?? UUID().uuidString
@@ -438,8 +442,33 @@ struct XenaConversationSummary: Identifiable, Hashable {
         tags = (json["tags"]?.array ?? []).compactMap(\.string)
         let contact = json["contact"]
         contactName = contact?["name"]?.string ?? contact?["email"]?.string ?? json["signedIn"]?.string ?? json["line"]?["name"]?.string
+        picture = json["line"]?["picture"]?.string.flatMap(URL.init(string:))
         turns = json["turns"]?.int ?? 0
-        firstQuestion = json["questions"]?.array.first?.string
+        let questions = (json["questions"]?.array ?? []).compactMap(\.string)
+        firstQuestion = questions.first
+        if let last = json["last"], let text = last["text"]?.string, !text.isEmpty {
+            switch last["role"]?.string {
+            case "assistant": preview = "Xena：\(text)"
+            case "staff": preview = "專人：\(text)"
+            default: preview = text
+            }
+        } else {
+            preview = questions.last
+        }
+    }
+
+    /// 收件匣的分類：Jev 最近替這段對話判斷的類別（有別的類別時不用「閒聊」「其他」）
+    var topic: String? {
+        tags.last { !["閒聊", "其他"].contains($0) } ?? tags.last
+    }
+
+    /// 為什麼要專人看（要你處理的那一列）
+    var attentionLabel: String {
+        switch status {
+        case "waiting": "等專人"
+        case "human": "客人又傳了訊息"
+        default: "留了聯絡資料"
+        }
     }
 
     var statusLabel: String { XenaConversationSummary.label(status) }

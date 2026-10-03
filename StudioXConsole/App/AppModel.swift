@@ -15,6 +15,8 @@ enum Route: Hashable {
     case order(site: String, id: String)
     case thread(site: String, id: String)
     case xenaConversation(site: String, id: String)
+    /// 專案詢問（網站聯絡表單送來的）
+    case inquiry(site: String, id: String)
     /// 一種資料的清單（商品、折價券、文章…；entity 是網站的實體代號）
     case collection(site: String, entity: String)
     /// 一筆資料（id 是 nil：單一頁面或設定）
@@ -31,7 +33,7 @@ enum Route: Hashable {
     var site: String {
         switch self {
         case .site(let s): s
-        case .order(let s, _), .thread(let s, _), .xenaConversation(let s, _), .collection(let s, _), .record(let s, _, _),
+        case .order(let s, _), .thread(let s, _), .xenaConversation(let s, _), .inquiry(let s, _), .collection(let s, _), .record(let s, _, _),
              .create(let s, _), .member(let s, _): s
         case .traffic(let s), .searchConsole(let s): s
         }
@@ -113,8 +115,8 @@ final class AppModel {
     /// 寬的畫面（iPad 的一般寬度）：網站直接放在側欄
     var regular = false
 
-    /// 收件匣現在看的分段（support、handoffs、inquiries、mailbox；點通知會設好）
-    var inboxSegment = "support"
+    /// 收件匣只看哪一類（Jev 自動分的類別；nil＝全部。點通知打開收件匣時回到全部）
+    var inboxTopic: String?
 
     @ObservationIgnored let api: ConsoleAPI
     let xena: XenaSession
@@ -164,7 +166,7 @@ final class AppModel {
 
     /// 收件匣的數字（客人在等回覆＋需要專人看的 Xena 對話＋新的詢問）：專人已經回過、客人還沒再說話的不算
     var inboxCount: Int {
-        briefing.awaiting.count + briefing.handoffs.filter(\.attention).count + briefing.inquiries.count
+        briefing.awaiting.count + briefing.handoffs.filter(\.attention).count + briefing.live.filter(\.attention).count + briefing.inquiries.count
     }
 
     // MARK: 登入
@@ -271,7 +273,7 @@ final class AppModel {
         schemaTasks = [:]
         xena.reset()
         briefing.reset()
-        inboxSegment = "support"
+        inboxTopic = nil
         lock.reset()
         // 登入過期：token 已經沒了、叫不了 console；unregister 會向 Apple 取消這台的通知代碼，console 下次送就知道它失效了
         Task { await push.unregister() }
@@ -355,7 +357,7 @@ final class AppModel {
         case .order:
             tab = .orders
             ordersPath = [route]
-        case .thread, .xenaConversation:
+        case .thread, .xenaConversation, .inquiry:
             tab = .inbox
             inboxPath = [route]
         case .site(let id):
@@ -384,8 +386,8 @@ final class AppModel {
         case route(Route)
         /// 訂單清單（那個網站）
         case orders(site: String)
-        /// 收件匣的某個分段
-        case inbox(String)
+        /// 收件匣
+        case inbox
         case home
     }
 
@@ -406,18 +408,18 @@ final class AppModel {
             // 黃毛丫頭的 Xena 對話（/admin/support/xena?c=；官網和 LINE 來的都是）：在 App 裡打開那一段
             if sub == "xena" {
                 if let id = q["c"] { return .route(.xenaConversation(site: site, id: id)) }
-                return .inbox("handoffs")
+                return .inbox
             }
             if let id = q["thread"] { return .route(.thread(site: site, id: id)) }
-            return .inbox("support")
+            return .inbox
         case "orders":
             if let id = sub ?? q["id"] { return .route(.order(site: site, id: id)) }
             return .orders(site: site)
         case "inbox":
             if let id = q["c"] { return .route(.xenaConversation(site: site, id: id)) }
             if let run = q["run"] { return .route(.record(site: site, entity: "automation_run", id: run)) }
-            if q["inquiry"] != nil { return .inbox("inquiries") }
-            return .inbox("support")
+            if let id = q["inquiry"] { return .route(.inquiry(site: site, id: id)) }
+            return .inbox
         case "automations":
             if let run = q["run"] { return .route(.record(site: site, entity: "automation_run", id: run)) }
             if let id = sub { return .route(.record(site: site, entity: "automation", id: id)) }
@@ -448,10 +450,10 @@ final class AppModel {
             ordersSite = site
             ordersPath = []
             tab = orderSites.isEmpty ? .xena : .orders
-        case .inbox(let segment):
+        case .inbox:
             showXena = false
             showAccount = false
-            inboxSegment = segment
+            inboxTopic = nil
             inboxPath = []
             tab = .inbox
         case .home:
@@ -496,9 +498,6 @@ final class AppModel {
         }
         switch action {
         case .inbox:
-            tab = .inbox
-        case .inboxSegment(let segment):
-            inboxSegment = segment
             tab = .inbox
         case .orders(let site, let status):
             ordersSite = site
