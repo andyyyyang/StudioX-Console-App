@@ -842,6 +842,87 @@ struct XenaConversationView: View {
     }
 }
 
+/// 客人說的話，一行一行畫（和後台的收件匣一樣）：LINE 傳來的照片、貼圖顯示圖，影片、語音、檔案可以點開，
+/// 其他的照原樣（網址可以點）。「［圖片］網址」「［貼圖：開心］網址」「［影片 12 秒］網址」「［語音 8 秒］網址」「［檔案］名稱 網址」
+private struct VisitorContent: View {
+    let text: String
+    @Environment(\.openURL) private var openURL
+
+    private enum Line: Identifiable {
+        case image(URL, sticker: Bool, id: Int)
+        case media(label: String, url: URL, id: Int)
+        case text(String, id: Int)
+        var id: Int {
+            switch self {
+            case .image(_, _, let id), .media(_, _, let id), .text(_, let id): id
+            }
+        }
+    }
+
+    private var lines: [Line] {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n").enumerated().map { (i, raw) -> Line in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            // ［標籤］ https://…（標籤後面可能有檔名）
+            if line.hasPrefix("["), let close = line.firstIndex(of: "]"),
+               let space = line.lastIndex(of: " "), space > close,
+               let url = URL(string: String(line[line.index(after: space)...])), url.scheme == "https" {
+                let label = String(line[line.index(after: line.startIndex)..<close])
+                let rest = line[line.index(after: close)..<space].trimmingCharacters(in: .whitespaces)
+                if label == "圖片" { return .image(url, sticker: false, id: i) }
+                if label.hasPrefix("貼圖") { return .image(url, sticker: true, id: i) }
+                if label.hasPrefix("影片") || label.hasPrefix("語音") || label.hasPrefix("檔案") || label.hasPrefix("位置") {
+                    return .media(label: [label, rest].filter { !$0.isEmpty }.joined(separator: " "), url: url, id: i)
+                }
+            }
+            return .text(raw, id: i)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(lines) { line in
+                switch line {
+                case .image(let url, let sticker, _):
+                    Button { openURL(url) } label: {
+                        AsyncImage(url: url) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            Theme.soft
+                        }
+                        .frame(maxWidth: sticker ? 96 : 220, maxHeight: sticker ? 96 : 220, alignment: .leading)
+                        .clipShape(.rect(cornerRadius: sticker ? 0 : 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(sticker ? "客人傳的貼圖" : "客人傳的照片")
+                case .media(let label, let url, _):
+                    Button { openURL(url) } label: {
+                        Label(label, systemImage: label.hasPrefix("影片") ? "play.rectangle" : label.hasPrefix("語音") ? "waveform" : label.hasPrefix("位置") ? "mappin.and.ellipse" : "doc")
+                            .textRole(.body)
+                            .foregroundStyle(Theme.accentText)
+                    }
+                    .buttonStyle(.plain)
+                case .text(let s, _):
+                    Text(Self.linked(s))
+                        .textRole(.body)
+                        .foregroundStyle(Theme.ink)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    /// 網址可以點
+    private static func linked(_ s: String) -> AttributedString {
+        var out = AttributedString(s)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return out }
+        for match in detector.matches(in: s, range: NSRange(s.startIndex..., in: s)) {
+            guard let url = match.url, let r = Range(match.range, in: s), let ar = Range(r, in: out) else { continue }
+            out[ar].link = url
+        }
+        return out
+    }
+}
+
 /// Xena 對話的一則：事件置中、客人在左（白卡；有 Jev 的分類與判斷）、Xena 與專人在右邊標名字
 private struct XenaMessageRow: View {
     let message: XenaConversationMessage
@@ -862,10 +943,7 @@ private struct XenaMessageRow: View {
                         .textRole(.xs)
                         .foregroundStyle(message.jevHuman?.yes == true ? Theme.warningFG : Theme.muted)
                 }
-                Text(message.content)
-                    .textRole(.body)
-                    .foregroundStyle(Theme.ink)
-                    .textSelection(.enabled)
+                VisitorContent(text: message.content)
                     .padding(.horizontal, 15)
                     .padding(.vertical, 11)
                     .background(Theme.surface, in: .rect(cornerRadius: 16, style: .continuous))
