@@ -445,15 +445,15 @@ struct XenaConversationSummary: Identifiable, Hashable {
         picture = json["line"]?["picture"]?.string.flatMap(URL.init(string:))
         turns = json["turns"]?.int ?? 0
         let questions = (json["questions"]?.array ?? []).compactMap(\.string)
-        firstQuestion = questions.first
+        firstQuestion = questions.first.map(VisitorPreview.text)
         if let last = json["last"], let text = last["text"]?.string, !text.isEmpty {
             switch last["role"]?.string {
             case "assistant": preview = "Xena：\(text)"
             case "staff": preview = "專人：\(text)"
-            default: preview = text
+            default: preview = VisitorPreview.text(text)
             }
         } else {
-            preview = questions.last
+            preview = questions.last.map(VisitorPreview.text)
         }
     }
 
@@ -913,6 +913,58 @@ struct Decision: Identifiable, Hashable {
         detail = json["detail"]?.string ?? ""
         impact = json["impact"]?.string ?? ""
         self.prompt = prompt
+    }
+}
+
+/// 清單上一則訪客訊息的樣子：「［圖片］網址」這類行換成一句話（傳了 2 張照片、傳了語音：…），網址和系統的附註不顯示
+enum VisitorPreview {
+    static func text(_ raw: String) -> String {
+        var parts: [String] = []
+        var photos = 0
+        func flushPhotos() {
+            if photos > 0 { parts.append(photos == 1 ? "傳了一張照片" : "傳了 \(photos) 張照片") }
+            photos = 0
+        }
+        let lines = raw.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var i = 0
+        while i < lines.count {
+            // 網址、舊版留下的系統附註（「（沒有存下來：…）」）不顯示
+            let line = lines[i]
+                .replacingOccurrences(of: #"\s*https?://\S+"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"（沒有存下來[^）]*）"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+            i += 1
+            if line.hasPrefix("[圖片]") {
+                photos += 1
+                continue
+            }
+            flushPhotos()
+            if let m = line.wholeMatch(of: /\[貼圖(?:：(.+))?\]/) {
+                parts.append(m.1.map { "傳了貼圖（\($0)）" } ?? "傳了貼圖")
+            } else if line.hasPrefix("[影片") {
+                parts.append("傳了一段影片")
+            } else if line.hasPrefix("[語音") {
+                // 語音轉成的文字在下一行
+                if i < lines.count, let said = lines[i].wholeMatch(of: /（語音內容：(.+)）/) {
+                    parts.append("語音：\(said.1)")
+                    i += 1
+                } else {
+                    parts.append("傳了一段語音")
+                }
+            } else if let m = line.wholeMatch(of: /\[檔案\]\s*(.*?)(?:（[^）]*）)?/) {
+                let name = m.1.trimmingCharacters(in: .whitespaces)
+                parts.append(name.isEmpty ? "傳了檔案" : "傳了檔案「\(name)」")
+            } else if let m = line.wholeMatch(of: /\[位置\]\s*(.*)/) {
+                let place = m.1.trimmingCharacters(in: .whitespaces)
+                parts.append(place.isEmpty ? "傳了位置" : "傳了位置：\(place)")
+            } else if let said = line.wholeMatch(of: /（語音內容：(.+)）/) {
+                parts.append("語音：\(said.1)")
+            } else {
+                parts.append(line)
+            }
+        }
+        flushPhotos()
+        return parts.joined(separator: "，")
     }
 }
 

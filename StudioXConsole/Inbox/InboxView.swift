@@ -218,20 +218,18 @@ struct InboxList: View {
                             count: { t in t.map { name in topics.first { $0.name == name }?.count ?? 0 } ?? all.all.count }
                         )
                     }
-                    needsYouSection(shown.needsYou)
+                    // 沒有要你處理的：上面那行已經說了，不再放一大塊「都處理好了」
+                    if !shown.needsYou.isEmpty {
+                        section("Needs *you*", aside: "客人在等你，等最久的在上面。", items: shown.needsYou, waiting: true)
+                    }
                     if !shown.live.isEmpty {
-                        section("Xena is *on it*", aside: "她正在官網、LINE 上回答的對話。點進去看，隨時可以接手。", items: shown.live) {
-                            HStack(spacing: 7) {
-                                LiveDot()
-                                Text("即時").textRole(.xs).foregroundStyle(Theme.muted)
-                            }
-                        }
+                        section("Xena is *on it*", aside: "她在回答的對話，需要時點進去接手。", items: shown.live)
                     }
                     if !shown.yours.isEmpty {
-                        section("In your *hands*", aside: "你們接手了、客人還沒再說話的。", items: shown.yours) { EmptyView() }
+                        section("In your *hands*", aside: "你們接手了、客人還沒再說話的。", items: shown.yours)
                     }
                     if !shown.mail.isEmpty {
-                        section("Unsorted *mail*", aside: "寄到網站信箱、還沒轉成客服對話的信。", items: shown.mail) { EmptyView() }
+                        section("Unsorted *mail*", aside: "寄到網站信箱、還沒轉成客服對話的信。", items: shown.mail)
                     }
                 }
             }
@@ -270,26 +268,14 @@ struct InboxList: View {
 
     private func summary(_ all: InboxSections) -> String {
         var parts = [all.needsYou.isEmpty ? "沒有要你處理的事" : "\(all.needsYou.count) 件要你處理"]
-        if !all.live.isEmpty { parts.append("Xena 正在回答 \(all.live.count) 段") }
+        if !all.live.isEmpty { parts.append("Xena 回答中 \(all.live.count) 段") }
         return parts.joined(separator: "・")
     }
 
-    @ViewBuilder
-    private func needsYouSection(_ items: [InboxItem]) -> some View {
+    private func section(_ title: String, aside: String, items: [InboxItem], waiting: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            SectionHead("Needs *you*", aside: items.isEmpty ? nil : "客人在等你，等最久的在上面。", role: .h3)
-            if items.isEmpty {
-                EmptyState(title: "都處理好了", message: "有客人需要你時會出現在這裡，也會通知你。")
-            } else {
-                rows(items, waiting: true)
-            }
-        }
-    }
-
-    private func section<Action: View>(_ title: String, aside: String, items: [InboxItem], @ViewBuilder action: () -> Action) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHead(title, aside: aside, role: .h3, action: action)
-            rows(items, waiting: false)
+            SectionHead(title, aside: aside, role: .h3)
+            rows(items, waiting: waiting)
         }
     }
 
