@@ -95,6 +95,7 @@ jobs:
             "talk|-demo|5"
             "home|-demo|13"
             "sheet|-demo -demoSheet today|9"
+            "decisions|-demo -demoSheet today -demoScroll decisions|11"
             "site|-demo -demoRoute site"
             "xena|-demo -demoRoute xena"
             "line|-demo -demoRoute line"

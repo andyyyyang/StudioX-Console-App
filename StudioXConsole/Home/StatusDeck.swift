@@ -106,6 +106,7 @@ private struct TodaySheet: View {
         let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
         let revenue = b.ops.values.reduce(0) { $0 + $1.revenueCents }
         let ship = b.toShip.values.reduce(0) { $0 + $1.count }
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
                 VStack(alignment: .leading, spacing: 20) {
@@ -143,6 +144,7 @@ private struct TodaySheet: View {
                 }
                 AttentionList()
                 DecisionList()
+                    .id("decisions")
                 if !model.sites.isEmpty {
                     VStack(alignment: .leading, spacing: 20) {
                         SectionHead("Your *sites*")
@@ -158,6 +160,13 @@ private struct TodaySheet: View {
             .pageWidth()
             .padding(.top, 8)
             .padding(.bottom, 48)
+        }
+        // UI 截圖（-demoScroll decisions）：捲到「等你決定」
+        .task(id: b.decisions.count) {
+            guard DemoServer.screenshots, UserDefaults.standard.string(forKey: "demoScroll") == "decisions", !b.decisions.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            proxy.scrollTo("decisions", anchor: .top)
+        }
         }
         .scrollIndicators(.hidden)
         .refreshable { [model] in await Task { await model.refreshAll() }.value }
