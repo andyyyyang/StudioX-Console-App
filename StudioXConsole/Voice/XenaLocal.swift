@@ -176,7 +176,7 @@ final class XenaLocal {
     /// grounding：Xena 先前分析過這位客人時的重點和事實（換一批時一起給，句子才有根據）；avoid：剛剛給過的，不要再一樣。
     /// 寫出來的數字都要在對話或事實裡（不能編價格、日期、訂單編號），對不上的那句不用。不能用、想不出來回 nil
     func suggestReplies(siteName: String, transcript: String, grounding: [String] = [], avoid: [String] = []) async -> [String]? {
-        guard available, AppSettings.shared.replySuggest != .off else { return nil }
+        guard available else { return nil }
         let session = LanguageModelSession(instructions: Self.replyRules(siteName))
         var prompt = "對話（舊到新，最後是客人說的）：\n\(transcript)"
         if !grounding.isEmpty {

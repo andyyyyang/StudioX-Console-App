@@ -120,7 +120,7 @@ enum ReplySheet: String, Identifiable {
 }
 
 enum ReplyTool: Hashable {
-    case xenaDraft, xenaPolish, release
+    case xenaDraft, xenaPolish, release, suggest
     case photos, camera, files
     case coupon, issueCoupon, products, card
     case saved, track
@@ -131,6 +131,8 @@ enum ReplyTool: Hashable {
 struct ReplyMenuOptions {
     var hasDraft = false
     var canRelease = false
+    /// 客人有新的話等專人回（可以叫出回覆建議）
+    var canSuggest = false
     /// 照片、檔案的上限；nil＝網站還沒有檔案空間
     var attach: AttachLimits?
     var room = 4
@@ -158,6 +160,10 @@ struct ReplyMenuSheet: View {
                              caption: options.hasDraft ? "把你打的當重點" : "讀完整段對話")
                         tile(.xenaPolish, "wand.and.stars", "潤飾我寫的", tint: Theme.bubbleXena,
                              caption: options.hasDraft ? nil : "先打一段", enabled: options.hasDraft)
+                        if options.canSuggest {
+                            tile(.suggest, "text.bubble", "回覆建議", tint: Theme.bubbleXena,
+                                 caption: options.hasDraft ? "輸入框空的時候" : "三句下一句", enabled: !options.hasDraft)
+                        }
                         if options.canRelease {
                             tile(.release, "arrow.uturn.backward.circle", "交給 Xena 回答", tint: Theme.bubbleXena, caption: "她接著回客人")
                         }

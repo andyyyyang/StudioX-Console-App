@@ -455,6 +455,7 @@ struct XenaConversationView: View {
         return ReplyMenuOptions(
             hasDraft: !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             canRelease: status == "human" || status == "waiting",
+            canSuggest: detail.flatMap(ReplySuggestions.waiting) != nil,
             attach: replyWith.contains("attachments") ? detail?.attach : nil,
             room: room,
             coupons: entities.contains("coupon") && replyWith.contains("card"),
@@ -474,6 +475,7 @@ struct XenaConversationView: View {
         case .xenaDraft: xenaWrite(polish: false)
         case .xenaPolish: xenaWrite(polish: true)
         case .release: act("release")
+        case .suggest: Task { await requestSuggestions() }
         case .photos: showPhotos = true
         case .camera: showCamera = true
         case .files: showFiles = true
@@ -563,6 +565,20 @@ struct XenaConversationView: View {
             await suggestXena()
         } else if XenaLocal.shared.available {
             await suggestLocal(again: false)
+        }
+    }
+
+    /// 從「＋」選單叫出回覆建議：收起來的再打開；還沒有就現在想（手機上能想就在手機上，不能才請 Xena）
+    private func requestSuggestions() async {
+        guard let d = detail, let run = ReplySuggestions.waiting(d) else { return }
+        let key = ReplySuggestions.key(run)
+        if suggest.key != key { suggest = ReplySuggestions(key: key) }
+        withAnimation(Motion.fast) { suggest.hidden = false }
+        guard suggest.replies.isEmpty, suggest.loading == nil else { return }
+        if XenaLocal.shared.available, !(AppSettings.shared.replySuggest == .auto && ReplySuggestions.needsXena(run)) {
+            await suggestLocal(again: false)
+        } else {
+            await suggestXena()
         }
     }
 
