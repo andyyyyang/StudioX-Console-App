@@ -69,7 +69,8 @@ struct XenaConversationView: View {
         .defaultScrollAnchor(atBottom ? .bottom : nil, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
         .onScrollGeometryChange(for: Bool.self) { g in
-            g.contentOffset.y + g.containerSize.height - g.contentInsets.bottom >= g.contentSize.height - 120
+            // 看得到的範圍（內容的座標）碰到最後 100 點就算在最下面
+            g.visibleRect.maxY >= g.contentSize.height - 100
         } action: { _, bottom in
             atBottom = bottom
             if bottom { unseen = 0 }
@@ -128,6 +129,7 @@ struct XenaConversationView: View {
     private func timeline(_ d: XenaConversationDetail) -> some View {
         // 轉真人的原因放在最後一次「通知專人」的事件下面
         let lastHandoff = d.messages.last { $0.role == "event" && ChatEventRow.kind(of: $0) == "handoff" }?.id
+        let flagged = Self.jevFlags(d.messages)
         ForEach(ChatEntry.build(d.messages)) { entry in
             switch entry {
             case .day(let date):
@@ -139,12 +141,28 @@ struct XenaConversationView: View {
                     .padding(.top, 14)
             case .message(let m, let first, let last):
                 XenaChatRow(
-                    message: m, first: first, last: last,
+                    message: m, first: first, last: last, jevFlag: flagged.contains(m.id),
                     who: who, picture: d.picture, site: site, siteURL: model.site(site)?.url
                 ) { viewing = $0 }
                 .padding(.top, first ? 14 : 3)
             }
         }
+    }
+
+    /// 「Jev 判斷要找人」只標在連續幾句裡的第一句（客人一次傳好幾句時不重複）
+    private static func jevFlags(_ messages: [XenaConversationMessage]) -> Set<Int> {
+        var out: Set<Int> = []
+        var previousFlagged = false
+        for m in messages {
+            guard m.role == "user" else {
+                previousFlagged = false
+                continue
+            }
+            let flagged = m.jevHuman?.yes == true
+            if flagged, !previousFlagged { out.insert(m.id) }
+            previousFlagged = flagged
+        }
+        return out
     }
 
     // MARK: 上方：客人、狀態、主要動作
@@ -436,6 +454,8 @@ private struct XenaChatRow: View {
     let message: XenaConversationMessage
     let first: Bool
     let last: Bool
+    /// 標出「Jev 判斷要找人」
+    let jevFlag: Bool
     let who: String
     let picture: URL?
     let site: String
@@ -462,7 +482,7 @@ private struct XenaChatRow: View {
                         .foregroundStyle(Theme.muted)
                 }
                 VisitorContent(text: message.content, first: first, open: open)
-                if let jev = message.jevHuman, jev.yes {
+                if jevFlag, let jev = message.jevHuman {
                     Label("Jev 判斷要找人（\(Int((jev.confidence * 100).rounded()))%）", systemImage: "exclamationmark.bubble.fill")
                         .font(.brand(11.5, .medium, relativeTo: .caption))
                         .foregroundStyle(Theme.warningFG)
