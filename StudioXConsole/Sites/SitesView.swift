@@ -36,7 +36,7 @@ struct SitesView: View {
                 .padding(.top, 24)
                 .padding(.bottom, 48)
             }
-            .refreshable { [model] in await model.refreshAll() }
+            .refreshable { [model] in await Task { await model.refreshAll() }.value }
             .brandPage()
             .navigationTitle("網站")
             .navigationBarTitleDisplayMode(.inline)

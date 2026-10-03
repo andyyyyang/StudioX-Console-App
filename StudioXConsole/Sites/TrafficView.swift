@@ -112,7 +112,7 @@ struct TrafficView: View {
             .padding(.top, 16)
             .padding(.bottom, 64)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("流量")
         .navigationBarTitleDisplayMode(.inline)
@@ -501,7 +501,7 @@ struct SearchConsoleView: View {
             .padding(.top, 16)
             .padding(.bottom, 64)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("Google 搜尋")
         .navigationBarTitleDisplayMode(.inline)

@@ -83,7 +83,7 @@ struct InboxList: View {
             .padding(.top, 16)
             .padding(.bottom, 48)
         }
-        .refreshable { [model] in await model.refreshAll() }
+        .refreshable { [model] in await Task { await model.refreshAll() }.value }
         .brandPage()
         .navigationTitle("收件匣")
         .navigationBarTitleDisplayMode(.inline)
@@ -391,18 +391,23 @@ struct SupportThreadView: View {
         }
         .task { await load() }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
-            let sent = result["sent"]?.array.first
-            if let error = sent?["emailError"]?.string, !error.isEmpty {
-                model.show("回覆存了，但信沒寄出：\(error)", tone: .danger)
-            } else {
-                model.show(sent != nil ? "已寄出回覆" : "已更新")
-            }
-            if sent != nil { draft = "" }
+            announce(result)
             Task {
                 await load()
                 await model.refreshAll()
             }
         }
+    }
+
+    /// 寫入完成：回覆有沒有寄出（信沒寄出要讓專人知道）
+    private func announce(_ result: JSONValue) {
+        let sent = result["sent"]?.array.first
+        if let error = sent?["emailError"]?.string, !error.isEmpty {
+            model.show("回覆存了，但信沒寄出：\(error)", tone: .danger)
+        } else {
+            model.show(sent != nil ? "已寄出回覆" : "已更新")
+        }
+        if sent != nil { draft = "" }
     }
 
     private func load() async {
@@ -414,13 +419,26 @@ struct SupportThreadView: View {
         }
     }
 
-    private func propose(_ make: () async throws -> ConsoleAPI.WriteOutcome) async {
+    private func propose(reply: Bool = false, _ make: () async throws -> ConsoleAPI.WriteOutcome) async {
         working = true
         defer { working = false }
         do {
             let outcome = try await make()
             switch outcome {
-            case .needsConfirmation(let p): proposal = p
+            case .needsConfirmation(let p):
+                // 送出回覆：按「送出」就是確認了，不再跳一次確認（要打字、危險的動作照樣確認）
+                if reply, p.typed == nil, !p.danger {
+                    switch try await model.api.confirm(p, typed: nil) {
+                    case .done(let result):
+                        announce(result)
+                        await load()
+                        Task { await model.refreshAll() }
+                    case .needsOwner(let next):
+                        proposal = next
+                    }
+                } else {
+                    proposal = p
+                }
             case .done:
                 model.show("已更新")
                 await load()
@@ -499,7 +517,7 @@ struct SupportThreadView: View {
                     .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.line) }
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Task { await propose { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
+                    Task { await propose(reply: true) { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
                 } label: {
                     Text("→")
                         .font(.brand(20, .medium))
@@ -650,21 +668,7 @@ struct XenaConversationView: View {
             }
         }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
-            if replying {
-                draft = ""
-                // 照網站回報的說：有沒有真的傳到客人的 LINE、有沒有寄信（沒傳到要讓專人知道）
-                if result["lineSent"]?.bool == false {
-                    model.show("回覆存下來了，但沒有傳到客人的 LINE（可能封鎖了官方帳號，或本月訊息量用完）", tone: .warning)
-                } else if let error = result["emailError"]?.string, !error.isEmpty {
-                    model.show("回覆已送出，但通知信沒寄出：\(error)", tone: .warning)
-                } else if result["lineSent"]?.bool == true {
-                    model.show("已傳到客人的 LINE")
-                } else {
-                    model.show(result["emailed"]?.bool == true ? "已送出回覆，也寄信通知客人" : "已送出回覆")
-                }
-            } else {
-                model.show("已更新")
-            }
+            if replying { announceReply(result) } else { model.show("已更新") }
             replying = false
             Task {
                 await load()
@@ -792,12 +796,39 @@ struct XenaConversationView: View {
         }
     }
 
+    /// 回覆送出了：照網站回報的說有沒有真的傳到客人的 LINE、有沒有寄信（沒傳到要讓專人知道）
+    private func announceReply(_ result: JSONValue) {
+        draft = ""
+        if result["lineSent"]?.bool == false {
+            model.show("回覆存下來了，但沒有傳到客人的 LINE（可能封鎖了官方帳號，或本月訊息量用完）", tone: .warning)
+        } else if let error = result["emailError"]?.string, !error.isEmpty {
+            model.show("回覆已送出，但通知信沒寄出：\(error)", tone: .warning)
+        } else if result["lineSent"]?.bool == true {
+            model.show("已傳到客人的 LINE")
+        } else {
+            model.show(result["emailed"]?.bool == true ? "已送出回覆，也寄信通知客人" : "已送出回覆")
+        }
+    }
+
     private func propose(reply: Bool = false, _ make: () async throws -> ConsoleAPI.WriteOutcome) async {
         working = true
         defer { working = false }
         do {
             switch try await make() {
             case .needsConfirmation(let p):
+                // 送出回覆：按「送出」就是確認了，不再跳一次確認（接手、結案這些選單裡的動作照樣確認）
+                if reply, p.typed == nil, !p.danger {
+                    switch try await model.api.confirm(p, typed: nil) {
+                    case .done(let result):
+                        announceReply(result)
+                        await load()
+                        Task { await model.refreshAll() }
+                    case .needsOwner(let next):
+                        replying = true
+                        proposal = next
+                    }
+                    return
+                }
                 replying = reply
                 proposal = p
             case .done:

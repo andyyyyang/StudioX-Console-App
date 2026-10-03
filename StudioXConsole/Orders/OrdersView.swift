@@ -108,7 +108,7 @@ struct OrdersList: View {
             .padding(.top, 16)
             .padding(.bottom, selecting ? 110 : 48)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("訂單")
         .navigationBarTitleDisplayMode(.inline)

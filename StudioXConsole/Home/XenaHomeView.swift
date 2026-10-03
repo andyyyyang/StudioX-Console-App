@@ -36,7 +36,7 @@ struct XenaHomeView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .refreshable { [model] in await model.refreshAll() }
+            .refreshable { [model] in await Task { await model.refreshAll() }.value }
             .brandPage()
             .navigationTitle("今天")
             .toolbar(.hidden, for: .navigationBar)

@@ -47,7 +47,7 @@ struct OrderDetailView: View {
             .padding(.top, 16)
             .padding(.bottom, 64)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle(detail.map { "#\($0.summary.number)" } ?? "訂單")
         .navigationBarTitleDisplayMode(.inline)

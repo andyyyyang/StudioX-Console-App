@@ -29,7 +29,7 @@ struct MemberView: View {
             .padding(.top, 16)
             .padding(.bottom, 64)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("會員")
         .navigationBarTitleDisplayMode(.inline)
@@ -286,7 +286,7 @@ struct StallMenuView: View {
             .padding(.top, 16)
             .padding(.bottom, 64)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("攤位菜單")
         .navigationBarTitleDisplayMode(.inline)
@@ -514,7 +514,7 @@ struct FaqPageView: View {
             .padding(.top, 16)
             .padding(.bottom, 64)
         }
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("FAQ")
         .navigationBarTitleDisplayMode(.inline)

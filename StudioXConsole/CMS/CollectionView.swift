@@ -33,7 +33,7 @@ struct CollectionView: View {
             .padding(.bottom, 64)
         }
         .searchable(text: $query, prompt: Text("搜尋\(schema?.label ?? "")"))
-        .refreshable { await load() }
+        .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle(schema?.label ?? "")
         .navigationBarTitleDisplayMode(.inline)
