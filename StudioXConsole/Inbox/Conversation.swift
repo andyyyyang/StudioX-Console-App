@@ -146,7 +146,7 @@ struct XenaConversationView: View {
                     .padding(.vertical, 8)
             case .message(let m, let first, let last):
                 XenaChatRow(
-                    message: m, first: first, last: last, jevFlag: flagged.contains(m.id),
+                    message: m, first: first, last: last, jevFlag: flagged[m.id],
                     site: site, siteURL: model.site(site)?.url, space: mediaSpace
                 ) { viewing = $0 }
                 .padding(.top, first ? 10 : 2)
@@ -154,19 +154,19 @@ struct XenaConversationView: View {
         }
     }
 
-    /// 「Jev 判斷要找人」只標在連續幾句裡的第一句（客人一次傳好幾句時不重複）
-    private static func jevFlags(_ messages: [XenaConversationMessage]) -> Set<Int> {
-        var out: Set<Int> = []
-        var previousFlagged = false
-        for m in messages {
-            guard m.role == "user" else {
-                previousFlagged = false
-                continue
-            }
-            let flagged = m.jevHuman?.yes == true
-            if flagged, !previousFlagged { out.insert(m.id) }
-            previousFlagged = flagged
+    /// 「Jev 判斷要找人」標在客人連續幾句的最後一句下面（一組只標一次，機率取最高的），不把一組泡泡切開
+    private static func jevFlags(_ messages: [XenaConversationMessage]) -> [Int: Double] {
+        var out: [Int: Double] = [:]
+        var run: [XenaConversationMessage] = []
+        func close() {
+            let flagged = run.compactMap { $0.jevHuman }.filter { $0.yes }
+            if let last = run.last, let top = flagged.map { $0.confidence }.max() { out[last.id] = top }
+            run = []
         }
+        for m in messages {
+            if m.role == "user" { run.append(m) } else { close() }
+        }
+        close()
         return out
     }
 
@@ -555,8 +555,8 @@ private struct XenaChatRow: View {
     let message: XenaConversationMessage
     let first: Bool
     let last: Bool
-    /// 標出「Jev 判斷要找人」
-    let jevFlag: Bool
+    /// 這一組客人說的話 Jev 判斷要找人（機率）：標在組的最後一句下面
+    let jevFlag: Double?
     let site: String
     let siteURL: URL?
     let space: Namespace.ID
@@ -572,8 +572,8 @@ private struct XenaChatRow: View {
         VStack(alignment: .leading, spacing: 4) {
             VisitorContent(text: message.content, tail: last, space: space, open: open)
                 .contextMenu { menu }
-            if jevFlag, let jev = message.jevHuman {
-                Label("Jev 判斷要找人（\(Int((jev.confidence * 100).rounded()))%）", systemImage: "exclamationmark.bubble.fill")
+            if let jevFlag {
+                Label("Jev 判斷要找人（\(Int((jevFlag * 100).rounded()))%）", systemImage: "exclamationmark.bubble.fill")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(Theme.warningFG)
                     .padding(.leading, 8)
@@ -1174,11 +1174,8 @@ struct ChatEventRow: View {
             HStack(spacing: 5) {
                 Image(systemName: d.icon)
                     .font(.system(size: 10, weight: .semibold))
-                Text(d.text)
+                Text(message.at.map { "\(d.text)・\($0.clockText)" } ?? d.text)
                     .lineLimit(2)
-                if let at = message.at {
-                    Text("・\(at.clockText)")
-                }
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(Theme.muted)
