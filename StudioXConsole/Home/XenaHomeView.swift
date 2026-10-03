@@ -24,7 +24,8 @@ struct XenaHomeView: View {
                         StatusDeck()
                     }
                     VStack(alignment: .leading, spacing: sizeClass == .regular ? 72 : 48) {
-                        if model.push.permission == .notDetermined && !promptDismissed {
+                        // UI 截圖不放（模擬器每次都是還沒問過）
+                        if model.push.permission == .notDetermined && !promptDismissed && !DemoServer.screenshots {
                             NotificationPrompt(dismissed: $promptDismissed)
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }

@@ -142,6 +142,11 @@ jobs:
             limit 30 xcrun simctl status_bar "$dev" override --time "9:41" --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4 || true
             limit 180 xcrun simctl install "$dev" "$app" || true
             limit 30 xcrun simctl ui "$dev" appearance "$appearance" || true
+            if [ "$APPSTORE" = "yes" ]; then
+              # 剛開機的系統通知（例如「Ready for Apple Intelligence」）會蓋在畫面上方：先開著 App 等它跳完、收掉
+              limit 60 xcrun simctl launch "$dev" tw.studiox.console -demo >/dev/null || true
+              sleep 75
+            fi
             for scene in "${scenes[@]}"; do
               # 名稱|啟動參數|等幾秒（預設 8；talk 是 Xena 說到一半、home 是說完）
               IFS='|' read -r name args wait <<< "$scene"
