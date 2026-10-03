@@ -94,6 +94,12 @@ struct XenaHomeView: View {
                 parts.append(r.createdTotal > 0 ? "昨天\(site.name)有 \(r.createdTotal) 筆訂單、收款 \(ntd(cents: r.revenueCents))" : "昨天\(site.name)沒有新訂單")
             }
         }
+        // 有門市的店：今天門市（POS）到現在賣了多少
+        for site in model.sites {
+            if let pos = site.pos, pos.today.tickets > 0 {
+                parts.append("\(site.name)門市今天 \(pos.today.tickets) 單、\(ntd(cents: pos.today.revenueCents))")
+            }
+        }
         var now: [String] = []
         if !b.awaiting.isEmpty { now.append("\(b.awaiting.count) 位客人在等回覆") }
         let ship = b.toShip.values.reduce(0) { $0 + $1.count }

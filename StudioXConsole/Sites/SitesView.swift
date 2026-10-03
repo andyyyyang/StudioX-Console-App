@@ -276,6 +276,9 @@ struct SiteOverview: View {
             if site.hasTraffic {
                 traffic
             }
+            if let pos = site.pos {
+                storefront(pos)
+            }
             if site.hasOrders, let ops {
                 store(ops)
             }
@@ -325,6 +328,36 @@ struct SiteOverview: View {
             } else if loading {
                 SkeletonRows(rows: 2)
             }
+        }
+    }
+
+    /// 門市（StudioX POS）：今天的營業額、單數、客單價，和昨天比；現在開著的單、在線的收銀機、還沒上傳的發票
+    private func storefront(_ pos: SitePOSSummary) -> some View {
+        VStack(alignment: .leading, spacing: 28) {
+            SectionHead("Store, *today*")
+            StatGrid {
+                Stat(value: Double(pos.today.revenueCents) / 100, label: "門市營業額",
+                     format: { "NT$" + Int($0.rounded()).formatted() }, compact: { ntdShort(cents: Int(($0 * 100).rounded())) }, change: pos.change)
+                Stat(value: Double(pos.today.tickets), label: "單數")
+                Stat(value: Double(pos.today.avgTicketCents) / 100, label: "客單價", format: { "NT$" + Int($0.rounded()).formatted() })
+                Stat(value: Double(pos.openTickets), label: "進行中的單")
+            }
+            HStack(spacing: 18) {
+                HStack(spacing: 6) {
+                    if pos.devicesOnline > 0 { LiveDot() } else { Circle().fill(Theme.faint).frame(width: 7, height: 7) }
+                    Text(pos.devicesOnline > 0 ? "\(pos.devicesOnline) 台收銀機在線" : "收銀機都沒有在線")
+                }
+                Text("昨天 \(ntd(cents: pos.yesterday.revenueCents))・\(pos.yesterday.tickets) 單")
+                if pos.invoicePending > 0 {
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.warningFG).frame(width: 6, height: 6)
+                        Text("\(pos.invoicePending) 張發票還沒上傳")
+                    }
+                    .foregroundStyle(Theme.warningFG)
+                }
+            }
+            .textRole(.small)
+            .foregroundStyle(Theme.ink2)
         }
     }
 

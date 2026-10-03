@@ -54,6 +54,8 @@ struct SiteSummary: Identifiable {
     /// 他在這個網站能用的工具
     var tools: Set<String>
     var stats: SiteStatsSummary?
+    /// 門市 POS（開通了才有）：今天、昨天的門市營業額、開著的單、在線的收銀機
+    var pos: SitePOSSummary?
 
     init(_ json: JSONValue) {
         id = json["site"]?.string ?? ""
@@ -67,6 +69,7 @@ struct SiteSummary: Identifiable {
         iconFill = icon?["fill"]?.bool ?? false
         tools = Set((json["tools"]?.array ?? []).compactMap(\.string))
         stats = json["stats"].flatMap { $0.isNull ? nil : SiteStatsSummary($0) }
+        pos = json["pos"].flatMap { $0.isNull ? nil : SitePOSSummary($0) }
     }
 
     var host: String { url?.host() ?? id }
@@ -84,6 +87,43 @@ struct SiteSummary: Identifiable {
         guard src.hasPrefix("data:image/"), !src.hasPrefix("data:image/svg"), let comma = src.firstIndex(of: ",") else { return nil }
         guard let data = Data(base64Encoded: String(src[src.index(after: comma)...])) else { return nil }
         return UIImage(data: data)
+    }
+}
+
+/// 門市 POS 的今日摘要（/api/app/me 的 sites[].pos，console 向網站的 /api/pos/relay 拿；金額是分）
+struct SitePOSSummary {
+    struct Day {
+        var revenueCents: Int
+        var tickets: Int
+        var avgTicketCents: Int
+
+        init(_ json: JSONValue?) {
+            revenueCents = json?["revenue"]?.int ?? 0
+            tickets = json?["tickets"]?.int ?? 0
+            avgTicketCents = json?["avgTicket"]?.int ?? 0
+        }
+    }
+
+    var today: Day
+    var yesterday: Day
+    /// 現在開著的單（用餐中的桌、還沒結帳的外帶）
+    var openTickets: Int
+    var devicesOnline: Int
+    /// 還沒上傳財政部的發票（含失敗的）
+    var invoicePending: Int
+
+    init(_ json: JSONValue) {
+        today = Day(json["today"])
+        yesterday = Day(json["yesterday"])
+        openTickets = json["openTickets"]?.int ?? 0
+        devicesOnline = json["devicesOnline"]?.int ?? 0
+        invoicePending = json["invoicePending"]?.int ?? 0
+    }
+
+    /// 今天比昨天（%）；昨天沒有營業就不比
+    var change: Double? {
+        guard yesterday.revenueCents > 0 else { return nil }
+        return Double(today.revenueCents - yesterday.revenueCents) / Double(yesterday.revenueCents)
     }
 }
 

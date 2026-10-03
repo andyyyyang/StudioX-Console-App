@@ -205,6 +205,8 @@ private struct TodayCard: View {
         let live = model.sites.reduce(0) { $0 + ($1.stats?.live ?? 0) }
         let revenue = b.ops.values.reduce(0) { $0 + $1.revenueCents }
         let ship = b.toShip.values.reduce(0) { $0 + $1.count }
+        let storeSites = model.sites.compactMap(\.pos)
+        let storeToday = storeSites.reduce(0) { $0 + $1.today.revenueCents }
         CardFace {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -242,6 +244,10 @@ private struct TodayCard: View {
                 Spacer(minLength: 8)
                 HStack(alignment: .top, spacing: 10) {
                     DeckFigure(value: "\(live)", label: "在線", live: live > 0)
+                    // 有門市的店：今天門市賣了多少（POS 即時）
+                    if !storeSites.isEmpty {
+                        DeckFigure(value: ntdShort(cents: storeToday), label: "門市今天")
+                    }
                     if !model.orderSites.isEmpty {
                         DeckFigure(value: ntdShort(cents: revenue), label: "昨天收款")
                         DeckFigure(value: "\(ship)", label: "等出貨")
@@ -295,11 +301,25 @@ private struct SiteStatusCard: View {
                         .frame(height: 40)
                         .padding(.top, 6)
                 }
+                if let pos = site.pos {
+                    // 門市現在的樣子：幾張單開著、幾台收銀機在線
+                    HStack(spacing: 6) {
+                        if pos.devicesOnline > 0 { LiveDot() }
+                        Text("門市 \(pos.openTickets) 張單進行中・\(pos.devicesOnline) 台在線")
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.ink2)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 6)
+                }
                 Spacer(minLength: 6)
                 HStack(alignment: .top, spacing: 10) {
+                    if let pos = site.pos {
+                        DeckFigure(value: ntdShort(cents: pos.today.revenueCents), label: "門市今天")
+                    }
                     if let report {
-                        DeckFigure(value: "\(report.createdTotal)", label: "昨天訂單")
-                        DeckFigure(value: ntdShort(cents: report.revenueCents), label: "昨天收款")
+                        if site.pos == nil { DeckFigure(value: "\(report.createdTotal)", label: "昨天訂單") }
+                        DeckFigure(value: ntdShort(cents: report.revenueCents), label: site.pos == nil ? "昨天收款" : "網路昨天")
                     }
                     if site.hasOrders { DeckFigure(value: "\(ship)", label: "等出貨", highlight: ship > 0) }
                     if site.hasSupport { DeckFigure(value: "\(waiting)", label: "在等回覆", highlight: waiting > 0) }

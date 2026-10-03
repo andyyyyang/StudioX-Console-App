@@ -212,7 +212,8 @@ nonisolated enum DemoServer {
     {"user":{"id":"demo","name":"Andy","email":"demo@studiox.tw","staff":true},
      "sites":[
       {"site":"chenmai.studiox.tw","name":"晨麥手作","org":"晨麥手作","url":"https://chenmai.studiox.tw","adminUrl":"https://chenmai.studiox.tw/login?sso=studiox","level":"owner","levelLabel":"負責人","icon":null,"tools":\(shopTools),
-       "stats":{"live":12,"visitors":1843,"pageviews":6120,"change":0.18,"trend":[\(trend([210, 245, 232, 268, 301, 287, 300]))]}},
+       "stats":{"live":12,"visitors":1843,"pageviews":6120,"change":0.18,"trend":[\(trend([210, 245, 232, 268, 301, 287, 300]))]},
+       "pos":{"today":{"revenue":1864000,"tickets":46,"avgTicket":40522},"yesterday":{"revenue":2131000,"tickets":52,"avgTicket":40981},"openTickets":5,"devicesOnline":3,"invoicePending":0}},
       {"site":"studiox.tw","name":"StudioX.tw","org":"StudioX","url":"https://studiox.tw","adminUrl":"https://studiox.tw/login?sso=studiox","level":"owner","levelLabel":"負責人","icon":null,"tools":\(studioTools),
        "stats":{"live":3,"visitors":412,"pageviews":1380,"change":-0.04,"trend":[\(trend([62, 55, 71, 58, 60, 49, 57]))]}},
       {"site":"mubai.studiox.tw","name":"木白設計","org":"木白設計","url":"https://mubai.studiox.tw","adminUrl":"https://mubai.studiox.tw/login?sso=studiox","level":"owner","levelLabel":"負責人","icon":null,"tools":\(basicTools),
