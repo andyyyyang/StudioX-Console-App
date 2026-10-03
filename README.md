@@ -65,6 +65,21 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
 - 上架需要的都準備好了：`ITSAppUsesNonExemptEncryption = NO`（TestFlight 不會卡在出口合規）、隱私清單 `PrivacyInfo.xcprivacy`、
   沒有透明度的 App 圖示。TestFlight 和 App Store 的版本用正式環境的推播（App 自己判斷），console 的 APNs 金鑰兩種都能送。
 
+### App Store 上架（`.github/workflows/appstore.yml`、`ci/appstore.py`）
+
+提交訊息帶標籤就會跑（推到 main 或這個分支）：
+
+| 標籤 | 做什麼 |
+|---|---|
+| `[appstore-shots]` | 在 Mac 上用示範模式截 App Store 尺寸的截圖（6.9 吋 iPhone、13 吋 iPad），存到 `docs/appstore/raw/`；`[appstore-shots-ipad]` 只重拍 iPad |
+| `[appstore]` | 上傳這一版的上架資料：文字（`ci/appstore/metadata.json`）、分類、年齡分級、價格（免費）、上架地區（全部，中國大陸要 ICP 備案先不上）、宣傳圖、最新的 build、審核說明。不送審 |
+| `[appstore-submit]` | 同上，然後送審 |
+
+- 宣傳圖：`python3 ci/appstore/compose.py --fonts <Noto Sans CJK TC 的資料夾>` 把 `docs/appstore/raw/` 合成到 `docs/appstore/iphone69/`、`ipad13/`
+  （文字、版型、放大的地方在檔案開頭的 SLIDES）。示範資料是虛構的店家（晨麥手作、木白設計），不放真實客戶
+- 審核用示範模式：歡迎頁「先看看示範（不用登入）」；刪除帳號在設定最下面（App Store 5.1.1(v)，console 的 `DELETE /api/app/account`）
+- API 做不到、要在 App Store Connect 網頁上做的：App 隱私權問卷、審核聯絡人（`[appstore]` 的摘要會提醒還缺什麼）
+
 ## 功能
 
 | 分頁 | 內容 |
@@ -165,10 +180,13 @@ Web/
   welcome/     歡迎頁的打包（esbuild；logo3d.ts 複製自 studio_website）
   assets/      從後台原始碼產生的圖：icons.cjs（Heroicons）
 ci/asc.py      App Store Connect API（TestFlight 流程：App ID、這一次專用的憑證與描述檔、測試內容、內部測試）
+ci/appstore.py App Store 上架（上架資料、價格、地區、截圖、build、審核說明、送審）；ci/appstore/ 宣傳圖合成與上架文字
 ci_scripts/    Xcode Cloud 用的（測試內容）
 .github/workflows/
   ios.yml        每次推上來編一次（模擬器、不簽章）
   testflight.yml 推上來就出一版 TestFlight
+  ui-screenshots.yml  示範模式的 UI 截圖（[screenshots]、[appstore-shots]）
+  appstore.yml   App Store 上架、送審（[appstore]、[appstore-submit]）
 ```
 
 Swift 6、預設 `@MainActor`、`@Observable`、SwiftUI＋Liquid Glass、Swift Charts，沒有第三方套件。
