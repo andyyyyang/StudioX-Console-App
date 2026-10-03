@@ -368,8 +368,6 @@ final class AppModel {
         case orders(site: String)
         /// 收件匣的某個分段
         case inbox(String)
-        /// App 裡還沒有的頁面：在瀏覽器打開網站後台的那一頁（網站自己的登入）
-        case web(site: String, path: String)
         case home
     }
 
@@ -438,15 +436,6 @@ final class AppModel {
             inboxSegment = segment
             inboxPath = []
             tab = .inbox
-        case .web(let site, let path):
-            // 後台在 adminURL 的同一個網域（/login?sso=studiox 的那個）
-            if let admin = self.site(site)?.adminURL,
-               var c = URLComponents(url: admin, resolvingAgainstBaseURL: false),
-               let target = URLComponents(string: path) {
-                c.path = target.path
-                c.query = target.query
-                if let url = c.url { UIApplication.shared.open(url) }
-            }
         case .home:
             showXena = false
             showAccount = false
