@@ -554,12 +554,22 @@ struct SupportThreadView: View {
             .padding(.bottom, 18)
         }
         .scrollPosition($position)
-        .defaultScrollAnchor(.bottom)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await load() }
-        .onChange(of: detail?.messages.count ?? 0) {
-            withAnimation(Motion.ease) { position.scrollTo(edge: .bottom) }
+        .onChange(of: detail?.messages.count ?? 0) { old, _ in
+            Task {
+                await Task.yield()
+                if old == 0 {
+                    position.scrollTo(edge: .bottom)
+                } else {
+                    withAnimation(Motion.ease) { position.scrollTo(edge: .bottom) }
+                }
+            }
         }
+        .onAppear { model.openChats += 1 }
+        .onDisappear { model.openChats = max(0, model.openChats - 1) }
         .brandPage()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if detail != nil {

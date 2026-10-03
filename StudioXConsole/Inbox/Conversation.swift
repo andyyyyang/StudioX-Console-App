@@ -64,7 +64,9 @@ struct XenaConversationView: View {
             .padding(.bottom, 18)
         }
         .scrollPosition($position)
-        .defaultScrollAnchor(.bottom)
+        // 打開時在最新的一句；在最下面時內容變多（載入、照片撐開、新訊息）也貼著底部，捲上去看舊的就不動
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(atBottom ? .bottom : nil, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
         .onScrollGeometryChange(for: Bool.self) { g in
             g.contentOffset.y + g.containerSize.height - g.contentInsets.bottom >= g.contentSize.height - 120
@@ -93,13 +95,22 @@ struct XenaConversationView: View {
         }
         .onChange(of: detail?.messages.count ?? 0) { old, new in
             guard new > old else { return }
-            // 剛打開、在最下面、或是自己剛送出的：跟著捲到最新；捲在上面看舊的就不打斷，右下角提示
-            if old == 0 || atBottom || detail?.messages.last?.role == "staff" {
+            if old == 0 {
+                // 剛載入：等這一輪排版好再到最底（不要動畫）
+                Task {
+                    await Task.yield()
+                    position.scrollTo(edge: .bottom)
+                }
+            } else if atBottom || detail?.messages.last?.role == "staff" {
+                // 在最下面、或是自己剛送出的：跟著捲到最新
                 withAnimation(Motion.ease) { position.scrollTo(edge: .bottom) }
             } else {
+                // 捲在上面看舊的就不打斷，右下角提示
                 unseen += new - old
             }
         }
+        .onAppear { model.openChats += 1 }
+        .onDisappear { model.openChats = max(0, model.openChats - 1) }
         .fullScreenCover(item: $viewing) { MediaViewer(media: $0) }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             if replying { announceReply(result) } else { model.show("已更新") }

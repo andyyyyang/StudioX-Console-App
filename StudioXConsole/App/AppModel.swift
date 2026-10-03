@@ -98,6 +98,8 @@ final class AppModel {
     }
     /// 首頁狀況卡片打開的 sheet（今天的總覽，或一個網站）
     var deckSheet: DeckSheet?
+    /// 開著幾個對話畫面（客服對話、客服信）：開著時收起 tab bar 上面的 Xena，回覆框貼著畫面底部
+    var openChats = 0
     var toast: Toast?
     /// 觸覺回饋（RootView 的 sensoryFeedback 看這幾個數字）
     private(set) var successTick = 0

@@ -207,8 +207,8 @@ struct MainView: View {
             .accessibilityElement()
             .accessibilityLabel("StudioX")
         }
-        // tab bar 上面的 Xena：首頁本身就有會動的水滴，那一頁不重複出現
-        .tabViewBottomAccessory(isEnabled: model.tab != .xena) {
+        // tab bar 上面的 Xena：首頁本身就有會動的水滴，那一頁不重複出現；對話畫面（回覆框在底部）也收起來
+        .tabViewBottomAccessory(isEnabled: model.tab != .xena && (regular || model.openChats == 0)) {
             XenaAccessory()
         }
         .sheet(isPresented: $model.showXena) {
