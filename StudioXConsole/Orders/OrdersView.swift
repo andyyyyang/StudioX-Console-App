@@ -6,17 +6,17 @@ import SwiftUI
 struct OrdersView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var picked: String?
 
     var body: some View {
         if sizeClass == .regular {
-            NavigationSplitView {
-                OrdersList(picked: $picked)
+            NavigationSplitView(columnVisibility: .constant(.all)) {
+                OrdersList(picked: Bindable(model).ordersPicked)
                     .navigationSplitViewColumnWidth(min: 340, ideal: 400, max: 480)
+                    .splitListColumn()
             } detail: {
                 NavigationStack(path: Bindable(model).ordersPath) {
                     Group {
-                        if let picked, let site = model.ordersSite ?? model.orderSites.first?.id {
+                        if let picked = model.ordersPicked, let site = model.ordersSite ?? model.orderSites.first?.id {
                             OrderDetailView(site: site, orderID: picked)
                                 .id(picked)
                         } else {
@@ -34,6 +34,7 @@ struct OrdersView: View {
                 }
                 .brandSplitView()
             }
+            .navigationSplitViewStyle(.balanced)
         } else {
             NavigationStack(path: Bindable(model).ordersPath) {
                 OrdersList(picked: nil)
@@ -114,15 +115,9 @@ struct OrdersList: View {
         .navigationTitle("訂單")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if filter == .toShip && !orders.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(selecting ? "完成" : "選取") {
-                        withAnimation(Motion.ease) {
-                            selecting.toggle()
-                            selected = []
-                        }
-                    }
-                }
+            // iPad 的分欄沒有導覽列：「選取」放在大標旁邊
+            if picked == nil, canSelect {
+                ToolbarItem(placement: .topBarTrailing) { selectButton }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -173,7 +168,26 @@ struct OrdersList: View {
             } else if let site {
                 Eyebrow(site.name)
             }
-            Headline("*Orders*", role: .h1)
+            HStack(alignment: .firstTextBaseline) {
+                Headline("*Orders*", role: .h1)
+                Spacer(minLength: 12)
+                if picked != nil, canSelect {
+                    selectButton
+                        .buttonStyle(.brand(.ghost, size: .sm))
+                }
+            }
+        }
+    }
+
+    /// 等出貨的訂單可以一次選幾張、一起標出貨
+    private var canSelect: Bool { filter == .toShip && !orders.isEmpty }
+
+    private var selectButton: some View {
+        Button(selecting ? "完成" : "選取") {
+            withAnimation(Motion.ease) {
+                selecting.toggle()
+                selected = []
+            }
         }
     }
 

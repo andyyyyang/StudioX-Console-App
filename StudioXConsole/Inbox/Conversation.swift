@@ -79,8 +79,7 @@ struct XenaConversationView: View {
                     SkeletonRows(rows: 5)
                 }
             }
-            .frame(maxWidth: Metric.readable)
-            .pageWidth()
+            .pageWidth(Metric.readable)
             .padding(.top, 12)
             .padding(.bottom, 18)
         }
@@ -1666,15 +1665,9 @@ private struct ConversationIntro: View {
     let siteName: String
     let site: String
 
-    private var name: String { detail.who ?? (detail.channel == .line ? "LINE 好友" : "網站訪客") }
-
     var body: some View {
+        // 頭像和名字在上面的導覽列（這裡不再放一次）：只放從哪裡來、聊什麼、訂單、之前的對話
         VStack(spacing: 6) {
-            Avatar(name: name, imageURL: detail.picture, size: 58)
-                .padding(.bottom, 4)
-            Text(name)
-                .font(.brand(17, .semibold, relativeTo: .headline))
-                .foregroundStyle(Theme.ink)
             HStack(spacing: 6) {
                 if detail.visitorOnline {
                     LiveDot()
@@ -1800,6 +1793,7 @@ struct ChatComposer<Accessory: View>: View {
     let accessory: Accessory
 
     @FocusState private var focused: Bool
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(
         text: Binding<String>, placeholder: String, hint: String? = nil, hintWarning: Bool = false, sending: Bool = false,
@@ -1894,7 +1888,10 @@ struct ChatComposer<Accessory: View>: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
+        // 和上面的對話同一欄：iPad 上一樣寬、一樣置中，＋ 和泡泡的左緣對齊
+        .frame(maxWidth: Metric.readable)
+        .padding(.horizontal, sizeClass == .regular ? Metric.gutterWide : 12)
+        .frame(maxWidth: .infinity)
         .padding(.top, 8)
         .padding(.bottom, 10)
         .background(.bar)

@@ -119,6 +119,9 @@ final class AppModel {
 
     /// 收件匣只看哪一類（Jev 自動分的類別；nil＝全部。點通知打開收件匣時回到全部）
     var inboxTopic: String?
+    /// iPad：收件匣、訂單右邊打開的是哪一個（左邊清單標起來；通知、首頁點進來也是選這一個，不另外推一頁）
+    var inboxPicked: Route?
+    var ordersPicked: String?
 
     @ObservationIgnored let api: ConsoleAPI
     let xena: XenaSession
@@ -263,6 +266,8 @@ final class AppModel {
         sitesPath = []
         ordersPath = []
         inboxPath = []
+        inboxPicked = nil
+        ordersPicked = nil
         accountPath = []
         searchPath = []
         sitePaths = [:]
@@ -357,12 +362,24 @@ final class AppModel {
         showXena = false
         showAccount = false
         switch route {
-        case .order:
+        case .order(let site, let id):
             tab = .orders
-            ordersPath = [route]
+            if regular {
+                // iPad：在左邊的清單選起來、右邊打開（沒有多一個「返回」）
+                ordersSite = site
+                ordersPicked = id
+                ordersPath = []
+            } else {
+                ordersPath = [route]
+            }
         case .thread, .xenaConversation, .inquiry:
             tab = .inbox
-            inboxPath = [route]
+            if regular {
+                inboxPicked = route
+                inboxPath = []
+            } else {
+                inboxPath = [route]
+            }
         case .site(let id):
             if regular {
                 tab = .site(id)
@@ -452,6 +469,7 @@ final class AppModel {
             showAccount = false
             ordersSite = site
             ordersPath = []
+            ordersPicked = nil
             tab = orderSites.isEmpty ? .xena : .orders
         case .inbox:
             showXena = false

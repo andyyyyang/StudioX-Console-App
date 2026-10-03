@@ -437,6 +437,13 @@ extension View {
         containerBackground(Theme.page, for: .navigationSplitView)
     }
 
+    /// iPad 分欄的左欄：清單一直開著——上面的分頁列已經有側欄鈕，不再放第二個收合鈕。
+    /// hidesBar：欄裡已經有大標（Your inbox、Orders）時，導覽列整條拿掉，不再重複寫一次小標題
+    func splitListColumn(hidesBar: Bool = true) -> some View {
+        toolbar(removing: .sidebarToggle)
+            .toolbar(hidesBar ? .hidden : .automatic, for: .navigationBar)
+    }
+
     /// 頁面內容的左右留白與最大寬度（iPad 上置中、不貼滿）
     func pageWidth(_ max: CGFloat = Metric.page) -> some View {
         modifier(PageWidth(maxWidth: max))

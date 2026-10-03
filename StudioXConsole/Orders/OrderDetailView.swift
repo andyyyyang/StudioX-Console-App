@@ -296,7 +296,7 @@ struct OrderDetailView: View {
                         .buttonStyle(.row)
                 }
                 if let email = d.email, let mail = URL(string: "mailto:\(email)") {
-                    Button { openURL(mail) } label: { infoRow("Email", email, link: true) }
+                    Button { openURL(mail) } label: { infoRow("Email", email, link: true, oneLine: true) }
                         .buttonStyle(.row)
                 }
                 infoRow(d.shippingMethod, d.address)
@@ -399,7 +399,8 @@ struct OrderDetailView: View {
         }
     }
 
-    private func infoRow(_ label: String, _ text: String, link: Bool = false) -> some View {
+    /// oneLine：Email 這類不能斷行的（iPad 的窄欄放不下時先縮小一點，再不行中間省略，不會拆成三行）
+    private func infoRow(_ label: String, _ text: String, link: Bool = false, oneLine: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(label)
                 .textRole(.xs)
@@ -408,6 +409,9 @@ struct OrderDetailView: View {
             Text(text)
                 .textRole(.body)
                 .foregroundStyle(link ? Theme.accentText : Theme.ink)
+                .lineLimit(oneLine ? 1 : nil)
+                .minimumScaleFactor(oneLine ? 0.8 : 1)
+                .truncationMode(.middle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -11,17 +11,17 @@ import UIKit
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var picked: Route?
 
     var body: some View {
         if sizeClass == .regular {
-            NavigationSplitView {
-                InboxList(picked: $picked)
+            NavigationSplitView(columnVisibility: .constant(.all)) {
+                InboxList(picked: Bindable(model).inboxPicked)
                     .navigationSplitViewColumnWidth(min: 340, ideal: 400, max: 480)
+                    .splitListColumn()
             } detail: {
                 NavigationStack(path: Bindable(model).inboxPath) {
                     Group {
-                        if let picked {
+                        if let picked = model.inboxPicked {
                             RouteView(route: picked).id(picked)
                         } else {
                             VStack(alignment: .leading, spacing: 14) {
@@ -38,6 +38,7 @@ struct InboxView: View {
                 }
                 .brandSplitView()
             }
+            .navigationSplitViewStyle(.balanced)
         } else {
             NavigationStack(path: Bindable(model).inboxPath) {
                 InboxList(picked: nil)
@@ -547,8 +548,7 @@ struct SupportThreadView: View {
                     SkeletonRows(rows: 4)
                 }
             }
-            .frame(maxWidth: Metric.readable, alignment: .leading)
-            .pageWidth()
+            .pageWidth(Metric.readable)
             .padding(.top, 16)
             .padding(.bottom, 18)
         }
