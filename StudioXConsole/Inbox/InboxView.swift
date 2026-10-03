@@ -38,7 +38,6 @@ struct InboxView: View {
                 }
                 .brandSplitView()
             }
-            .navigationSplitViewStyle(.balanced)
         } else {
             NavigationStack(path: Bindable(model).inboxPath) {
                 InboxList(picked: nil)

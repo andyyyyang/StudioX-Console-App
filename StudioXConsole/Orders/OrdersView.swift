@@ -34,7 +34,6 @@ struct OrdersView: View {
                 }
                 .brandSplitView()
             }
-            .navigationSplitViewStyle(.balanced)
         } else {
             NavigationStack(path: Bindable(model).ordersPath) {
                 OrdersList(picked: nil)

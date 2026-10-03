@@ -299,10 +299,6 @@ struct WindowPaint: UIViewRepresentable {
         override func didMoveToWindow() {
             super.didMoveToWindow()
             window?.backgroundColor = Theme.pageUIColor
-            // UI 截圖（-demoLandscape YES）：iPad 轉成橫的，看分欄在橫向的樣子
-            if DemoServer.screenshots, UserDefaults.standard.bool(forKey: "demoLandscape") {
-                window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { _ in }
-            }
         }
     }
 }

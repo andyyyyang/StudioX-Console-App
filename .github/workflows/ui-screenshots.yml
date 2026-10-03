@@ -172,17 +172,10 @@ jobs:
           else
             shoot "$IPHONE" iphone dark
           fi
-          # iPad 另外截橫的（收件匣、訂單的分欄在橫向最寬，內容和輸入列的對齊看得最清楚）
-          landscape=(
-            "inbox-landscape|-demo -demoRoute line -demoLandscape YES|10"
-            "orders-landscape|-demo -demoRoute order -demoLandscape YES|10"
-          )
           if [ "$FULL" = "yes" ]; then
             shoot "$IPHONE" iphone light
-            scenes+=("${landscape[@]}")
             shoot "$IPAD" ipad dark
           elif [ "$IPADSHOTS" = "yes" ]; then
-            scenes+=("${landscape[@]}")
             shoot "$IPAD" ipad dark
           fi
           ls shots | wc -l
