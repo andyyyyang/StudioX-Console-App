@@ -66,7 +66,7 @@ struct NotificationSettingsView: View {
             case .unknown:
                 LoadingRow()
             case .notDetermined:
-                statusLine("還沒打開通知", tone: .warning, detail: "打開之後，客人在等、有事要你決定時會跳出來。")
+                statusLine("還沒打開通知", tone: .warning, detail: "打開之後，客人在等、有事要你處理時會跳出來。")
                 Button("打開通知") { Task { await push.requestPermission() } }
                     .buttonStyle(.brand(.accent, size: .lg, fullWidth: true))
             case .denied:

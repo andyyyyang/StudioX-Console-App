@@ -51,6 +51,7 @@ nonisolated enum DemoServer {
         case "/api/app/devices": body = ["configured": false, "device": .null]
         case "/api/app/notifications": body = ["supported": false]
         case "/api/app/account": body = ["ok": true, "demo": true]
+        case "/api/app/decisions": body = request.httpMethod == "POST" ? ["ok": true] : parse(decisions)
         default:
             status = 404
             body = ["error": "not_found", "message": "示範模式沒有這個資料"]
@@ -59,6 +60,25 @@ nonisolated enum DemoServer {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["content-type": "application/json"])!
         return (data, response)
     }
+
+    // MARK: 等你決定（console 看數據找到的優化）
+
+    private static let decisions = #"""
+    {"decisions":[
+     {"id":"chenmai.studiox.tw:checkout","site":"chenmai.studiox.tw","kind":"checkout","icon":"shopping-bag",
+      "title":"開始結帳的人，大多沒有送出訂單","detail":"過去 28 天有 46 位開始結帳，只有 15 位送出訂單（33%）。",
+      "impact":"結帳這一步每多留住一位就是多一筆訂單，平均一筆 NT$1,280。",
+      "prompt":"晨麥手作過去 28 天有 46 位開始結帳、只有 15 位送出訂單。請幫我找出結帳時最可能讓人放棄的地方，列出最可能的原因和改法，我決定要改哪些。"},
+     {"id":"chenmai.studiox.tw:seo-page:/products/egg-roll","site":"chenmai.studiox.tw","kind":"seo-page","icon":"globe-alt",
+      "title":"/products/egg-roll 在 Google 常出現，但很少人點進來","detail":"過去 28 天在 Google 出現 4,210 次、平均第 5.8 名，只有 0.7% 的人點進來（這個名次一般有 4% 左右）。",
+      "impact":"把搜尋結果上的標題和描述改得更吸引人，每個月大約可以多 70 次點擊。",
+      "prompt":"幫我優化晨麥手作的頁面 /products/egg-roll 在 Google 搜尋結果上的標題和描述。先讀這一頁現在的內容，給我 2～3 組新的標題和描述，我選好再幫我改。"},
+     {"id":"mubai.studiox.tw:seo-query:室內設計 費用","site":"mubai.studiox.tw","kind":"seo-query","icon":"magnifying-glass",
+      "title":"很多人搜「室內設計 費用」，網站排在第 8 名左右","detail":"過去 28 天這個搜尋讓網站出現 1,320 次，只有 9 次點進來（0.7%）。擠進前三名，點的人會多很多。",
+      "impact":"把相關的內容寫得更完整、標題更貼近這個字，每個月可能多 55 次點擊。",
+      "prompt":"木白設計在 Google 搜尋「室內設計 費用」時排在第 8 名左右、點閱率很低。請先查是哪一頁在這個搜尋上出現，再給我方案，我決定之後再做。"}
+    ]}
+    """#
 
     // MARK: 和 Xena 的對話（UI 截圖：交代她做事、等你確認）
 

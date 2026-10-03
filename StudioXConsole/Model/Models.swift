@@ -878,3 +878,41 @@ struct Proposal: Identifiable {
     var ownerTitle: String?
     var ownerDetail: String?
 }
+
+// MARK: - 等你決定（console 看數據找到的優化，/api/app/decisions）
+
+/// 等你決定的一件事：StudioX 看網站的數據找到、做了會更好的優化（不是出貨、回覆這種本來就要做的事）。
+/// 「交給 Xena」就把 prompt 交給她：她先查、給方案，真的要改時照樣要你確認。
+struct Decision: Identifiable, Hashable {
+    enum Action: String {
+        /// 交給 Xena 了（30 天內不再出現）
+        case accept
+        /// 不用了（90 天）
+        case dismiss
+        /// 之後再說（7 天）
+        case later
+    }
+
+    let id: String
+    var site: String
+    var icon: String
+    var title: String
+    /// 看到了什麼（附數字）
+    var detail: String
+    /// 做了大概會怎樣
+    var impact: String
+    /// 交代 Xena 的話
+    var prompt: String
+
+    init?(_ json: JSONValue) {
+        guard let id = json["id"]?.string, let site = json["site"]?.string, let title = json["title"]?.string, let prompt = json["prompt"]?.string else { return nil }
+        self.id = id
+        self.site = site
+        icon = json["icon"]?.string ?? "light-bulb"
+        self.title = title
+        detail = json["detail"]?.string ?? ""
+        impact = json["impact"]?.string ?? ""
+        self.prompt = prompt
+    }
+}
+

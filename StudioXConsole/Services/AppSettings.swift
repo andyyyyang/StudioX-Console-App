@@ -137,12 +137,13 @@ final class AppSettings {
 
     /// 首頁可以收起來的區塊
     enum HomeSection: String, CaseIterable, Identifiable {
-        case cards, attention
+        case cards, attention, decisions
         var id: Self { self }
         var label: String {
             switch self {
             case .cards: "狀況卡片"
-            case .attention: "需要你決定的事"
+            case .attention: "要你處理的事"
+            case .decisions: "等你決定的優化"
             }
         }
     }

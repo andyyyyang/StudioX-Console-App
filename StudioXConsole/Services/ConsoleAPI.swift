@@ -420,6 +420,22 @@ final class ConsoleAPI {
         return NotificationPrefs(try appReply(data, http, fallback: "拿不到通知設定"))
     }
 
+    // MARK: 等你決定（/api/app/decisions）
+
+    /// console 看各網站的數據找到、值得做的優化。console 還沒更新到有這個（404）就是沒有
+    func decisions() async throws -> [Decision] {
+        let (data, http) = try await send { try appRequest("api/app/decisions") }
+        if http.statusCode == 404 { return [] }
+        return (try appReply(data, http, fallback: "拿不到建議")["decisions"]?.array ?? []).compactMap(Decision.init)
+    }
+
+    /// 交給 Xena 了／不用了／之後再說：那一則一段時間內不再出現（跟著帳號走）
+    func decide(_ id: String, action: Decision.Action) async throws {
+        let payload: JSONValue = ["id": .string(id), "action": .string(action.rawValue)]
+        let (data, http) = try await send { try appRequest("api/app/decisions", method: "POST", body: payload) }
+        _ = try appReply(data, http, fallback: "沒有存起來")
+    }
+
     // MARK: Xena（/api/copilot）
 
     private func copilotRequest(_ path: String, method: String = "GET", body: JSONValue? = nil) throws -> URLRequest {

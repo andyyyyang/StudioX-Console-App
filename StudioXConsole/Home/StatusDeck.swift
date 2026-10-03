@@ -63,7 +63,7 @@ struct StatusDeck: View {
     }
 }
 
-/// 卡片打開的 sheet：今天（總覽、要你決定的事、各網站）或一個網站（和「網站」分頁同一頁，裡面可以再往下點）。
+/// 卡片打開的 sheet：今天（總覽、要處理的事、等你決定的優化、各網站）或一個網站（和「網站」分頁同一頁，裡面可以再往下點）。
 /// 往下滑或按 ✕ 回到首頁；要去別的分頁（收件匣、訂單、問 Xena）會先收起來再過去
 private struct DeckSheetView: View {
     let sheet: DeckSheet
@@ -96,7 +96,7 @@ private struct DeckSheetView: View {
     }
 }
 
-/// 「今天」：要你決定幾件事、四個數字、要你決定的事（點了直接去處理）、各網站（點了在 sheet 裡往下看）
+/// 「今天」：要處理幾件事、四個數字、要處理的事（點了直接去處理）、等你決定的優化、各網站（點了在 sheet 裡往下看）
 private struct TodaySheet: View {
     @Environment(AppModel.self) private var model
 
@@ -120,10 +120,15 @@ private struct TodaySheet: View {
                             Text("\(count)")
                                 .textRole(.stat)
                                 .foregroundStyle(Theme.accent)
-                            Text("件事等你決定")
+                            Text("件事要處理")
                                 .textRole(.h3)
                                 .foregroundStyle(Theme.ink)
                         }
+                    }
+                    if b.updatedAt != nil && !b.decisions.isEmpty {
+                        Text("另外有 \(b.decisions.count) 個優化等你決定")
+                            .textRole(.small)
+                            .foregroundStyle(Theme.ink2)
                     }
                     HStack(spacing: 0) {
                         DeckFigure(value: "\(live)", label: "在線", live: live > 0)
@@ -137,6 +142,7 @@ private struct TodaySheet: View {
                     }
                 }
                 AttentionList()
+                DecisionList()
                 if !model.sites.isEmpty {
                     VStack(alignment: .leading, spacing: 20) {
                         SectionHead("Your *sites*")
@@ -180,7 +186,7 @@ private struct CardFace<Content: View>: View {
     }
 }
 
-/// 第一張：今天要你決定幾件事、現在多少人在線、昨天收了多少、幾筆等出貨
+/// 第一張：今天要處理幾件事（還有幾個優化等你決定）、現在多少人在線、昨天收了多少、幾筆等出貨
 private struct TodayCard: View {
     @Environment(AppModel.self) private var model
 
@@ -213,10 +219,16 @@ private struct TodayCard: View {
                         Text("\(count)")
                             .textRole(.stat)
                             .foregroundStyle(Theme.accent)
-                        Text("件事等你決定")
+                        Text("件事要處理")
                             .textRole(.h4)
                             .foregroundStyle(Theme.ink)
                     }
+                }
+                if b.updatedAt != nil && !b.decisions.isEmpty {
+                    Text("另有 \(b.decisions.count) 個優化等你決定")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                        .padding(.top, 4)
                 }
                 Spacer(minLength: 8)
                 HStack(spacing: 0) {

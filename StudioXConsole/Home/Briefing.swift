@@ -19,6 +19,8 @@ final class Briefing {
     private(set) var inquiries: [InquirySummary] = []
     /// 寄到網站信箱、還沒分的信
     private(set) var mail: [MailSummary] = []
+    /// 等你決定：console 看數據找到的優化（要處理的事是 attention）
+    private(set) var decisions: [Decision] = []
     /// 拿不到資料的網站（網站代號 → 原因）
     private(set) var failures: [String: String] = [:]
     private(set) var loading = false
@@ -43,6 +45,7 @@ final class Briefing {
         live = []
         inquiries = []
         mail = []
+        decisions = []
         failures = [:]
         updatedAt = nil
     }
@@ -77,6 +80,12 @@ final class Briefing {
     private func collect(_ sites: [SiteSummary]) async {
         plan = Dictionary(sites.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         collected = [:]
+        // 等你決定：console 第一次看一個網站的數據要幾秒，不等它（拿到了再出現）；拿不到就留著上一次的
+        Task { [api] in
+            if let found = try? await api.decisions() {
+                withAnimation(Motion.ease) { self.decisions = found }
+            }
+        }
         // 一個網站一個請求序列；網站之間同時跑（結果各自寫回這裡）
         let ids = sites.map(\.id)
         await withTaskGroup(of: Void.self) { group in
@@ -126,7 +135,13 @@ final class Briefing {
         collected[id] = r
     }
 
-    /// 需要你看一下的事（越急的越前面）
+    /// 交給 Xena 了／不用了／之後再說：先從清單拿掉，再告訴 console（失敗也不放回來，下次重新整理會照 console 的）
+    func decide(_ decision: Decision, _ action: Decision.Action) {
+        withAnimation(Motion.ease) { decisions.removeAll { $0.id == decision.id } }
+        Task { [api] in try? await api.decide(decision.id, action: action) }
+    }
+
+    /// 要你處理的事（越急的越前面）：出貨、回覆客人、異常…本來就得做的。可做可不做的優化在 decisions
     func attention(sites: [SiteSummary]) -> [AttentionItem] {
         var out: [AttentionItem] = []
         let name = { (id: String) in sites.first { $0.id == id }?.name ?? id }

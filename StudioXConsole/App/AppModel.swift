@@ -490,7 +490,7 @@ final class AppModel {
         }
     }
 
-    /// 首頁「需要你決定」的一件事：直接去處理（從卡片的 sheet 按的，先收起來）
+    /// 首頁「要處理」的一件事：直接去處理（從卡片的 sheet 按的，先收起來）
     func handle(_ action: AttentionItem.Action) {
         if deckSheet != nil {
             afterClosingDeck { $0.handle(action) }
@@ -505,6 +505,23 @@ final class AppModel {
             tab = .orders
         case .askXena(let prompt):
             askXena(prompt)
+        }
+    }
+
+    /// 等你決定的一件事：交給 Xena（帶著交代，她先查、給方案）、不用了、之後再說
+    func decide(_ decision: Decision, _ action: Decision.Action) {
+        briefing.decide(decision, action)
+        switch action {
+        case .accept:
+            if deckSheet != nil {
+                afterClosingDeck { $0.askXena(decision.prompt) }
+            } else {
+                askXena(decision.prompt)
+            }
+        case .later:
+            show("好，一週後再提醒你", tone: .neutral)
+        case .dismiss:
+            show("好，這件不做", tone: .neutral)
         }
     }
 

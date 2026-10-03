@@ -4,7 +4,8 @@ import SwiftUI
 ///   - Hero：studiox.tw 的 Xena 介紹頁開場——置中的 3D 水珠、背後一團紫粉的光；
 ///     她在跟你說話：招呼一行一行升起，接著一個字一個字說今天的狀況，水珠跟著每個字鼓起來、標點換氣；「問問Xena」
 ///   - 現在的狀況（StatusDeck）：卡片左右滑——今天的總覽、每個網站一張
-///   - Needs you：客人在等回覆、已付款等出貨、營運異常、轉給專人的對話、新的專案詢問（點了直接去處理）
+///   - Needs you（要處理）：客人在等回覆、已付款等出貨、營運異常、轉給專人的對話、新的專案詢問（點了直接去處理）
+///   - Your call（等你決定）：StudioX 看數據找到、做了會更好的優化，要不要做由你決定（交給 Xena／之後再說／不用）
 struct XenaHomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -30,6 +31,7 @@ struct XenaHomeView: View {
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                         if settings.shows(.attention) { attention }
+                        if settings.shows(.decisions) { DecisionList() }
                     }
                     .pageWidth()
                     .padding(.top, sizeClass == .regular ? 56 : 40)
@@ -62,9 +64,11 @@ struct XenaHomeView: View {
         let name = Self.callName(model.me?.name ?? "")
         let first = name.isEmpty ? hello : "\(hello)，\(name)"
         guard b.updatedAt != nil else { return (first, "我在*看你的網站*") }
-        let count = b.attention(sites: model.sites).count
-        if count == 0 { return (first, "現在*都處理好了*") }
-        return (first, "*\(count) 件事*等你決定")
+        // 要處理（出貨、回覆）優先；沒有的話才說有幾個優化等你決定
+        let tasks = b.attention(sites: model.sites).count
+        if tasks > 0 { return (first, "*\(tasks) 件事*要處理") }
+        if !b.decisions.isEmpty { return (first, "*\(b.decisions.count) 個優化*等你決定") }
+        return (first, "現在*都處理好了*")
     }
 
     /// 怎麼叫你：中文叫名字（黃韋豪 → 韋豪）；英文取第一個字、去掉數字（andy111yang111 → Andy）；email 只看 @ 前面
@@ -97,7 +101,14 @@ struct XenaHomeView: View {
         if !b.handoffs.isEmpty { now.append("\(b.handoffs.count) 段對話轉給專人") }
         if !b.inquiries.isEmpty { now.append("\(b.inquiries.count) 筆新的專案詢問") }
         var text = parts.isEmpty ? "" : parts.joined(separator: "；") + "。"
-        text += now.isEmpty ? "其他都很順，有事我會先跟你說。" : "現在" + now.joined(separator: "、") + "。"
+        if now.isEmpty {
+            text += b.decisions.isEmpty ? "其他都很順，有事我會先跟你說。" : "現在沒有急事。"
+        } else {
+            text += "現在" + now.joined(separator: "、") + "。"
+        }
+        if !b.decisions.isEmpty {
+            text += "我看了數據，有 \(b.decisions.count) 個地方做了會更好，要不要做你決定。"
+        }
         return text
     }
 
@@ -239,7 +250,7 @@ struct XenaHomeView: View {
     }
 }
 
-/// Needs you：客人在等回覆、已付款等出貨、營運異常…（點了直接去處理）。首頁和「今天」卡片的 sheet 共用
+/// Needs you（要處理）：客人在等回覆、已付款等出貨、營運異常…本來就得做的事（點了直接去處理）。首頁和「今天」卡片的 sheet 共用
 struct AttentionList: View {
     @Environment(AppModel.self) private var model
 
@@ -253,7 +264,7 @@ struct AttentionList: View {
             }
             if items.isEmpty {
                 if model.briefing.updatedAt != nil {
-                    EmptyState(title: "都處理好了", message: "沒有要你決定的事，我繼續看著。")
+                    EmptyState(title: "都處理好了", message: "沒有要你處理的事，我繼續看著。")
                 } else {
                     SkeletonRows(rows: 3)
                 }
@@ -375,3 +386,86 @@ private struct NotificationPrompt: View {
         .reveal()
     }
 }
+
+/// Your call（等你決定）：StudioX 看各網站的數據找到、做了會更好的優化（可做可不做）。
+/// 交給 Xena：她帶著這段交代去查、給方案，真的要改時照樣要你確認。首頁和「今天」卡片的 sheet 共用；沒有就不出現
+struct DecisionList: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let items = model.briefing.decisions
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 24) {
+                SectionHead("Your *call*", aside: "我看了各網站的數據，這些做了會更好。要不要做，你決定。")
+                VStack(spacing: 14) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, decision in
+                        DecisionCard(decision: decision, site: model.site(decision.site))
+                            .reveal(index)
+                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 一個優化：哪個網站、看到了什麼、做了會怎樣；交給 Xena／之後再說／不用
+private struct DecisionCard: View {
+    let decision: Decision
+    let site: SiteSummary?
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                HeroIcon(decision.icon, size: 16)
+                    .foregroundStyle(Theme.accentText)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.accentSoft, in: .rect(cornerRadius: Metric.radiusSm))
+                if let site {
+                    SiteIconView(site: site, size: 16)
+                    Text(site.name)
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(decision.title)
+                    .textRole(.h4)
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(decision.detail)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !decision.impact.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Rectangle()
+                        .fill(Theme.accent)
+                        .frame(width: 6, height: 6)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                    Text(decision.impact)
+                        .textRole(.small)
+                        .foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: 8) {
+                Button { model.decide(decision, .accept) } label: { Text("交給 Xena") }
+                    .buttonStyle(.brand(.primary, size: .sm, arrow: true))
+                Button { model.decide(decision, .later) } label: { Text("之後再說") }
+                    .buttonStyle(.brand(.ghost, size: .sm))
+                Spacer(minLength: 0)
+                Button { model.decide(decision, .dismiss) } label: { Text("不用") }
+                    .buttonStyle(.brand(.quiet, size: .sm))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panel()
+        .accessibilityElement(children: .contain)
+    }
+}
+

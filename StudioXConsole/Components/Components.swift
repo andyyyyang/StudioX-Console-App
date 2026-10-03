@@ -483,7 +483,7 @@ struct RuledList<Content: View>: View {
 // MARK: - 區塊標題（SectionHead.astro）
 
 /// 區塊標題：英文大字＋襯線強調詞，旁邊一句中文說明、右邊一個動作。
-/// `SectionHead("Needs *you*", aside: "需要你決定的事")`
+/// `SectionHead("Needs *you*", aside: "要你處理的事")`
 struct SectionHead<Action: View>: View {
     let title: String
     var aside: String?
