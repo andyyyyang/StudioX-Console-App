@@ -252,17 +252,29 @@ nonisolated enum DemoServer {
     ]}
     """ }
 
+    /// LINE 上的一位客人：前天問禮盒（Xena 帶她看商品、專人給了優惠卡片），今天收到時盒子壓扁了（Jev 判斷要找人、她也傳了語音）
     private static var lineConversation: String { """
     {"id":"yc1","status":"waiting","channel":"line","line":{"name":"小雯","following":true},"member":{"name":"小雯"},
-     "handoff":{"reason":"客人說收到時包裝破損"},"replyGoesTo":"回覆會從官方帳號傳到客人的 LINE（署名「真人客服」）",
+     "startedAt":"\(ago(hours: 50))","tagLabels":["商品詢問","優惠","收貨問題"],
+     "orders":[{"id":"o1","orderNumber":"CM-24100607","statusLabel":"已送達","totalLabel":"NT$1,134","itemSummary":"原味蛋捲禮盒 × 3"}],
+     "handoff":{"at":"\(ago(hours: 0.3))","reason":"客人說蛋捲禮盒收到時盒子壓扁、有兩條碎掉，想換一盒"},
+     "replyGoesTo":"回覆會從官方帳號照原樣傳到客人的 LINE",
      "messages":[
       {"role":"user","content":"請問蛋捲禮盒可以放多久？想寄給台北的朋友","at":"\(ago(hours: 50))","tag":"商品詢問","jev":{"human":false,"confidence":0.02}},
-      {"role":"assistant","content":"原味蛋捲禮盒常溫可以放 **30 天**，開封後建議一週內吃完。寄台北隔天就到，盒子附提袋，送禮很方便。","at":"\(ago(hours: 50))"},
-      {"role":"user","content":"我的訂單到哪了？","at":"\(ago(hours: 26))","tag":"訂單查詢","jev":{"human":false,"confidence":0.04}},
-      {"role":"assistant","content":"你的訂單 **CM-24100607** 昨天已經出貨，黑貓單號 9012-3456-7890，預計今天送達。","at":"\(ago(hours: 26))"},
-      {"role":"user","content":"蛋捲禮盒收到的時候盒子壓扁了","at":"\(ago(hours: 0.25))","tag":"收貨問題","jev":{"human":true,"confidence":0.93}},
-      {"role":"assistant","content":"真的很抱歉！我已經請專人來處理，方便的話可以先拍一張照片傳給我們。","at":"\(ago(hours: 0.24))"},
-      {"role":"event","content":"已經通知專人，專人會在這裡回覆你。","at":"\(ago(hours: 0.24))","event":"handoff"}
+      {"role":"assistant","content":"原味蛋捲禮盒常溫可以放 **30 天**，開封後建議一週內吃完。寄台北隔天就到，盒子附提袋，送禮很方便。","at":"\(ago(hours: 50))","navigate":{"path":"/products/egg-roll-gift","title":"原味蛋捲禮盒"}},
+      {"role":"user","content":"訂 3 盒有優惠嗎？","at":"\(ago(hours: 49.9))","tag":"優惠","jev":{"human":true,"confidence":0.71}},
+      {"role":"assistant","content":"我請專人幫你看看，稍等一下喔。","at":"\(ago(hours: 49.9))"},
+      {"role":"event","content":"已經通知專人，專人會在這裡回覆你。","at":"\(ago(hours: 49.9))","event":"handoff"},
+      {"role":"event","content":"Andy 接手了這段對話，接下來由我在這裡回覆你。","at":"\(ago(hours: 49.6))","event":"takeover","author":"Andy"},
+      {"role":"staff","content":"小雯你好！3 盒以上可以用這張 9 折券，結帳時輸入就好 🙌","at":"\(ago(hours: 49.6))","author":"Andy"},
+      {"role":"staff","content":"［卡片］蛋捲禮盒 3 盒 9 折","at":"\(ago(hours: 49.6))","author":"Andy",
+       "card":{"title":"蛋捲禮盒 3 盒 9 折","body":"中秋前下單，3 盒以上結帳輸入優惠碼就打 9 折，寄台北隔天到。","couponCode":"MOON10","buttonLabel":"去訂購","url":"https://chenmai.studiox.tw/products/egg-roll-gift"}},
+      {"role":"user","content":"太好了，謝謝！","at":"\(ago(hours: 49.5))","tag":"閒聊","jev":{"human":false,"confidence":0}},
+      {"role":"event","content":"這段對話已經結束。還有問題的話，直接再問就好。","at":"\(ago(hours: 49.4))","event":"closed"},
+      {"role":"user","content":"蛋捲禮盒收到的時候盒子壓扁了","at":"\(ago(hours: 0.32))","tag":"收貨問題","jev":{"human":true,"confidence":0.93}},
+      {"role":"user","content":"[語音 6 秒] https://chenmai.studiox.tw/api/line/media/demo-voice?s=demo\\n（語音內容：裡面有兩條碎掉了，可以換一盒嗎？）","at":"\(ago(hours: 0.31))","tag":"收貨問題","jev":{"human":true,"confidence":0.9}},
+      {"role":"assistant","content":"真的很抱歉讓你收到壓壞的禮盒！我已經請專人來處理，方便的話可以拍一張照片傳給我們。","at":"\(ago(hours: 0.3))"},
+      {"role":"event","content":"已經通知專人，專人會在這裡回覆你。","at":"\(ago(hours: 0.3))","event":"handoff"}
      ]}
     """ }
 

@@ -508,65 +508,95 @@ struct InquiryView: View {
     }
 }
 
-/// 一封客服信：來回的訊息、這位客人的訂單；回信（寄給客人）與結案都先出網站的確認
+/// 一封客服信：來回的訊息（和 Xena 對話同一套泡泡：客人在左、我們在右，跨天放日期）、這位客人的訂單；
+/// 回信（寄給客人）按送出就寄，結案先出網站的確認
 struct SupportThreadView: View {
     let site: String
     let threadID: String
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var detail: SupportThreadDetail?
     @State private var error: String?
     @State private var draft = ""
     @State private var closeAfter = false
     @State private var proposal: Proposal?
     @State private var working = false
-    @FocusState private var focused: Bool
+    @State private var position = ScrollPosition(edge: .bottom)
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if let d = detail {
-                        summary(d)
-                        ForEach(d.messages) { m in
-                            MessageBubble(message: m).id(m.id)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let d = detail {
+                    summary(d)
+                    ForEach(Array(d.messages.enumerated()), id: \.element.id) { i, m in
+                        let previous = i > 0 ? d.messages[i - 1] : nil
+                        if let at = m.at, previous?.at.map({ Calendar.taipei.isDate($0, inSameDayAs: at) }) != true {
+                            ChatDayDivider(date: at)
+                                .padding(.top, 22)
+                                .padding(.bottom, 4)
                         }
-                        if !d.orders.isEmpty { orders(d) }
-                    } else if let error {
-                        ErrorNote(message: error) { Task { await load() } }
-                    } else {
-                        SkeletonRows(rows: 4)
+                        let first = previous == nil || previous?.fromCustomer != m.fromCustomer || previous?.author != m.author
+                        MessageBubble(message: m, first: first)
+                            .padding(.top, first ? 14 : 3)
                     }
+                    if !d.orders.isEmpty { orders(d) }
+                } else if let error {
+                    ErrorNote(message: error) { Task { await load() } }
+                } else {
+                    SkeletonRows(rows: 4)
                 }
-                .frame(maxWidth: Metric.readable, alignment: .leading)
-                .pageWidth()
-                .padding(.top, 16)
-                .padding(.bottom, 16)
             }
-            .defaultScrollAnchor(.bottom)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: detail?.messages.count ?? 0) {
-                if let last = detail?.messages.last?.id { proxy.scrollTo(last, anchor: .bottom) }
-            }
+            .frame(maxWidth: Metric.readable, alignment: .leading)
+            .pageWidth()
+            .padding(.top, 16)
+            .padding(.bottom, 18)
+        }
+        .scrollPosition($position)
+        .defaultScrollAnchor(.bottom)
+        .scrollDismissesKeyboard(.interactively)
+        .refreshable { await load() }
+        .onChange(of: detail?.messages.count ?? 0) {
+            withAnimation(Motion.ease) { position.scrollTo(edge: .bottom) }
         }
         .brandPage()
-        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if detail != nil {
+                ChatComposer(
+                    text: $draft,
+                    placeholder: "回覆客人…",
+                    hint: detail.map { "寄到 \($0.contactEmail)" },
+                    sending: working,
+                    draftWithXena: askXenaForDraft,
+                    send: send
+                ) {
+                    if !draft.isEmpty {
+                        Toggle(isOn: $closeAfter) {
+                            Text("寄出後結案").textRole(.xs).foregroundStyle(Theme.muted)
+                        }
+                        .toggleStyle(.switch)
+                        .tint(Theme.primary)
+                        .padding(.horizontal, 4)
+                    }
+                }
+            }
+        }
+        // 聊天畫面：手機上收起底部的分頁列，留給回覆
+        .toolbar(sizeClass == .regular ? .automatic : .hidden, for: .tabBar)
         .navigationTitle(detail?.summary.customer ?? "客服信")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("請 Xena 擬回覆") {
-                        model.askXena("幫我擬一封回覆給\(model.site(site)?.name ?? site)的客服信「\(detail?.summary.subject ?? "")」（\(threadID)）")
-                    }
+                    Button("請 Xena 擬回覆", systemImage: "sparkles") { askXenaForDraft() }
                     if detail?.summary.status != "closed" {
-                        Button("結案") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "closed") } } }
+                        Button("結案", systemImage: "checkmark.circle") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "closed") } } }
                     } else {
-                        Button("重新打開") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "open") } } }
+                        Button("重新打開", systemImage: "arrow.uturn.backward.circle") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "open") } } }
                     }
                     if let url = detail?.adminURL {
-                        Button("在後台打開") { openURL(url) }
+                        Button("在後台打開", systemImage: "arrow.up.right.square") { openURL(url) }
                     }
                 } label: { HeroIcon("ellipsis-horizontal") }
             }
@@ -581,6 +611,16 @@ struct SupportThreadView: View {
         }
     }
 
+    private func askXenaForDraft() {
+        model.askXena("幫我擬一封回覆給\(model.site(site)?.name ?? site)的客服信「\(detail?.summary.subject ?? "")」（\(threadID)）")
+    }
+
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !working else { return }
+        Task { await propose(reply: true) { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
+    }
+
     /// 寫入完成：回覆有沒有寄出（信沒寄出要讓專人知道）
     private func announce(_ result: JSONValue) {
         let sent = result["sent"]?.array.first
@@ -589,7 +629,10 @@ struct SupportThreadView: View {
         } else {
             model.show(sent != nil ? "已寄出回覆" : "已更新")
         }
-        if sent != nil { draft = "" }
+        if sent != nil {
+            draft = ""
+            closeAfter = false
+        }
     }
 
     private func load() async {
@@ -683,502 +726,59 @@ struct SupportThreadView: View {
                 }
             }
         }
-        .padding(.top, 12)
-    }
-
-    private var composer: some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("回覆客人…", text: $draft, axis: .vertical)
-                    .fieldText()
-                    .lineLimit(1...8)
-                    .focused($focused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.line) }
-                Button {
-                    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Task { await propose(reply: true) { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
-                } label: {
-                    Text("→")
-                        .font(.brand(20, .medium))
-                        .foregroundStyle(Theme.onAccent)
-                        .frame(width: 40, height: 40)
-                        .background(Theme.accent, in: .circle)
-                }
-                .buttonStyle(.press)
-                .disabled(working || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
-                .keyboardShortcut(.return, modifiers: .command)
-                .accessibilityLabel("寄出")
-            }
-            if focused || !draft.isEmpty {
-                Toggle(isOn: $closeAfter) {
-                    Text("寄出後結案").textRole(.xs).foregroundStyle(Theme.muted)
-                }
-                .toggleStyle(.switch)
-                .tint(Theme.primary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .background(Theme.sheet)
-        .overlay(alignment: .top) { Rule() }
-        .animation(Motion.ease, value: focused)
+        .padding(.top, 28)
     }
 }
 
-/// 客服信的一則訊息：客人在左（白卡）、我們在右（品牌橘）
+/// 客服信的一則：客人在左（白泡泡）、我們在右（品牌色）；一組的第一則放誰、什麼時候
 private struct MessageBubble: View {
     let message: SupportMessage
+    var first = true
+
+    private var mine: Bool { !message.fromCustomer }
 
     var body: some View {
-        HStack {
-            if !message.fromCustomer { Spacer(minLength: 48) }
-            VStack(alignment: message.fromCustomer ? .leading : .trailing, spacing: 5) {
-                Text("\(message.author)・\(message.at?.shortText ?? "")")
-                    .textRole(.xs)
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: !mine && first ? 5 : 18,
+            bottomLeadingRadius: 18,
+            bottomTrailingRadius: 18,
+            topTrailingRadius: mine && first ? 5 : 18,
+            style: .continuous
+        )
+        VStack(alignment: mine ? .trailing : .leading, spacing: 5) {
+            if first {
+                Text([message.author, message.at?.clockText ?? ""].filter { !$0.isEmpty }.joined(separator: "・"))
+                    .font(.brand(11.5, .medium, relativeTo: .caption))
                     .foregroundStyle(Theme.muted)
-                if !message.body.isEmpty {
-                    Text(message.body)
-                        .textRole(.body)
-                        .foregroundStyle(message.fromCustomer ? Theme.ink : Theme.onAccent)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 11)
-                        .background(
-                            message.fromCustomer ? Theme.surface : Theme.accent,
-                            in: UnevenRoundedRectangle(
-                                topLeadingRadius: 16,
-                                bottomLeadingRadius: message.fromCustomer ? 4 : 16,
-                                bottomTrailingRadius: message.fromCustomer ? 16 : 4,
-                                topTrailingRadius: 16,
-                                style: .continuous
-                            )
-                        )
-                        .overlay {
-                            if message.fromCustomer {
-                                UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16, style: .continuous)
-                                    .strokeBorder(Theme.line, lineWidth: 1)
-                            }
-                        }
-                }
-                ForEach(message.attachments, id: \.self) { name in
-                    Text("📎 \(name)")
-                        .textRole(.xs)
-                        .foregroundStyle(Theme.muted)
-                }
-                if let error = message.emailError, !error.isEmpty {
-                    Text("信沒寄出：\(error)")
-                        .textRole(.xs)
-                        .foregroundStyle(Theme.dangerFG)
-                }
             }
-            if message.fromCustomer { Spacer(minLength: 48) }
-        }
-    }
-}
-
-/// 網站上 Xena 的客服對話：官網右下角的 Xena，或網站的 LINE 官方帳號。
-/// 網站有 reply_xena 就能在這裡回覆、接手、交給 Xena 繼續回答、結案 —— 官網的回覆出現在客人的 Xena 裡，
-/// LINE 的回覆從官方帳號傳到客人的 LINE。沒有的網站（還沒更新的）照舊到後台處理。
-struct XenaConversationView: View {
-    let site: String
-    let conversationID: String
-
-    @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
-    @State private var detail: XenaConversationDetail?
-    @State private var error: String?
-    @State private var draft = ""
-    @State private var proposal: Proposal?
-    @State private var replying = false
-    @State private var working = false
-    @FocusState private var focused: Bool
-
-    /// 這個網站能在 App 裡回覆、接手
-    private var desk: Bool { model.site(site)?.hasXenaDesk ?? false }
-    private var status: String? { detail?.status }
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    header
-                    if let error, detail == nil {
-                        ErrorNote(message: error) { Task { await load() } }
-                    } else if detail == nil {
-                        SkeletonRows(rows: 4)
-                    }
-                    ForEach(detail?.messages ?? []) { m in
-                        XenaMessageRow(message: m, channel: detail?.channel ?? .web).id(m.id)
-                    }
-                    if detail != nil, !desk, let admin = detail?.adminURL ?? model.site(site)?.adminURL {
-                        Button { openURL(admin) } label: { Text("到後台接手回覆 ↗") }
-                            .buttonStyle(.brand(.ghost, size: .lg, fullWidth: true))
-                            .padding(.top, 8)
-                    }
-                }
-                .frame(maxWidth: Metric.readable, alignment: .leading)
-                .pageWidth()
-                .padding(.vertical, 16)
-            }
-            .defaultScrollAnchor(.bottom)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: detail?.messages.count ?? 0) {
-                if let last = detail?.messages.last?.id { withAnimation(Motion.ease) { proxy.scrollTo(last, anchor: .bottom) } }
-            }
-        }
-        .brandPage()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if desk, detail != nil { composer }
-        }
-        .navigationTitle(detail?.who ?? "Xena 的對話")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { menu }
-        }
-        .task { await load() }
-        // 開著的時候每 20 秒看一次有沒有新訊息（客人在 LINE 或網站上又說話了）
-        .task(id: conversationID) {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(20))
-                if Task.isCancelled { break }
-                await load(quiet: true)
-            }
-        }
-        .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
-            if replying { announceReply(result) } else { model.show("已更新") }
-            replying = false
-            Task {
-                await load()
-                await model.refreshAll()
-            }
-        }
-    }
-
-    // MARK: 上方：來源、狀態、誰在處理
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Eyebrow("\(model.site(site)?.name ?? site)・Xena 客服")
-            if let d = detail {
-                FlowLayout(spacing: 6) {
-                    StatusBadge(d.channel.label, tone: d.channel == .line ? .active : .neutral)
-                    if let s = d.status { StatusBadge(XenaConversationSummary.label(s), tone: XenaConversationSummary.tone(s)) }
-                    if let a = d.assignee, d.status == "human" { StatusBadge("\(a) 處理中") }
-                    if d.lineBlocked { StatusBadge("已封鎖官方帳號", tone: .danger) }
-                }
-                if let reason = d.handoffReason, !reason.isEmpty {
-                    Text("轉真人：\(reason)")
-                        .textRole(.xs)
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(3)
-                }
-            }
-        }
-        .padding(.bottom, 4)
-    }
-
-    // MARK: 右上角：接手、交還 Xena、結案
-
-    @ViewBuilder
-    private var menu: some View {
-        Menu {
-            if desk, let status {
-                if status == "ai" || status == "waiting" {
-                    Button("接手（Xena 先停止回答）") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "takeover") } } }
-                }
-                if status == "human" || status == "waiting" {
-                    Button("交給 Xena 繼續回答") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "release") } } }
-                }
-                if status != "closed" {
-                    Button("結案") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "close") } } }
-                } else {
-                    Button("重新開啟") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "reopen") } } }
-                }
-            }
-            Button("請 Xena 擬回覆") {
-                let from = detail?.channel == .line ? "LINE 上" : "官網上"
-                model.askXena("幫我看\(model.site(site)?.name ?? site)\(from)這段 Xena 客服對話（\(conversationID)），擬一段給客人的回覆")
-            }
-            if let url = detail?.adminURL ?? model.site(site)?.adminURL {
-                Button("在後台打開") { openURL(url) }
-            }
-        } label: { HeroIcon("ellipsis-horizontal") }
-    }
-
-    // MARK: 下方：回覆
-
-    @ViewBuilder
-    private var composer: some View {
-        if status == "closed" {
-            Text("這段對話已結案。客人再開口會回到 Xena；要由專人繼續回覆，先從右上角「重新開啟」。")
-                .textRole(.xs)
-                .foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(Theme.sheet)
-                .overlay(alignment: .top) { Rule() }
-        } else {
-            let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField(status == "human" ? "回覆客人…" : "回覆客人（送出就等於接手）", text: $draft, axis: .vertical)
-                        .fieldText()
-                        .lineLimit(1...8)
-                        .focused($focused)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Theme.surface, in: .rect(cornerRadius: 20, style: .continuous))
-                        .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(focused ? Theme.accent : Theme.line) }
-                    Button {
-                        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                        Task { await propose(reply: true) { try await model.api.proposeXena(site: site, id: conversationID, action: "reply", text: text) } }
-                    } label: {
-                        Text("→")
-                            .font(.brand(20, .medium))
-                            .foregroundStyle(Theme.onAccent)
-                            .frame(width: 40, height: 40)
-                            .background(Theme.accent, in: .circle)
-                    }
-                    .buttonStyle(.press)
-                    .disabled(working || empty)
-                    .opacity(empty ? 0.35 : 1)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .accessibilityLabel("送出")
-                }
-                if focused || !draft.isEmpty {
-                    Text(detail?.replyGoesTo ?? detail?.channel.replyHint ?? "")
-                        .textRole(.xs)
-                        .foregroundStyle(detail?.lineBlocked == true ? Theme.dangerFG : Theme.muted)
-                        .padding(.horizontal, 6)
-                        .transition(.opacity)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
-            .background(Theme.sheet)
-            .overlay(alignment: .top) { Rule() }
-            .animation(Motion.ease, value: focused)
-        }
-    }
-
-    private func load(quiet: Bool = false) async {
-        do {
-            detail = try await model.api.xenaConversation(site: site, id: conversationID)
-            error = nil
-        } catch {
-            if !quiet { self.error = error.localizedDescription }
-        }
-    }
-
-    /// 回覆送出了：照網站回報的說有沒有真的傳到客人的 LINE、有沒有寄信（沒傳到要讓專人知道）
-    private func announceReply(_ result: JSONValue) {
-        draft = ""
-        if result["lineSent"]?.bool == false {
-            model.show("回覆存下來了，但沒有傳到客人的 LINE（可能封鎖了官方帳號，或本月訊息量用完）", tone: .warning)
-        } else if let error = result["emailError"]?.string, !error.isEmpty {
-            model.show("回覆已送出，但通知信沒寄出：\(error)", tone: .warning)
-        } else if result["lineSent"]?.bool == true {
-            model.show("已傳到客人的 LINE")
-        } else {
-            model.show(result["emailed"]?.bool == true ? "已送出回覆，也寄信通知客人" : "已送出回覆")
-        }
-    }
-
-    private func propose(reply: Bool = false, _ make: () async throws -> ConsoleAPI.WriteOutcome) async {
-        working = true
-        defer { working = false }
-        do {
-            switch try await make() {
-            case .needsConfirmation(let p):
-                // 送出回覆：按「送出」就是確認了，不再跳一次確認（接手、結案這些選單裡的動作照樣確認）
-                if reply, p.typed == nil, !p.danger {
-                    switch try await model.api.confirm(p, typed: nil) {
-                    case .done(let result):
-                        announceReply(result)
-                        await load()
-                        Task { await model.refreshAll() }
-                    case .needsOwner(let next):
-                        replying = true
-                        proposal = next
-                    }
-                    return
-                }
-                replying = reply
-                proposal = p
-            case .done:
-                if reply { draft = "" }
-                model.show("已更新")
-                await load()
-            }
-        } catch {
-            model.show(error.localizedDescription, tone: .danger)
-        }
-    }
-}
-
-/// 客人說的話，一行一行畫（和後台的收件匣一樣）：LINE 傳來的照片、貼圖顯示圖，影片、語音、檔案可以點開，
-/// 其他的照原樣（網址可以點）。「［圖片］網址」「［貼圖：開心］網址」「［影片 12 秒］網址」「［語音 8 秒］網址」「［檔案］名稱 網址」
-private struct VisitorContent: View {
-    let text: String
-    @Environment(\.openURL) private var openURL
-
-    private enum Line: Identifiable {
-        case image(URL, sticker: Bool, id: Int)
-        case media(label: String, url: URL, id: Int)
-        /// 客人傳了東西，但原檔沒有存下來（舊的訊息、網站當時沒開圖片儲存）
-        case missing(String, id: Int)
-        case text(String, id: Int)
-        var id: Int {
-            switch self {
-            case .image(_, _, let id), .media(_, _, let id), .missing(_, let id), .text(_, let id): id
-            }
-        }
-    }
-
-    private var lines: [Line] {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n").enumerated().map { (i, raw) -> Line in
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            // ［標籤］ https://…（標籤後面可能有檔名）
-            if line.hasPrefix("["), let close = line.firstIndex(of: "]"),
-               let space = line.lastIndex(of: " "), space > close,
-               let url = URL(string: String(line[line.index(after: space)...])), url.scheme == "https" {
-                let label = String(line[line.index(after: line.startIndex)..<close])
-                let rest = line[line.index(after: close)..<space].trimmingCharacters(in: .whitespaces)
-                if label == "圖片" { return .image(url, sticker: false, id: i) }
-                if label.hasPrefix("貼圖") { return .image(url, sticker: true, id: i) }
-                if label.hasPrefix("影片") || label.hasPrefix("語音") || label.hasPrefix("檔案") || label.hasPrefix("位置") {
-                    return .media(label: [label, rest].filter { !$0.isEmpty }.joined(separator: " "), url: url, id: i)
-                }
-            }
-            // 沒有網址的照片、影片（原檔沒存下來）：不顯示「［圖片］（沒有存下來：…）」這種原文
-            if line.hasPrefix("[圖片]") { return .missing("照片沒有存下來", id: i) }
-            if line.hasPrefix("[影片") && !line.contains("https://") { return .missing("影片沒有存下來", id: i) }
-            return .text(raw, id: i)
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(lines) { line in
-                switch line {
-                case .image(let url, let sticker, _):
-                    Button { openURL(url) } label: {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image.resizable().scaledToFit()
-                            case .failure:
-                                // 網站沒開圖片儲存時是向 LINE 拿的：LINE 刪掉之後就拿不到了
-                                MissingMedia(text: sticker ? "貼圖載入不了" : "照片載入不了（可能已經過期）")
-                            default:
-                                Theme.soft.frame(width: sticker ? 96 : 220, height: sticker ? 96 : 160)
-                            }
-                        }
-                        .frame(maxWidth: sticker ? 96 : 220, maxHeight: sticker ? 96 : 220, alignment: .leading)
-                        .clipShape(.rect(cornerRadius: sticker ? 0 : 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(sticker ? "客人傳的貼圖" : "客人傳的照片")
-                case .missing(let text, _):
-                    MissingMedia(text: text)
-                case .media(let label, let url, _):
-                    Button { openURL(url) } label: {
-                        Label(label, systemImage: label.hasPrefix("影片") ? "play.rectangle" : label.hasPrefix("語音") ? "waveform" : label.hasPrefix("位置") ? "mappin.and.ellipse" : "doc")
-                            .textRole(.body)
-                            .foregroundStyle(Theme.accentText)
-                    }
-                    .buttonStyle(.plain)
-                case .text(let s, _):
-                    Text(Self.linked(s))
-                        .textRole(.body)
-                        .foregroundStyle(Theme.ink)
-                        .textSelection(.enabled)
-                }
-            }
-        }
-    }
-
-    /// 網址可以點
-    private static func linked(_ s: String) -> AttributedString {
-        var out = AttributedString(s)
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return out }
-        for match in detector.matches(in: s, range: NSRange(s.startIndex..., in: s)) {
-            guard let url = match.url, let r = Range(match.range, in: s), let ar = Range(r, in: out) else { continue }
-            out[ar].link = url
-        }
-        return out
-    }
-}
-
-/// 看不到的照片、影片：一塊淡底、一個圖示、一句說明
-private struct MissingMedia: View {
-    let text: String
-
-    var body: some View {
-        Label(text, systemImage: "photo")
-            .textRole(.small)
-            .foregroundStyle(Theme.muted)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Theme.soft, in: .rect(cornerRadius: 10, style: .continuous))
-    }
-}
-
-/// Xena 對話的一則：事件置中、客人在左（白卡；有 Jev 的分類與判斷）、Xena 與專人在右邊標名字
-private struct XenaMessageRow: View {
-    let message: XenaConversationMessage
-    let channel: XenaChannel
-
-    var body: some View {
-        switch message.role {
-        case "event":
-            Text(message.content + (message.author.map { "（\($0)）" } ?? ""))
-                .textRole(.xs)
-                .foregroundStyle(Theme.faint)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-        case "user":
-            VStack(alignment: .leading, spacing: 5) {
-                if let meta = jevLine {
-                    Text(meta)
-                        .textRole(.xs)
-                        .foregroundStyle(message.jevHuman?.yes == true ? Theme.warningFG : Theme.muted)
-                }
-                VisitorContent(text: message.content)
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 11)
-                    .background(Theme.surface, in: .rect(cornerRadius: 16, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line) }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        default:
-            VStack(alignment: .leading, spacing: 4) {
-                Text(message.role == "assistant" ? "Xena" : (message.author ?? "專人"))
-                    .textRole(.xs)
-                    .foregroundStyle(message.role == "assistant" ? Theme.accent : Theme.muted)
-                Text(markdown(message.content))
+            if !message.body.isEmpty {
+                Text(VisitorContent.linked(message.body))
                     .textRole(.body)
-                    .foregroundStyle(Theme.ink)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(mine ? Theme.onPrimary : Theme.ink)
+                    .tint(mine ? Theme.onPrimary : Theme.accentText)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(mine ? Theme.primary : Theme.surface, in: shape)
+                    .overlay {
+                        if !mine { shape.strokeBorder(Theme.line, lineWidth: 1) }
+                    }
+                    .contextMenu {
+                        Button("複製", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.body }
+                    }
+            }
+            ForEach(message.attachments, id: \.self) { name in
+                Label(name, systemImage: "paperclip")
+                    .font(.brand(12, .medium, relativeTo: .caption))
+                    .foregroundStyle(Theme.muted)
+            }
+            if let error = message.emailError, !error.isEmpty {
+                Label("信沒寄出：\(error)", systemImage: "exclamationmark.triangle.fill")
+                    .font(.brand(12, .medium, relativeTo: .caption))
+                    .foregroundStyle(Theme.dangerFG)
             }
         }
-    }
-
-    /// 客人（LINE）・訂單查詢・Jev：找人 92%
-    private var jevLine: String? {
-        var parts: [String] = [channel == .line ? "客人（LINE）" : "客人"]
-        if let tag = message.tag, !tag.isEmpty { parts.append(tag) }
-        if let h = message.jevHuman { parts.append("Jev：找人 \(Int((h.confidence * 100).rounded()))%") }
-        if let at = message.at { parts.append(at.shortText) }
-        return parts.joined(separator: "・")
+        .frame(maxWidth: 520, alignment: mine ? .trailing : .leading)
+        .padding(mine ? .leading : .trailing, 48)
+        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
     }
 }

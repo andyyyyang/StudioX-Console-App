@@ -505,6 +505,16 @@ struct XenaConversationMessage: Identifiable {
     var tag: String?
     /// Jev 判斷這一句要不要找人（機率 0–1）
     var jevHuman: (yes: Bool, confidence: Double)?
+    /// Xena 這一輪帶客人去的頁面（客人看到的是一顆按鈕）
+    var navigate: (path: String, title: String)?
+    /// 專人附的行銷卡片（LINE 上是品牌樣式的 Flex 卡片）
+    var card: StaffCard?
+    /// 專人推薦的商品（黃毛丫頭：LINE 上是左右滑的商品卡片）
+    var products: [(name: String, slug: String)]
+    /// role 是 event 的種類：handoff / takeover / release / closed / reopened / contact / login / logout（舊的網站沒有）
+    var event: String?
+    /// 專人回覆時也寄了信給客人
+    var emailed: Bool
 
     init(id: Int, _ m: JSONValue) {
         self.id = id
@@ -516,7 +526,53 @@ struct XenaConversationMessage: Identifiable {
         if let jev = m["jev"], let yes = jev["human"]?.bool {
             jevHuman = (yes, jev["confidence"]?.double ?? 0)
         }
+        if let nav = m["navigate"], let path = nav["path"]?.string, !path.isEmpty {
+            navigate = (path, nav["title"]?.string ?? path)
+        }
+        card = m["card"].flatMap(StaffCard.init)
+        products = (m["products"]?.array ?? []).compactMap { p in
+            guard let name = p["name"]?.string else { return nil }
+            return (name, p["slug"]?.string ?? "")
+        }
+        event = m["event"]?.string
+        emailed = m["emailed"]?.bool ?? false
     }
+
+    /// 只是卡片的那一行字（「［卡片］標題」）：畫了卡片就不用再畫這行
+    var isOnlyCardLabel: Bool {
+        guard card != nil else { return false }
+        let t = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty || t.hasPrefix("［卡片］") || t.hasPrefix("[卡片]")
+    }
+}
+
+/// 專人回覆附的行銷卡片（網站的 lib/ai/staff-card.ts）
+struct StaffCard {
+    var title: String
+    var body: String?
+    var imageURL: URL?
+    var couponCode: String?
+    var buttonLabel: String?
+    var url: URL?
+
+    init?(_ json: JSONValue) {
+        guard let title = json["title"]?.string, !title.isEmpty else { return nil }
+        self.title = title
+        body = json["body"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        imageURL = json["imageUrl"]?.string.flatMap(URL.init(string:))
+        couponCode = json["couponCode"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        buttonLabel = json["buttonLabel"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        url = json["url"]?.string.flatMap(URL.init(string:))
+    }
+}
+
+/// 同一位 LINE 好友之前的一段對話
+struct EarlierConversation: Identifiable {
+    let id: String
+    var startedAt: Date?
+    var lastAt: Date?
+    var statusLabel: String?
+    var firstQuestion: String?
 }
 
 /// 一段 Xena 對話的全貌（網站有給的才有：還沒更新的網站只有訊息）
@@ -524,12 +580,23 @@ struct XenaConversationDetail {
     var status: String?
     var channel: XenaChannel
     var who: String?
+    /// LINE 好友的頭像
+    var picture: URL?
     var lineBlocked: Bool
+    /// 客人現在開著網站（官網的對話）
+    var visitorOnline: Bool
     var assignee: String?
     var handoffReason: String?
+    var handoffAt: Date?
+    var startedAt: Date?
+    /// Jev 替這段對話分的類別
+    var topics: [String]
     /// 回覆會送到哪裡（網站說的；沒有就照來源）
     var replyGoesTo: String?
     var messages: [XenaConversationMessage]
+    var earlier: [EarlierConversation]
+    /// 會員最近的訂單（黃毛丫頭：登入的會員、綁了 LINE 的客人）
+    var orders: [CustomerOrder]
     var adminURL: URL?
 
     init(_ json: JSONValue) {
@@ -538,11 +605,31 @@ struct XenaConversationDetail {
         // 會員（黃毛丫頭）或用 StudioX 登入的訪客（studiox.tw 的 identity）、LINE 好友、留過聯絡資料的
         let member = json["member"] ?? json["identity"]
         who = member?["name"]?.string ?? member?["email"]?.string ?? json["line"]?["name"]?.string ?? json["contact"]?["name"]?.string
+        picture = json["line"]?["picture"]?.string.flatMap(URL.init(string:))
         lineBlocked = json["line"]?["following"]?.bool == false
+        visitorOnline = json["visitorOnline"]?.bool ?? false
         assignee = json["assignee"]?.string
-        handoffReason = json["handoff"]?["reason"]?.string
+        handoffReason = json["handoff"]?["reason"]?.string ?? json["handoffReason"]?.string
+        handoffAt = json["handoff"]?["at"]?.date
+        startedAt = json["startedAt"]?.date
+        // atelier-cms：tags 是代號、tagLabels 是中文；黃毛丫頭的 tags 就是中文
+        topics = (json["tagLabels"]?.array ?? json["tags"]?.array ?? []).compactMap(\.string)
         replyGoesTo = json["replyGoesTo"]?.string
         messages = (json["messages"]?.array ?? []).enumerated().map { XenaConversationMessage(id: $0, $1) }
+        earlier = (json["earlier"]?.array ?? []).compactMap { e in
+            guard let id = e["id"]?.string else { return nil }
+            return EarlierConversation(id: id, startedAt: e["startedAt"]?.date, lastAt: e["lastAt"]?.date, statusLabel: e["statusLabel"]?.string, firstQuestion: e["firstQuestion"]?.string)
+        }
+        orders = (json["orders"]?.array ?? []).compactMap { o in
+            guard let id = o["id"]?.string else { return nil }
+            return CustomerOrder(
+                id: id,
+                number: o["orderNumber"]?.string ?? "",
+                statusLabel: o["statusLabel"]?.string ?? "",
+                totalLabel: o["totalLabel"]?.string ?? "",
+                items: o["itemSummary"]?.string ?? ""
+            )
+        }
         adminURL = json["adminUrl"]?.string.flatMap(URL.init(string:))
     }
 }
