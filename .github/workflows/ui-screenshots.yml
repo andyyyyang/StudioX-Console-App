@@ -117,7 +117,7 @@ jobs:
               "products|-demo -demoRoute products"
               "product|-demo -demoRoute product"
               "orders|-demo -demoTab orders"
-              "order|-demo -demoRoute order"
+              "order-top|-demo -demoRoute order"
               "lock|-demo -demoLock YES"
             )
           fi
