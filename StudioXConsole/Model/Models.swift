@@ -66,7 +66,7 @@ struct SiteSummary: Identifiable {
     var hasOrders: Bool { tools.contains("update_order") || tools.contains("ops_report") }
     /// 有客服信（support_thread、reply_support）
     var hasSupport: Bool { tools.contains("reply_support") }
-    /// Xena 的客服對話可以在 App 裡回覆、接手（reply_xena；黃毛丫頭的官網＋LINE）
+    /// Xena 的客服對話可以在 App 裡回覆、接手（reply_xena；官網＋LINE）
     var hasXenaDesk: Bool { tools.contains("reply_xena") }
     var hasTraffic: Bool { tools.contains("traffic_report") }
     var canRefund: Bool { tools.contains("refund_order") }
@@ -409,7 +409,7 @@ enum XenaChannel: String, Hashable, Sendable {
     var label: String { self == .line ? "LINE" : "官網" }
     /// 專人的回覆會送到哪裡（對話頁的說明）
     var replyHint: String {
-        self == .line ? "回覆會從官方帳號傳到客人的 LINE（署名「真人客服」）" : "回覆會出現在客人網站上的 Xena 裡（署名「真人客服」）"
+        self == .line ? "回覆會從官方帳號照原樣傳到客人的 LINE；第一次回覆前客人會看到「你的名字 接手了這段對話」" : "回覆會出現在客人網站上的 Xena 裡"
     }
 }
 
@@ -490,7 +490,7 @@ struct XenaConversationMessage: Identifiable {
     }
 }
 
-/// 一段 Xena 對話的全貌（網站有給的才有：atelier-cms 的網站只有訊息）
+/// 一段 Xena 對話的全貌（網站有給的才有：還沒更新的網站只有訊息）
 struct XenaConversationDetail {
     var status: String?
     var channel: XenaChannel
@@ -506,7 +506,8 @@ struct XenaConversationDetail {
     init(_ json: JSONValue) {
         status = json["status"]?.string
         channel = XenaChannel(json["channel"]?.string)
-        let member = json["member"]
+        // 會員（黃毛丫頭）或用 StudioX 登入的訪客（studiox.tw 的 identity）、LINE 好友、留過聯絡資料的
+        let member = json["member"] ?? json["identity"]
         who = member?["name"]?.string ?? member?["email"]?.string ?? json["line"]?["name"]?.string ?? json["contact"]?["name"]?.string
         lineBlocked = json["line"]?["following"]?.bool == false
         assignee = json["assignee"]?.string

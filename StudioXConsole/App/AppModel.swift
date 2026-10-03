@@ -163,9 +163,9 @@ final class AppModel {
         sites.first { $0.id == id }
     }
 
-    /// 收件匣的數字（客人在等回覆＋轉給專人＋新的詢問）
+    /// 收件匣的數字（客人在等回覆＋需要專人看的 Xena 對話＋新的詢問）：專人已經回過、客人還沒再說話的不算
     var inboxCount: Int {
-        briefing.awaiting.count + briefing.handoffs.count + briefing.inquiries.count
+        briefing.awaiting.count + briefing.handoffs.filter(\.attention).count + briefing.inquiries.count
     }
 
     // MARK: 登入
@@ -489,6 +489,9 @@ final class AppModel {
         }
         switch action {
         case .inbox:
+            tab = .inbox
+        case .inboxSegment(let segment):
+            inboxSegment = segment
             tab = .inbox
         case .orders(let site, let status):
             ordersSite = site

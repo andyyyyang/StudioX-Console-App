@@ -95,7 +95,7 @@ nonisolated enum DemoServer {
     // MARK: 我與網站
 
     private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","reply_xena","traffic_report","search_report","issue_coupons"]"#
-    private static let studioTools = #"["list","get","search","update","create","delete","set_images","traffic_report","search_report","reply_support"]"#
+    private static let studioTools = #"["list","get","search","update","create","delete","set_images","traffic_report","search_report","reply_support","reply_xena"]"#
     private static let basicTools = #"["list","get","search","update","traffic_report"]"#
 
     private static var me: String { """

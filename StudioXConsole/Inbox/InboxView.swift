@@ -581,9 +581,9 @@ private struct MessageBubble: View {
     }
 }
 
-/// 網站上 Xena 的客服對話：官網右下角的 Xena，或網站的 LINE 官方帳號（黃毛丫頭）。
-/// 網站有 reply_xena（黃毛丫頭）就能在這裡回覆、接手、交還 Xena、結案 —— 官網的回覆出現在客人的 Xena 裡，
-/// LINE 的回覆從官方帳號傳到客人的 LINE。沒有的網站（atelier-cms）照舊到後台處理。
+/// 網站上 Xena 的客服對話：官網右下角的 Xena，或網站的 LINE 官方帳號。
+/// 網站有 reply_xena 就能在這裡回覆、接手、交給 Xena 繼續回答、結案 —— 官網的回覆出現在客人的 Xena 裡，
+/// LINE 的回覆從官方帳號傳到客人的 LINE。沒有的網站（還沒更新的）照舊到後台處理。
 struct XenaConversationView: View {
     let site: String
     let conversationID: String
@@ -649,10 +649,19 @@ struct XenaConversationView: View {
                 await load(quiet: true)
             }
         }
-        .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { _ in
+        .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             if replying {
                 draft = ""
-                model.show(detail?.channel == .line ? "已傳到客人的 LINE" : "已送出回覆")
+                // 照網站回報的說：有沒有真的傳到客人的 LINE、有沒有寄信（沒傳到要讓專人知道）
+                if result["lineSent"]?.bool == false {
+                    model.show("回覆存下來了，但沒有傳到客人的 LINE（可能封鎖了官方帳號，或本月訊息量用完）", tone: .warning)
+                } else if let error = result["emailError"]?.string, !error.isEmpty {
+                    model.show("回覆已送出，但通知信沒寄出：\(error)", tone: .warning)
+                } else if result["lineSent"]?.bool == true {
+                    model.show("已傳到客人的 LINE")
+                } else {
+                    model.show(result["emailed"]?.bool == true ? "已送出回覆，也寄信通知客人" : "已送出回覆")
+                }
             } else {
                 model.show("已更新")
             }

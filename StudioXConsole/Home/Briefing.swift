@@ -136,7 +136,7 @@ final class Briefing {
                 id: "handoffs", site: handoffs[0].site, icon: "chat-bubble-oval-left-ellipsis", tone: .warning,
                 title: "Xena 轉給專人的對話 \(handoffs.count) 段",
                 detail: handoffs.prefix(2).map { $0.contactName ?? $0.firstQuestion ?? "訪客" }.joined(separator: "、"),
-                action: .inbox
+                action: .inboxSegment("handoffs")
             ))
         }
         if !inquiries.isEmpty {
@@ -159,6 +159,8 @@ final class Briefing {
 struct AttentionItem: Identifiable {
     enum Action {
         case inbox
+        /// 收件匣的某個分段（Xena 轉來的對話…）
+        case inboxSegment(String)
         case orders(site: String, status: String)
         case askXena(String)
     }
