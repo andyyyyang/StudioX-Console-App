@@ -167,32 +167,32 @@ struct MainView: View {
         let regular = sizeClass == .regular
         TabView(selection: $model.tab) {
             Tab("今天", image: "hi-home", value: AppTab.xena) {
-                XenaHomeView().tabPage()
+                XenaHomeView()
             }
             Tab("網站", image: "hi-globe-alt", value: AppTab.sites) {
-                SitesView().tabPage()
+                SitesView()
             }
             .hidden(regular)
             if !model.orderSites.isEmpty {
                 Tab("訂單", image: "hi-shopping-bag", value: AppTab.orders) {
-                    OrdersView().tabPage()
+                    OrdersView()
                 }
             }
             Tab("收件匣", image: "hi-inbox-stack", value: AppTab.inbox) {
-                InboxView().tabPage()
+                InboxView()
             }
             .badge(model.inboxCount)
             Tab("設定", image: "hi-cog-6-tooth", value: AppTab.account) {
-                AccountView().tabPage()
+                AccountView()
             }
             .hidden(!regular)
             Tab(value: AppTab.search, role: .search) {
-                SearchView().tabPage()
+                SearchView()
             }
             TabSection("網站") {
                 ForEach(model.sites) { site in
                     Tab(site.name, image: site.hasOrders ? "hi-building-storefront" : "hi-globe-alt", value: AppTab.site(site.id)) {
-                        SiteWorkspace(siteID: site.id).tabPage()
+                        SiteWorkspace(siteID: site.id)
                     }
                 }
             }
@@ -300,12 +300,5 @@ struct WindowPaint: UIViewRepresentable {
             super.didMoveToWindow()
             window?.backgroundColor = Theme.pageUIColor
         }
-    }
-}
-
-private extension View {
-    /// 分頁的底（TabView 每一頁後面）：暖紙色
-    func tabPage() -> some View {
-        containerBackground(Theme.page, for: .tabView)
     }
 }
