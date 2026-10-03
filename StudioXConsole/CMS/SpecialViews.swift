@@ -85,7 +85,7 @@ struct MemberView: View {
         .reveal()
 
         StatGrid {
-            Stat(value: Double(u["lifetimeSpendCents"]?.int ?? 0) / 100, label: "累積消費", format: { "NT$" + Int($0.rounded()).formatted() })
+            Stat(value: Double(u["lifetimeSpendCents"]?.int ?? 0) / 100, label: "累積消費", format: { "NT$" + Int($0.rounded()).formatted() }, compact: { ntdShort(cents: Int(($0 * 100).rounded())) })
             Stat(value: Double(d["rfm"]?["orderCount"]?.int ?? d["recentOrders"]?.array.count ?? 0), label: "訂單")
             Stat(value: Double(u["invitedCount"]?.int ?? 0), label: "邀請的朋友")
             Stat(value: Double(d["rfm"]?["recencyDays"]?.int ?? 0), label: "距離上次購買（天）")

@@ -210,7 +210,8 @@ struct ReplyMenuSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        // iPad 的表單視窗一半高度放不下：直接整張
+        .presentationDetents(UIDevice.current.userInterfaceIdiom == .pad ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -810,6 +811,6 @@ struct SavedRepliesSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(UIDevice.current.userInterfaceIdiom == .pad ? [.large] : [.medium, .large])
     }
 }

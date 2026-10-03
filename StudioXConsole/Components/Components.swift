@@ -642,17 +642,32 @@ struct Stat: View {
     let value: Double
     let label: String
     var format: (Double) -> String = { $0.formatted(.number.precision(.fractionLength(0))) }
+    /// 放不下時的短寫法（金額：NT$1.3萬）；放得下照完整的寫
+    var compact: ((Double) -> String)?
     /// 和前一期比（%）
     var change: Double?
     var note: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CountUp(value: value, format: format)
-                .textRole(.stat)
-                .foregroundStyle(Theme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
+            Group {
+                if let compact {
+                    ViewThatFits(in: .horizontal) {
+                        CountUp(value: value, format: format)
+                            .lineLimit(1)
+                            .fixedSize()
+                        CountUp(value: value, format: compact)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                } else {
+                    CountUp(value: value, format: format)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                }
+            }
+            .textRole(.stat)
+            .foregroundStyle(Theme.ink)
             HStack(spacing: 8) {
                 Text(label)
                     .textRole(.small)

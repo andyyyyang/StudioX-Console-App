@@ -325,7 +325,7 @@ struct OrderDetailView: View {
                     Text(facts.isEmpty ? "會員" : facts.joined(separator: "・"))
                         .textRole(.xs)
                         .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Spacer(minLength: 8)
                 if canOpenMember {

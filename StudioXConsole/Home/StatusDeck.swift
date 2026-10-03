@@ -240,7 +240,7 @@ private struct TodayCard: View {
                         .padding(.top, 4)
                 }
                 Spacer(minLength: 8)
-                HStack(spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
                     DeckFigure(value: "\(live)", label: "在線", live: live > 0)
                     if !model.orderSites.isEmpty {
                         DeckFigure(value: ntdShort(cents: revenue), label: "昨天收款")
@@ -296,7 +296,7 @@ private struct SiteStatusCard: View {
                         .padding(.top, 6)
                 }
                 Spacer(minLength: 6)
-                HStack(spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
                     if let report {
                         DeckFigure(value: "\(report.createdTotal)", label: "昨天訂單")
                         DeckFigure(value: ntdShort(cents: report.revenueCents), label: "昨天收款")

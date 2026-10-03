@@ -339,7 +339,7 @@ struct SiteOverview: View {
             }
             StatGrid {
                 Stat(value: Double(ops.createdTotal), label: "新訂單")
-                Stat(value: Double(ops.revenueCents) / 100, label: "收款", format: { "NT$" + Int($0.rounded()).formatted() })
+                Stat(value: Double(ops.revenueCents) / 100, label: "收款", format: { "NT$" + Int($0.rounded()).formatted() }, compact: { ntdShort(cents: Int(($0 * 100).rounded())) })
                 Stat(value: Double(ops.paidButUnfulfilled), label: "等出貨")
                 Stat(value: Double(ops.supportAwaiting), label: "客人等回覆")
             }
