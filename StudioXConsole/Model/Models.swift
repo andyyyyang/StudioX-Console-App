@@ -66,6 +66,8 @@ struct SiteSummary: Identifiable {
     var hasOrders: Bool { tools.contains("update_order") || tools.contains("ops_report") }
     /// 有客服信（support_thread、reply_support）
     var hasSupport: Bool { tools.contains("reply_support") }
+    /// Xena 的客服對話可以在 App 裡回覆、接手（reply_xena；黃毛丫頭的官網＋LINE）
+    var hasXenaDesk: Bool { tools.contains("reply_xena") }
     var hasTraffic: Bool { tools.contains("traffic_report") }
     var canRefund: Bool { tools.contains("refund_order") }
 
@@ -396,7 +398,20 @@ struct SupportThreadDetail {
     }
 }
 
-// MARK: - Xena 的客服對話（assistant_conversation，atelier-cms 的網站）
+// MARK: - Xena 的客服對話（assistant_conversation：atelier-cms 的網站、黃毛丫頭的官網＋LINE）
+
+/// 對話從哪裡來：官網右下角的 Xena，或網站的 LINE 官方帳號（黃毛丫頭）
+enum XenaChannel: String, Hashable, Sendable {
+    case web, line
+
+    init(_ raw: String?) { self = raw == "line" ? .line : .web }
+
+    var label: String { self == .line ? "LINE" : "官網" }
+    /// 專人的回覆會送到哪裡（對話頁的說明）
+    var replyHint: String {
+        self == .line ? "回覆會從官方帳號傳到客人的 LINE（署名「真人客服」）" : "回覆會出現在客人網站上的 Xena 裡（署名「真人客服」）"
+    }
+}
 
 struct XenaConversationSummary: Identifiable, Hashable {
     let id: String
@@ -405,6 +420,9 @@ struct XenaConversationSummary: Identifiable, Hashable {
     var at: Date?
     /// ai（Xena 回答中）/ waiting（等專人）/ human（專人接手）/ closed
     var status: String
+    var channel: XenaChannel
+    /// 需要專人看（等人接手、接手後客人又說話還沒看）；網站沒給就照狀態算
+    var attention: Bool
     var tags: [String]
     var contactName: String?
     var turns: Int
@@ -415,14 +433,19 @@ struct XenaConversationSummary: Identifiable, Hashable {
         self.site = site
         at = json["at"]?.date
         status = json["status"]?.string ?? "ai"
+        channel = XenaChannel(json["channel"]?.string)
+        attention = json["attention"]?.bool ?? (status == "waiting")
         tags = (json["tags"]?.array ?? []).compactMap(\.string)
         let contact = json["contact"]
-        contactName = contact?["name"]?.string ?? contact?["email"]?.string ?? json["signedIn"]?.string
+        contactName = contact?["name"]?.string ?? contact?["email"]?.string ?? json["signedIn"]?.string ?? json["line"]?["name"]?.string
         turns = json["turns"]?.int ?? 0
         firstQuestion = json["questions"]?.array.first?.string
     }
 
-    var statusLabel: String {
+    var statusLabel: String { XenaConversationSummary.label(status) }
+    var tone: Tone { XenaConversationSummary.tone(status) }
+
+    static func label(_ status: String) -> String {
         switch status {
         case "ai": "Xena 回答中"
         case "waiting": "等專人"
@@ -432,7 +455,7 @@ struct XenaConversationSummary: Identifiable, Hashable {
         }
     }
 
-    var tone: Tone {
+    static func tone(_ status: String) -> Tone {
         switch status {
         case "waiting": .warning
         case "human": .gold
@@ -449,6 +472,49 @@ struct XenaConversationMessage: Identifiable {
     var content: String
     var author: String?
     var at: Date?
+    /// Jev 的分類（「訂單查詢」…）
+    var tag: String?
+    /// Jev 判斷這一句要不要找人（機率 0–1）
+    var jevHuman: (yes: Bool, confidence: Double)?
+
+    init(id: Int, _ m: JSONValue) {
+        self.id = id
+        role = m["role"]?.string ?? "user"
+        content = m["content"]?.string ?? ""
+        author = m["author"]?.string
+        at = m["at"]?.date
+        tag = m["tag"]?.string
+        if let jev = m["jev"], let yes = jev["human"]?.bool {
+            jevHuman = (yes, jev["confidence"]?.double ?? 0)
+        }
+    }
+}
+
+/// 一段 Xena 對話的全貌（網站有給的才有：atelier-cms 的網站只有訊息）
+struct XenaConversationDetail {
+    var status: String?
+    var channel: XenaChannel
+    var who: String?
+    var lineBlocked: Bool
+    var assignee: String?
+    var handoffReason: String?
+    /// 回覆會送到哪裡（網站說的；沒有就照來源）
+    var replyGoesTo: String?
+    var messages: [XenaConversationMessage]
+    var adminURL: URL?
+
+    init(_ json: JSONValue) {
+        status = json["status"]?.string
+        channel = XenaChannel(json["channel"]?.string)
+        let member = json["member"]
+        who = member?["name"]?.string ?? member?["email"]?.string ?? json["line"]?["name"]?.string ?? json["contact"]?["name"]?.string
+        lineBlocked = json["line"]?["following"]?.bool == false
+        assignee = json["assignee"]?.string
+        handoffReason = json["handoff"]?["reason"]?.string
+        replyGoesTo = json["replyGoesTo"]?.string
+        messages = (json["messages"]?.array ?? []).enumerated().map { XenaConversationMessage(id: $0, $1) }
+        adminURL = json["adminUrl"]?.string.flatMap(URL.init(string:))
+    }
 }
 
 // MARK: - 專案詢問（inquiry，atelier-cms 的網站）

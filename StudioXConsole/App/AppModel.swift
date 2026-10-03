@@ -197,6 +197,7 @@ final class AppModel {
         case "traffic": open(.traffic(site: shop))
         case "order": open(.order(site: shop, id: "o1"))
         case "thread": open(.thread(site: shop, id: "t1"))
+        case "line": open(.xenaConversation(site: shop, id: "yc1"))
         case "products": open(.collection(site: shop, entity: "product"))
         case "product": open(.record(site: shop, entity: "product", id: "p1"))
         case "xena": showXena = true
@@ -386,8 +387,11 @@ final class AppModel {
         let sub = parts.count > 2 ? parts[2] : nil
         switch section {
         case "support":
-            // yellowgirl 的 Xena 對話（/admin/support/xena?c=）：App 裡還沒有這種對話，在瀏覽器打開後台的那一段
-            if sub == "xena" { return .web(site: site, path: url) }
+            // 黃毛丫頭的 Xena 對話（/admin/support/xena?c=；官網和 LINE 來的都是）：在 App 裡打開那一段
+            if sub == "xena" {
+                if let id = q["c"] { return .route(.xenaConversation(site: site, id: id)) }
+                return .inbox("handoffs")
+            }
             if let id = q["thread"] { return .route(.thread(site: site, id: id)) }
             return .inbox("support")
         case "orders":

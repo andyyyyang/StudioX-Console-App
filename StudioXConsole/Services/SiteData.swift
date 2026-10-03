@@ -29,10 +29,13 @@ extension ConsoleAPI {
         SupportThreadDetail(site: site, try await tool("get", site: site, ["entity": "support_thread", "id": .string(id)]))
     }
 
-    /// Xena 在網站上的客服對話（只有 atelier-cms 的網站有；沒有就回空的）
-    func xenaConversations(site: String) async throws -> [XenaConversationSummary] {
+    /// Xena 在網站上的客服對話（atelier-cms 的網站；黃毛丫頭的官網＋LINE。沒有就回空的）
+    /// status：open＝等專人＋專人處理中（黃毛丫頭的網站照這個篩；atelier-cms 的網站不認得，回最近的，由呼叫的人自己篩）
+    func xenaConversations(site: String, status: String? = "open") async throws -> [XenaConversationSummary] {
         do {
-            let r = try await tool("list", site: site, ["entity": "assistant_conversation", "limit": 40])
+            var args: [String: JSONValue] = ["entity": "assistant_conversation", "limit": 40]
+            if let status { args["status"] = .string(status) }
+            let r = try await tool("list", site: site, args)
             return (r["items"]?.array ?? []).map { XenaConversationSummary(site: site, $0) }
         } catch let error as APIError {
             // 這個網站沒有這種資料（或不給看）：當作沒有
@@ -43,11 +46,8 @@ extension ConsoleAPI {
         }
     }
 
-    func xenaConversation(site: String, id: String) async throws -> [XenaConversationMessage] {
-        let r = try await tool("get", site: site, ["entity": "assistant_conversation", "id": .string(id)])
-        return (r["messages"]?.array ?? []).enumerated().map { i, m in
-            XenaConversationMessage(id: i, role: m["role"]?.string ?? "user", content: m["content"]?.string ?? "", author: m["author"]?.string, at: m["at"]?.date)
-        }
+    func xenaConversation(site: String, id: String) async throws -> XenaConversationDetail {
+        XenaConversationDetail(try await tool("get", site: site, ["entity": "assistant_conversation", "id": .string(id)]))
     }
 
     /// 專案詢問（只有 atelier-cms 的網站有；沒有就回空的）
@@ -178,6 +178,14 @@ extension ConsoleAPI {
         var reply: [String: JSONValue] = ["id": .string(threadID), "body": .string(body)]
         if close { reply["close"] = true }
         return try await propose("reply_support", site: site, ["replies": [.object(reply)]])
+    }
+
+    /// Xena 對話的專人動作（reply_xena）：reply（text 必填；官網的出現在客人的 Xena 裡、LINE 的傳到客人的 LINE）、
+    /// takeover、release（交還 Xena）、close、reopen
+    func proposeXena(site: String, id: String, action: String, text: String? = nil) async throws -> WriteOutcome {
+        var args: [String: JSONValue] = ["id": .string(id), "action": .string(action)]
+        if let text { args["text"] = .string(text) }
+        return try await propose("reply_xena", site: site, args)
     }
 
     /// 客服信的狀態：open / answered / closed

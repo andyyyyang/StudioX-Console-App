@@ -7,7 +7,7 @@ import Foundation
 ///
 /// 其他啟動參數：
 ///   -demoTab sites|orders|inbox|account|search   打開哪個分頁
-///   -demoRoute site|traffic|order|thread|products|product|xena   打開哪一頁
+///   -demoRoute site|traffic|order|thread|line|products|product|xena   打開哪一頁（line：LINE 來的 Xena 對話）
 ///   -demoSheet today|yellowgirl.tw   首頁卡片打開的 sheet
 ///   -demoLock YES   顯示 Face ID 的鎖定畫面
 nonisolated enum DemoServer {
@@ -63,8 +63,8 @@ nonisolated enum DemoServer {
         case ("get", "order"): return order(id: args["id"]?.string ?? "o1")
         case ("list", "support_thread"): return site == "yellowgirl.tw" ? threads : #"{"threads":[]}"#
         case ("get", "support_thread"): return thread
-        case ("list", "assistant_conversation"): return site == "studiox.tw" ? conversations : nil
-        case ("get", "assistant_conversation"): return conversation
+        case ("list", "assistant_conversation"): return site == "studiox.tw" ? conversations : site == "yellowgirl.tw" ? shopConversations : nil
+        case ("get", "assistant_conversation"): return args["id"]?.string == "yc1" ? lineConversation : conversation
         case ("list", "inquiry"): return site == "studiox.tw" ? inquiries : nil
         case ("list", "product"): return products
         case ("list", _): return #"{"items":[]}"#
@@ -94,7 +94,7 @@ nonisolated enum DemoServer {
 
     // MARK: 我與網站
 
-    private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","traffic_report","search_report","issue_coupons"]"#
+    private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","reply_xena","traffic_report","search_report","issue_coupons"]"#
     private static let studioTools = #"["list","get","search","update","create","delete","set_images","traffic_report","search_report","reply_support"]"#
     private static let basicTools = #"["list","get","search","update","traffic_report"]"#
 
@@ -165,6 +165,25 @@ nonisolated enum DemoServer {
      {"id":"c1","at":"\(ago(hours: 0.6))","status":"waiting","tags":["quote"],"contact":{"name":"Sarah"},"turns":6,"questions":["想做一個品牌官網，大概的費用與時程？"]},
      {"id":"c2","at":"\(ago(hours: 7))","status":"human","tags":[],"contact":null,"signedIn":"demo-visitor@example.com","turns":4,"questions":["你們有做電商網站嗎？"]}
     ]}
+    """ }
+
+    private static var shopConversations: String { """
+    {"items":[
+     {"id":"yc1","at":"\(ago(hours: 0.2))","status":"waiting","channel":"line","line":{"name":"小雯"},"attention":true,"tags":["收貨問題"],"contact":{"name":"小雯"},"turns":3,"questions":["鴨頭收到的時候袋子破了"]},
+     {"id":"yc2","at":"\(ago(hours: 3))","status":"human","channel":"web","attention":false,"tags":["改單退款"],"contact":{"name":"王先生"},"turns":5,"questions":["可以改收件地址嗎？"]}
+    ]}
+    """ }
+
+    private static var lineConversation: String { """
+    {"id":"yc1","status":"waiting","channel":"line","line":{"name":"小雯","following":true},"member":{"name":"小雯"},
+     "handoff":{"reason":"客人說收到時包裝破損"},"replyGoesTo":"回覆會從官方帳號傳到客人的 LINE（署名「真人客服」）",
+     "messages":[
+      {"role":"user","content":"我的訂單到哪了？","at":"\(ago(hours: 26))","tag":"訂單查詢","jev":{"human":false,"confidence":0.04}},
+      {"role":"assistant","content":"你的訂單 **YG-24100607** 昨天已經出貨，黑貓單號 9012-3456-7890，預計今天送達。","at":"\(ago(hours: 26))"},
+      {"role":"user","content":"鴨頭收到的時候袋子破了","at":"\(ago(hours: 0.25))","tag":"收貨問題","jev":{"human":true,"confidence":0.93}},
+      {"role":"assistant","content":"真的很抱歉！我已經請專人來處理，方便的話可以先拍一張照片傳給我們。","at":"\(ago(hours: 0.24))"},
+      {"role":"event","content":"已經通知專人，專人會在這裡回覆你。","at":"\(ago(hours: 0.24))","event":"handoff"}
+     ]}
     """ }
 
     private static var conversation: String { """

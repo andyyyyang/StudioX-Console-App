@@ -92,6 +92,7 @@ jobs:
             "sheet|-demo -demoSheet today|9"
             "site|-demo -demoRoute site"
             "xena|-demo -demoRoute xena"
+            "line|-demo -demoRoute line"
             "voice|-demo -demoVoice YES"
             "account|-demo -demoTab account"
           )
