@@ -697,7 +697,7 @@ struct XenaConversationView: View {
                     Button("接手（Xena 先停止回答）") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "takeover") } } }
                 }
                 if status == "human" || status == "waiting" {
-                    Button("交還 Xena") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "release") } } }
+                    Button("交給 Xena 繼續回答") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "release") } } }
                 }
                 if status != "closed" {
                     Button("結案") { Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: "close") } } }
