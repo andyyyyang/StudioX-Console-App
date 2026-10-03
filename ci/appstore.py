@@ -150,6 +150,9 @@ def age_rating(info_id):
         return
     attrs = {}
     for k, v in decl["attributes"].items():
+        # 「分級覆寫」（ageRatingOverride／V2、韓國）和兒童分類保持 Apple 的預設：新舊兩個覆寫欄位不能一起送
+        if "override" in k.lower() or k == "kidsAgeBand":
+            continue
         if k in AGE_YES:
             attrs[k] = True
         elif isinstance(v, bool) or (v is None and k in AGE_BOOLS):
@@ -213,7 +216,7 @@ def all_pages(path, query):
 def availability(app):
     """全部國家與地區（中國大陸除外），之後 Apple 新開的地區也自動上架"""
     try:
-        territories = [t["id"] for t in all_pages("/territories", {"limit": 200}) if t["id"] not in SKIP_TERRITORIES]
+        territories = [t["id"] for t in all_pages("/territories", {"limit": 200})]
         existing = None
         try:
             existing = (call("GET", f"/apps/{app}/appAvailabilityV2").get("data") or {}).get("id")
@@ -226,11 +229,12 @@ def availability(app):
                     "app": {"data": {"type": "apps", "id": app}},
                     "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{{t}}}"} for t in territories]},
                 }},
+                # 每個地區都要列（Apple 的規定），不上的（中國大陸）標成 available: false
                 "included": [{"type": "territoryAvailabilities", "id": f"${{{t}}}",
-                              "attributes": {"available": True, "releaseDate": None, "preOrderEnabled": False},
+                              "attributes": {"available": t not in SKIP_TERRITORIES, "releaseDate": None, "preOrderEnabled": False},
                               "relationships": {"territory": {"data": {"type": "territories", "id": t}}}} for t in territories],
             })
-            summary(f"- 上架地區：{len(territories)} 個國家與地區（中國大陸要 ICP 備案，先不上）")
+            summary(f"- 上架地區：{len(territories) - len(SKIP_TERRITORIES)} 個國家與地區（中國大陸要 ICP 備案，先不上）")
             return
         rows = all_pages(f"/v2/appAvailabilities/{existing}/territoryAvailabilities", {"limit": 200, "include": "territory"})
         turned = 0
