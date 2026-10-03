@@ -1,0 +1,49 @@
+# App Store 上架：把這一版的上架資料（文字、截圖、build、審核說明）用 App Store Connect API 準備好，要的話直接送審。
+# 見 ci/appstore.py。提交訊息有 [appstore] 時準備資料（不送審）；有 [appstore-submit] 時準備好就送審。也可以手動 Run workflow。
+# 金鑰和 TestFlight 用的是同一組 Secrets。
+name: App Store
+
+on:
+  push:
+    branches:
+      - main
+      - claude/ios-app-prototype-4492mf
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: "準備好就送審"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appstore
+  cancel-in-progress: false
+
+jobs:
+  appstore:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[appstore]') ||
+      contains(github.event.head_commit.message, '[appstore-submit]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install --quiet pyjwt cryptography
+      - name: 準備上架資料（要的話送審）
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          SUBMIT: ${{ (inputs.submit || contains(github.event.head_commit.message, '[appstore-submit]')) && 'yes' || 'no' }}
+        run: |
+          version=$(grep -m1 -o 'MARKETING_VERSION = [0-9.]*' StudioXConsole.xcodeproj/project.pbxproj | awk '{print $3}')
+          echo "版本 $version"
+          if [ "$SUBMIT" = "yes" ]; then
+            python3 ci/appstore.py prepare --version "$version" --submit
+          else
+            python3 ci/appstore.py prepare --version "$version"
+          fi
