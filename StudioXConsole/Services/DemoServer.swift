@@ -228,6 +228,8 @@ nonisolated enum DemoServer {
     {"id":"yc1","status":"waiting","channel":"line","line":{"name":"小雯","following":true},"member":{"name":"小雯"},
      "handoff":{"reason":"客人說收到時包裝破損"},"replyGoesTo":"回覆會從官方帳號傳到客人的 LINE（署名「真人客服」）",
      "messages":[
+      {"role":"user","content":"請問蛋捲禮盒可以放多久？想寄給台北的朋友","at":"\(ago(hours: 50))","tag":"商品詢問","jev":{"human":false,"confidence":0.02}},
+      {"role":"assistant","content":"原味蛋捲禮盒常溫可以放 **30 天**，開封後建議一週內吃完。寄台北隔天就到，盒子附提袋，送禮很方便。","at":"\(ago(hours: 50))"},
       {"role":"user","content":"我的訂單到哪了？","at":"\(ago(hours: 26))","tag":"訂單查詢","jev":{"human":false,"confidence":0.04}},
       {"role":"assistant","content":"你的訂單 **CM-24100607** 昨天已經出貨，黑貓單號 9012-3456-7890，預計今天送達。","at":"\(ago(hours: 26))"},
       {"role":"user","content":"蛋捲禮盒收到的時候盒子壓扁了","at":"\(ago(hours: 0.25))","tag":"收貨問題","jev":{"human":true,"confidence":0.93}},
@@ -319,7 +321,7 @@ nonisolated enum DemoServer {
 
     private static func schema(site: String) -> String {
         let product = #"""
-        {"key":"product","label":"商品","ops":{"list":true,"get":true,"update":true,"create":true,"delete":true,"images":"multiple"},
+        {"key":"product","label":"商品","ops":{"list":true,"get":true,"update":true,"create":true,"delete":true\#(screenshots ? "" : #","images":"multiple""#)},
          "fields":[{"key":"title","label":"名稱","type":"string","required":true,"maxLen":80},
                    {"key":"price","label":"價格","type":"ntd","required":true,"min":0},
                    {"key":"stock","label":"庫存","type":"int","min":0},

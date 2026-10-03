@@ -97,7 +97,7 @@ jobs:
             "site|-demo -demoRoute site"
             "xena|-demo -demoRoute xena"
             "line|-demo -demoRoute line"
-            "voice|-demo -demoVoice YES"
+            "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )
           if [ "$FULL" = "yes" ]; then
@@ -119,7 +119,7 @@ jobs:
             scenes=(
               "home|-demo|13"
               "talk|-demo|5"
-              "voice|-demo -demoVoice YES"
+              "voice|-demo -demoVoice YES|12"
               "line|-demo -demoRoute line"
               "inbox|-demo -demoTab inbox"
               "orders|-demo -demoTab orders"
