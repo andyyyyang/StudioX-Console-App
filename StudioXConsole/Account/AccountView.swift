@@ -1,12 +1,15 @@
 import AVFoundation
 import SwiftUI
 
-/// 設定（手機：首頁右上角的齒輪；iPad：側欄）：帳號、外觀、Xena、首頁、通知、安全、各網站的職能、console、登出。
+/// 設定（手機：首頁右上角的齒輪；iPad：側欄）：帳號、外觀、Xena、首頁、通知、安全、各網站的職能、console、登出、刪除帳號。
 /// 可以微調的偏好在 AppSettings（存在這台裝置，改了馬上生效）
 struct AccountView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var confirmingSignOut = false
+    @State private var confirmingDelete = false
+    @State private var deleting = false
+    @State private var deleteError: String?
     @State private var showingNotifications = false
 
     private var version: String {
@@ -190,6 +193,14 @@ struct AccountView: View {
                                 } label: { Text("登出") }
                                 .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
                             }
+                            // App Store 要求：App 裡就能刪帳號（示範模式也走一遍，什麼都不會真的刪）
+                            Button {
+                                confirmingDelete = true
+                            } label: {
+                                if deleting { ProgressView() } else { Text("刪除帳號") }
+                            }
+                            .buttonStyle(.brand(.ghost, size: .lg, fullWidth: true))
+                            .disabled(deleting)
                         }
                     }
                     .frame(maxWidth: Metric.readable + 120, alignment: .leading)
@@ -226,6 +237,29 @@ struct AccountView: View {
             } message: {
                 Text("這台裝置的登入會撤銷、不再收到通知，其他裝置與 AI 連接器不受影響。")
             }
+            .confirmationDialog("要刪除 StudioX 帳號嗎？", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("永久刪除帳號", role: .destructive) { Task { await deleteAccount() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(model.isDemo
+                    ? "這是示範模式：會走一遍刪除帳號的流程，然後回到歡迎頁，不會刪掉任何東西。"
+                    : "你在每個網站的管理權限、Apple 登入的連結、所有裝置的登入與通知都會刪除，無法復原。網站本身與網站的資料（訂單、客人）不受影響，仍由網站負責人管理。")
+            }
+            .alert("沒有刪除", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
+            }
+        }
+    }
+
+    private func deleteAccount() async {
+        deleting = true
+        defer { deleting = false }
+        do {
+            _ = try await model.deleteAccount()
+        } catch {
+            deleteError = error.localizedDescription
         }
     }
 

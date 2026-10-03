@@ -10,10 +10,11 @@ App Store 上架（.github/workflows/appstore.yml）：用 App Store Connect API
   3. 年齡分級：都選「無」（商用工具，沒有成人內容）
   4. 截圖：docs/appstore/iphone69/*.png（6.9 吋 iPhone）、docs/appstore/ipad13/*.png（13 吋 iPad），照檔名順序、整組換掉
   5. 這一版的 build：最新一個處理好的
-  6. 審核說明（示範模式怎麼進去）
-  7. --submit：送審
+  6. 審核說明（示範模式怎麼進去、刪除帳號在哪）
+  7. 價格：免費；上架地區：全部國家與地區（中國大陸要 ICP 備案，先不上），之後新開的地區自動上架
+  8. --submit：送審
 
-API 做不到、要在 App Store Connect 網頁上做一次的：App 隱私權（資料蒐集問卷）、價格（免費）與上架地區、審核聯絡人（姓名、電話、Email）。
+API 做不到、要在 App Store Connect 網頁上做一次的：App 隱私權（資料蒐集問卷）、審核聯絡人（姓名、電話、Email）。
 送審前會檢查，缺了就在摘要列出來、不送。
 """
 import argparse
@@ -23,6 +24,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -169,6 +171,79 @@ def content_rights(app):
         summary(f"- ⚠️ 內容權利聲明：{apple_error(e)}")
 
 
+# ── 價格與上架地區 ───────────────────────────────────────────────────────────
+
+# 中國大陸要 ICP 備案號才能上架，先不選（有備案號再加）
+SKIP_TERRITORIES = {"CHN"}
+
+
+def pricing(app):
+    """免費：以台灣為基準地區，選價格 0 的價格點"""
+    try:
+        points = all_pages(f"/apps/{app}/appPricePoints", {"filter[territory]": "TWN", "limit": 200})
+        free = next((p for p in points if float(p["attributes"].get("customerPrice") or 1) == 0), None)
+        if not free:
+            summary("- ⚠️ 找不到免費的價格點，價格要在網頁上設（價格與上架地區 → 免費）")
+            return
+        call("POST", "/appPriceSchedules", {
+            "data": {"type": "appPriceSchedules", "relationships": {
+                "app": {"data": {"type": "apps", "id": app}},
+                "baseTerritory": {"data": {"type": "territories", "id": "TWN"}},
+                "manualPrices": {"data": [{"type": "appPrices", "id": "${free}"}]},
+            }},
+            "included": [{"type": "appPrices", "id": "${free}", "attributes": {"startDate": None},
+                          "relationships": {"appPricePoint": {"data": {"type": "appPricePoints", "id": free["id"]}}}}],
+        })
+        summary("- 價格：免費")
+    except ApiError as e:
+        summary(f"- ⚠️ 價格要在網頁上設（價格與上架地區 → 免費）：{apple_error(e)}")
+
+
+def all_pages(path, query):
+    out, q = [], dict(query)
+    while True:
+        r = call("GET", path, query=q)
+        out += data(r)
+        nxt = (r.get("links") or {}).get("next")
+        if not nxt:
+            return out
+        q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(nxt).query))
+
+
+def availability(app):
+    """全部國家與地區（中國大陸除外），之後 Apple 新開的地區也自動上架"""
+    try:
+        territories = [t["id"] for t in all_pages("/territories", {"limit": 200}) if t["id"] not in SKIP_TERRITORIES]
+        existing = None
+        try:
+            existing = (call("GET", f"/apps/{app}/appAvailabilityV2").get("data") or {}).get("id")
+        except ApiError as e:
+            if e.status != 404:
+                raise
+        if not existing:
+            call("POST", "/v2/appAvailabilities", {
+                "data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": True}, "relationships": {
+                    "app": {"data": {"type": "apps", "id": app}},
+                    "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{{t}}}"} for t in territories]},
+                }},
+                "included": [{"type": "territoryAvailabilities", "id": f"${{{t}}}",
+                              "attributes": {"available": True, "releaseDate": None, "preOrderEnabled": False},
+                              "relationships": {"territory": {"data": {"type": "territories", "id": t}}}} for t in territories],
+            })
+            summary(f"- 上架地區：{len(territories)} 個國家與地區（中國大陸要 ICP 備案，先不上）")
+            return
+        rows = all_pages(f"/v2/appAvailabilities/{existing}/territoryAvailabilities", {"limit": 200, "include": "territory"})
+        turned = 0
+        for row in rows:
+            tid = ((row.get("relationships") or {}).get("territory") or {}).get("data", {}).get("id")
+            if tid and tid not in SKIP_TERRITORIES and not row["attributes"].get("available"):
+                call("PATCH", f"/territoryAvailabilities/{row['id']}", {"data": {"type": "territoryAvailabilities", "id": row["id"], "attributes": {"available": True}}})
+                turned += 1
+        summary(f"- 上架地區：全部國家與地區（中國大陸除外）{f'，這次打開 {turned} 個' if turned else ''}")
+    except ApiError as e:
+        summary(f"- ⚠️ 上架地區要在網頁上設（價格與上架地區 → 全部國家或地區）：{apple_error(e)}")
+
+
 # ── 截圖 ─────────────────────────────────────────────────────────────────────
 
 def upload_shot(set_id, path):
@@ -300,11 +375,13 @@ def prepare(args):
     loc_id = version_texts(version_id, m)
     app_info(app, m)
     content_rights(app)
+    pricing(app)
+    availability(app)
     if not args.skip_screenshots:
         screenshots(loc_id)
     has_build = attach_build(app, version_id, args.version)
     contact_ok = review_detail(version_id, m)
-    summary("\n**還要在 App Store Connect 網頁上做一次的**（API 做不到）：App 隱私權問卷、價格（免費）與上架地區"
+    summary("\n**還要在 App Store Connect 網頁上做一次的**（API 做不到）：App 隱私權問卷"
             + ("" if contact_ok else "、審核聯絡人（姓名、電話、Email）"))
     if args.submit:
         if not has_build:

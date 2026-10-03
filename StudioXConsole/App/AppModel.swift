@@ -187,7 +187,7 @@ final class AppModel {
         case "search": tab = .search
         default: break
         }
-        let shop = "yellowgirl.tw"
+        let shop = "chenmai.studiox.tw"
         switch defaults.string(forKey: "demoRoute") {
         case "site": open(.site(shop))
         case "traffic": open(.traffic(site: shop))
@@ -232,6 +232,18 @@ final class AppModel {
         await push.unregister()
         await api.signOut()
         didSignOut(message: nil)
+    }
+
+    /// 刪除帳號：先用 Face ID 驗證（設定裡有開「重要動作再驗證」時），console 刪掉之後這台裝置照登出清乾淨。
+    /// 回傳 false＝驗證沒過、什麼都沒做；失敗丟錯（例如平台管理者不能在 App 刪）
+    func deleteAccount() async throws -> Bool {
+        guard await lock.verify("刪除 StudioX 帳號") else { return false }
+        try await api.deleteAccount()
+        // 帳號、裝置、登入在 console 都刪掉了，這裡只要清掉本機的（先登出，推播就只清本機、不再叫 API）
+        await api.signOut()
+        await push.unregister()
+        didSignOut(message: nil)
+        return true
     }
 
     private func didSignOut(message: String?) {

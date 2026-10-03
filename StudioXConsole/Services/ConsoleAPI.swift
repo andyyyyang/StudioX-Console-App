@@ -190,6 +190,20 @@ final class ConsoleAPI {
         return Me(try json(data))
     }
 
+    /// 刪除自己的帳號（console 的 /api/app/account）：網站的權限、Apple 的連結、所有登入與推播裝置一起刪掉。
+    /// 平台管理者不能在 App 刪（console 回 403 和說明）
+    func deleteAccount() async throws {
+        let (data, http) = try await send(retryable: false) {
+            var r = URLRequest(url: ConsoleConfig.baseURL.appending(path: "api/app/account"))
+            r.httpMethod = "DELETE"
+            return r
+        }
+        guard http.statusCode == 200 else {
+            if let message = (try? json(data))?["message"]?.string { throw APIError.tool(message) }
+            throw APIError.http(http.statusCode)
+        }
+    }
+
     // MARK: 網站的工具（MCP）
 
     /// 呼叫某個網站的工具。回傳工具結果的 JSON（site_guide 這種純文字放在 .string）

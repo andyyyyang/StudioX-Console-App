@@ -47,7 +47,7 @@ struct XenaVoiceView: View {
                 .frame(maxWidth: 600)
                 .padding(.horizontal, 20)
 
-            if XenaMouth.usingCompactVoice && AppSettings.shared.speakReplies {
+            if XenaMouth.usingCompactVoice && AppSettings.shared.speakReplies && !DemoServer.screenshots {
                 voiceTip
                     .padding(.top, 8)
             }

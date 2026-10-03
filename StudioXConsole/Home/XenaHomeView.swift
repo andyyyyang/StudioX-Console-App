@@ -49,7 +49,8 @@ struct XenaHomeView: View {
     /// 招呼：上面一行小字（早安，Andy），下面一行大字只說重點（強調詞用 Xena 的彩虹漸層）
     private var greeting: (hello: String, headline: String) {
         let b = model.briefing
-        let hour = Calendar.taipei.component(.hour, from: .now)
+        // UI 截圖的狀態列固定 9:41，招呼也跟著說早安
+        let hour = DemoServer.screenshots ? 9 : Calendar.taipei.component(.hour, from: .now)
         let hello = switch hour {
         case 5..<11: "早安"
         case 11..<14: "午安"

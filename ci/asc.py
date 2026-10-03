@@ -65,7 +65,9 @@ def token():
 
 
 def call(method, path, body=None, query=None):
-    url = API + path + ("?" + urllib.parse.urlencode(query) if query else "")
+    # /v2/… 的端點（上架地區）不在 /v1 底下
+    base = API.rsplit("/v1", 1)[0] if path.startswith("/v2/") else API
+    url = base + path + ("?" + urllib.parse.urlencode(query) if query else "")
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
         "Authorization": f"Bearer {token()}",
