@@ -1025,7 +1025,7 @@ struct VisitorContent: View {
             case sticker(URL)
             /// 影片、語音（App 裡播）；檔案、位置（kind 是 nil：交給系統打開）
             case media(ViewedMedia.Kind?, title: String, url: URL, location: Bool)
-            /// 客人傳了東西，但原檔沒有存下來（舊的訊息、網站當時沒開圖片儲存）
+            /// 客人傳了東西，但原檔沒有存下來（舊的訊息、網站當時還沒有檔案空間）
             case missing(String)
             /// 語音轉成的文字
             case transcript(String)
@@ -1209,7 +1209,7 @@ private struct PhotoThumb: View {
                 .accessibilityLabel("客人傳的照片，點一下放大")
                 .transition(.opacity)
             } else if failed {
-                // 網站沒開圖片儲存時是向 LINE 拿的：LINE 刪掉之後就拿不到了
+                // 網站還沒有檔案空間時是向 LINE 拿的：LINE 刪掉之後就拿不到了
                 MissingMedia(text: "照片載入不了（LINE 只保留一段時間）")
             } else {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)

@@ -131,7 +131,7 @@ enum ReplyTool: Hashable {
 struct ReplyMenuOptions {
     var hasDraft = false
     var canRelease = false
-    /// 照片、檔案的上限；nil＝網站沒開圖片儲存
+    /// 照片、檔案的上限；nil＝網站還沒有檔案空間
     var attach: AttachLimits?
     var room = 4
     var coupons = false
@@ -164,7 +164,7 @@ struct ReplyMenuSheet: View {
                     }
                     section("附上") {
                         let attach = options.attach != nil && options.room > 0
-                        let off: String? = options.attach == nil ? "要開圖片儲存" : options.room > 0 ? nil : "最多 \(options.attach?.max ?? 4) 個"
+                        let off: String? = options.attach == nil ? "還沒有空間" : options.room > 0 ? nil : "最多 \(options.attach?.max ?? 4) 個"
                         tile(.photos, "photo.on.rectangle", "照片", tint: Theme.chart[1], caption: off, enabled: attach)
                         if camera {
                             tile(.camera, "camera", "拍照", tint: Theme.chart[1], caption: off, enabled: attach)
@@ -193,7 +193,7 @@ struct ReplyMenuSheet: View {
                         }
                     }
                     if options.attach == nil {
-                        Text("這個網站還沒開圖片儲存，開了才能傳照片和檔案（StudioX console →「網站服務」→「圖片儲存」）。")
+                        Text("這個網站還沒有放照片、檔案的空間，請 StudioX 幫網站開主機的檔案空間，開好就能傳。")
                             .textRole(.xs)
                             .foregroundStyle(Theme.muted)
                     }

@@ -686,7 +686,7 @@ struct UploadedAttachment: Hashable, Sendable {
     }
 }
 
-/// 網站讓專人附照片、檔案的上限（get assistant_conversation 的 attach；網站沒開圖片儲存是 nil）
+/// 網站讓專人附照片、檔案的上限（get assistant_conversation 的 attach；網站還沒有檔案空間是 nil）
 struct AttachLimits {
     var max: Int
     var imageBytes: Int
@@ -734,7 +734,7 @@ struct XenaConversationDetail {
     var adminURL: URL?
     /// 專人回覆除了文字還能附什麼：card（行銷卡片）、products（商品卡片）、attachments（照片、檔案）
     var replyWith: Set<String>
-    /// 照片、檔案的上限（網站沒開圖片儲存是 nil）
+    /// 照片、檔案的上限（網站還沒有檔案空間是 nil）
     var attach: AttachLimits?
     /// 登入的會員（黃毛丫頭）：可以點進會員頁、發專屬折價券
     var memberID: String?
