@@ -271,14 +271,22 @@ def signing(args):
     except ApiError as e:
         if e.status != 409:
             raise
-        # 一個團隊最多 3 張 Distribution 憑證：之前的建置沒收乾淨的先撤銷，再試一次
-        summary(f"- Apple Distribution 憑證滿了（Apple 說：{apple_error(e)}），清掉之前建置留下的")
-        if not free_distribution_slot(args.name):
-            sys.exit(1)
-        try:
-            cert = create()
-        except ApiError as e2:
-            summary(f"### ❌ 還是建不了 Apple Distribution 憑證\nApple 說：{apple_error(e2)}")
+        # 一個 Apple 團隊最多 3 張 Distribution 憑證，同一個團隊其他 App 的 CI（例如 StudioX POS）也在用：
+        # 先撤銷這個 App 之前的建置沒收乾淨的，再等別的建置用完還回來（剛撤銷的也要一下子才空出來）
+        summary(f"- Apple Distribution 憑證滿了（Apple 說：{apple_error(e)}）")
+        free_distribution_slot(args.name)
+        cert = None
+        for _ in range(16):
+            time.sleep(30)
+            try:
+                cert = create()
+                summary("- 等到空出來的憑證位置")
+                break
+            except ApiError as e2:
+                if e2.status != 409:
+                    raise
+        if cert is None:
+            summary("### ❌ 等了 8 分鐘還是建不了 Apple Distribution 憑證")
             list_distribution_certs()
             sys.exit(1)
     output("cert_id", cert["id"])
@@ -394,28 +402,28 @@ def list_distribution_certs():
         lines.append(f"- {c['attributes'].get('name') or c['attributes'].get('displayName')}"
                      f"（建立於 {made:%Y-%m-%d %H:%M} UTC；{names}）" if made else f"- {c['attributes'].get('name')}（{names}）")
     summary("現在的 Distribution 憑證：\n" + ("\n".join(lines) or "- （沒有）") +
-            "\n\n到 developer.apple.com → Certificates 撤銷一張用不到的，再推一次就會重建。"
-            "撤銷 Distribution 憑證不影響已經上架、已經在 TestFlight 的版本。")
+            "\n\n「沒有描述檔在用」的通常用不到了：確定不是你自己 Mac 上在用的，到 developer.apple.com → Certificates 撤銷，"
+            "再推一次就會重建。撤銷 Distribution 憑證不影響已經上架、已經在 TestFlight 的版本。")
 
 
 def free_distribution_slot(current, min_age_hours=2):
-    """憑證滿了：撤銷之前的建置留下的，讓這一次建得出來。
-    1. 名稱「StudioX CI …」的描述檔（建置被取消、機器斷線留下的）和它綁的憑證：一定是 CI 的，全部清掉
-    2. 不夠的話：沒有任何描述檔在用、建立超過 2 小時的 Distribution 憑證（之前撤銷失敗留下的；
-       沒有描述檔就拿不來簽 App Store 的版本），從最舊的撤銷一張
-    你自己在 Mac 上用的（有描述檔在用）不動。撤銷不影響已經上架、已經在 TestFlight 的版本"""
+    """撤銷這個 App 之前的建置留下的：名稱「StudioX CI …」、超過 2 小時的描述檔，和它綁的憑證（建置被取消、
+    機器斷線留下的）。其他的憑證（你自己的、其他 App 的 CI 的）一律不動，滿了就等、清不出來就列出來讓你決定。
+    撤銷不影響已經上架、已經在 TestFlight 的版本"""
     import datetime as dt
     try:
         certs, uses = distribution_state()
     except ApiError as e:
-        summary(f"### ❌ 讀不到憑證清單：{apple_error(e)}")
-        return False
+        summary(f"- 讀不到憑證清單：{apple_error(e)}")
+        return 0
     now = dt.datetime.now(dt.timezone.utc)
-    old_enough = lambda c: (cert_created(c) or now) <= now - dt.timedelta(hours=min_age_hours)
     freed = 0
     for c in certs:
         users = uses.get(c["id"], [])
-        if not users or not old_enough(c) or not all(n.startswith(CI_PREFIX) and n != current for _, n in users):
+        made = cert_created(c)
+        if not users or made is None or made > now - dt.timedelta(hours=min_age_hours):
+            continue
+        if not all(n.startswith(CI_PREFIX) and n != current for _, n in users):
             continue
         for pid, _ in users:
             delete_profile(pid)
@@ -426,21 +434,8 @@ def free_distribution_slot(current, min_age_hours=2):
         else:
             summary(f"- ⚠️ 之前建置留下的憑證撤銷不了：{error}")
     if not freed:
-        orphans = sorted((c for c in certs if not uses.get(c["id"]) and old_enough(c)),
-                         key=lambda c: cert_created(c) or now)
-        for c in orphans[:1]:
-            error = revoke(c["id"])
-            if error is None:
-                freed += 1
-                made = cert_created(c)
-                summary(f"- 撤銷了一張沒有描述檔在用的 Distribution 憑證（{made:%Y-%m-%d} 建立）" if made
-                        else "- 撤銷了一張沒有描述檔在用的 Distribution 憑證")
-            else:
-                summary(f"- ⚠️ 憑證撤銷不了：{error}")
-    if not freed:
-        summary("### ❌ Apple Distribution 憑證滿了，沒有可以自動清掉的")
-        list_distribution_certs()
-    return freed > 0
+        summary("- 沒有這個 App 的建置留下的憑證；等其他建置用完")
+    return freed
 
 
 # ── finish ───────────────────────────────────────────────────────────────────
