@@ -263,15 +263,24 @@ def signing(args):
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, args.name)]))
            .sign(key, hashes.SHA256()))
     csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
-    try:
-        cert = call("POST", "/certificates", {"data": {"type": "certificates", "attributes": {
+    def create():
+        return call("POST", "/certificates", {"data": {"type": "certificates", "attributes": {
             "certificateType": "DISTRIBUTION", "csrContent": csr_pem}}})["data"]
+    try:
+        cert = create()
     except ApiError as e:
-        if e.status == 409:
-            summary("### ❌ Apple Distribution 憑證已經到上限\n"
-                    "到 developer.apple.com → Certificates 撤銷用不到的 Distribution 憑證（名稱是「StudioX CI …」的可以直接撤銷），再重跑。")
+        if e.status != 409:
+            raise
+        # 一個團隊最多 3 張 Distribution 憑證：之前的建置沒收乾淨的先撤銷，再試一次
+        summary(f"- Apple Distribution 憑證滿了（Apple 說：{apple_error(e)}），清掉之前建置留下的")
+        if not free_distribution_slot(args.name):
             sys.exit(1)
-        raise
+        try:
+            cert = create()
+        except ApiError as e2:
+            summary(f"### ❌ 還是建不了 Apple Distribution 憑證\nApple 說：{apple_error(e2)}")
+            list_distribution_certs()
+            sys.exit(1)
     output("cert_id", cert["id"])
     der = base64.b64decode(cert["attributes"]["certificateContent"])
     certificate = x509.load_der_x509_certificate(der)
@@ -308,18 +317,130 @@ def signing(args):
     summary(f"- 這一次的簽章：憑證與描述檔「{args.name}」（建置完就撤銷）")
 
 
+def revoke(cert_id, tries=3):
+    """撤銷憑證（已經不在了也算成功）；Apple 偶爾回 5xx，等一下再試"""
+    for i in range(tries):
+        try:
+            call("DELETE", f"/certificates/{cert_id}")
+            return None
+        except ApiError as e:
+            if e.status == 404:
+                return None
+            if i == tries - 1 or e.status < 500 and e.status != 429:
+                return apple_error(e)
+            time.sleep(5 * (i + 1))
+
+
+def delete_profile(profile_id):
+    try:
+        call("DELETE", f"/profiles/{profile_id}")
+        return None
+    except ApiError as e:
+        return None if e.status == 404 else apple_error(e)
+
+
 def cleanup(args):
     if args.profile:
-        try:
-            call("DELETE", f"/profiles/{args.profile}")
-        except ApiError as e:
-            summary(f"- ⚠️ 描述檔沒有刪掉：{e}")
+        error = delete_profile(args.profile)
+        if error:
+            summary(f"- ⚠️ 描述檔沒有刪掉：{error}")
     if args.cert:
-        try:
-            call("DELETE", f"/certificates/{args.cert}")
+        error = revoke(args.cert)
+        if error is None:
             summary("- 撤銷了這一次的憑證、刪掉描述檔（已經上傳的版本不受影響）")
-        except ApiError as e:
-            summary(f"- ⚠️ 憑證沒有撤銷，到 developer.apple.com 撤銷名稱是「StudioX CI …」的那張：{e}")
+        else:
+            # 下一次建置憑證滿了會自己清掉（free_distribution_slot）
+            summary(f"- ⚠️ 憑證沒有撤銷（下一次建置會再清）：{error}")
+
+
+# ── 之前的建置沒收乾淨的憑證 ──────────────────────────────────────────────────
+
+CI_PREFIX = "StudioX CI "
+
+
+def cert_created(cert):
+    """憑證的建立時間：Apple 只給到期日，Distribution 憑證效期一年"""
+    import datetime as dt
+    import re
+    exp = re.sub(r"([+-]\d\d)(\d\d)$", r"\1:\2", (cert["attributes"].get("expirationDate") or "").replace("Z", "+00:00"))
+    try:
+        return dt.datetime.fromisoformat(exp) - dt.timedelta(days=365)
+    except ValueError:
+        return None
+
+
+def distribution_state():
+    """Distribution 憑證，和每一張被哪些描述檔用著"""
+    certs = call("GET", "/certificates", query={
+        "filter[certificateType]": "DISTRIBUTION,IOS_DISTRIBUTION", "limit": 200}).get("data", [])
+    uses = {}
+    for p in call("GET", "/profiles", query={"limit": 200, "include": "certificates", "limit[certificates]": 50}).get("data", []):
+        rel = ((p.get("relationships") or {}).get("certificates") or {}).get("data") or []
+        for c in rel:
+            uses.setdefault(c["id"], []).append((p["id"], p["attributes"].get("name") or ""))
+    return certs, uses
+
+
+def list_distribution_certs():
+    try:
+        certs, uses = distribution_state()
+    except ApiError as e:
+        summary(f"- 讀不到憑證清單：{apple_error(e)}")
+        return
+    lines = []
+    for c in certs:
+        made = cert_created(c)
+        names = "、".join(n for _, n in uses.get(c["id"], [])) or "沒有描述檔在用"
+        lines.append(f"- {c['attributes'].get('name') or c['attributes'].get('displayName')}"
+                     f"（建立於 {made:%Y-%m-%d %H:%M} UTC；{names}）" if made else f"- {c['attributes'].get('name')}（{names}）")
+    summary("現在的 Distribution 憑證：\n" + ("\n".join(lines) or "- （沒有）") +
+            "\n\n到 developer.apple.com → Certificates 撤銷一張用不到的，再推一次就會重建。"
+            "撤銷 Distribution 憑證不影響已經上架、已經在 TestFlight 的版本。")
+
+
+def free_distribution_slot(current, min_age_hours=2):
+    """憑證滿了：撤銷之前的建置留下的，讓這一次建得出來。
+    1. 名稱「StudioX CI …」的描述檔（建置被取消、機器斷線留下的）和它綁的憑證：一定是 CI 的，全部清掉
+    2. 不夠的話：沒有任何描述檔在用、建立超過 2 小時的 Distribution 憑證（之前撤銷失敗留下的；
+       沒有描述檔就拿不來簽 App Store 的版本），從最舊的撤銷一張
+    你自己在 Mac 上用的（有描述檔在用）不動。撤銷不影響已經上架、已經在 TestFlight 的版本"""
+    import datetime as dt
+    try:
+        certs, uses = distribution_state()
+    except ApiError as e:
+        summary(f"### ❌ 讀不到憑證清單：{apple_error(e)}")
+        return False
+    now = dt.datetime.now(dt.timezone.utc)
+    old_enough = lambda c: (cert_created(c) or now) <= now - dt.timedelta(hours=min_age_hours)
+    freed = 0
+    for c in certs:
+        users = uses.get(c["id"], [])
+        if not users or not old_enough(c) or not all(n.startswith(CI_PREFIX) and n != current for _, n in users):
+            continue
+        for pid, _ in users:
+            delete_profile(pid)
+        error = revoke(c["id"])
+        if error is None:
+            freed += 1
+            summary(f"- 撤銷了之前建置留下的憑證（描述檔 {'、'.join(n for _, n in users)}）")
+        else:
+            summary(f"- ⚠️ 之前建置留下的憑證撤銷不了：{error}")
+    if not freed:
+        orphans = sorted((c for c in certs if not uses.get(c["id"]) and old_enough(c)),
+                         key=lambda c: cert_created(c) or now)
+        for c in orphans[:1]:
+            error = revoke(c["id"])
+            if error is None:
+                freed += 1
+                made = cert_created(c)
+                summary(f"- 撤銷了一張沒有描述檔在用的 Distribution 憑證（{made:%Y-%m-%d} 建立）" if made
+                        else "- 撤銷了一張沒有描述檔在用的 Distribution 憑證")
+            else:
+                summary(f"- ⚠️ 憑證撤銷不了：{error}")
+    if not freed:
+        summary("### ❌ Apple Distribution 憑證滿了，沒有可以自動清掉的")
+        list_distribution_certs()
+    return freed > 0
 
 
 # ── finish ───────────────────────────────────────────────────────────────────

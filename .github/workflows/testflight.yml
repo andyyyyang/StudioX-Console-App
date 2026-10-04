@@ -32,8 +32,8 @@ env:
 jobs:
   # 便宜的 Linux 先檢查：Secrets 設好了沒、App ID 註冊了沒、App Store Connect 上有沒有這個 App
   prepare:
-    # 提交訊息有 [invite only]：只重寄邀請（testflight-invite.yml），不建置
-    if: "!contains(github.event.head_commit.message, '[invite only]')"
+    # 提交訊息有 [invite only]：只重寄邀請（testflight-invite.yml）；[public only]：只把現有的 build 給公開測試（testflight-public.yml）。都不建置
+    if: "!contains(github.event.head_commit.message, '[invite only]') && !contains(github.event.head_commit.message, '[public only]')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -233,7 +233,8 @@ jobs:
     needs: [prepare, build]
     if: needs.build.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    # 等 Apple 處理最多 40 分鐘，[public] 再等測試版審核最多 40 分鐘
+    timeout-minutes: 95
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -257,3 +258,11 @@ jobs:
             --version "${{ needs.build.outputs.version }}" \
             --build "${{ needs.build.outputs.build }}" \
             --notes notes.txt
+      # 提交訊息有 [public]：這一版也給公開測試（外部測試員，ci/testflight_public.py），送 Apple 的測試版審核
+      - name: 給公開測試
+        if: contains(github.event.head_commit.message, '[public]')
+        run: |
+          python3 ci/testflight_public.py \
+            --version "${{ needs.build.outputs.version }}" \
+            --build "${{ needs.build.outputs.build }}" \
+            --wait 40
