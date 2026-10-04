@@ -56,6 +56,8 @@ final class XenaSession {
     @ObservationIgnored var onDidWrite: (() -> Void)?
     /// 危險動作確認前的驗證（AppModel 接到 Face ID）；回 false 就不送出
     @ObservationIgnored var verify: ((String) async -> Bool)?
+    /// 還沒同意用雲端 AI 時：先問（AppModel.withCloudAI），同意了才送
+    @ObservationIgnored var askConsent: ((@escaping () -> Void) -> Void)?
     @ObservationIgnored private let api: ConsoleAPI
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -163,6 +165,10 @@ final class XenaSession {
     func send(_ text: String, answering: String? = nil) {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, !isBusy else { return }
+        guard AppSettings.shared.cloudAIAllowed else {
+            askConsent?({ [weak self] in self?.send(text, answering: answering) })
+            return
+        }
         if let answering, let i = items.firstIndex(where: { $0.id == answering }), case .ask(var ask) = items[i] {
             ask.answer = message
             items[i] = .ask(ask)

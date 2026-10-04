@@ -328,7 +328,7 @@ struct XenaConversationView: View {
                 }
             }
             if desk, status != "closed" {
-                Button("請 Xena 擬回覆", systemImage: "sparkles") { xenaWrite(polish: false) }
+                Button("請 Xena 擬回覆", systemImage: "sparkles") { model.withCloudAI { xenaWrite(polish: false) } }
             }
             Button("跟 Xena 討論這段對話", systemImage: "bubble.left.and.text.bubble.right") { askXenaForDraft() }
             if let url = detail?.adminURL ?? model.site(site)?.adminURL {
@@ -383,7 +383,7 @@ struct XenaConversationView: View {
                             local: XenaLocal.shared.available,
                             pick: { reply in withAnimation(Motion.ease) { draft = reply } },
                             again: { Task { await suggestLocal(again: true) } },
-                            askXena: { Task { await suggestXena() } },
+                            askXena: { model.withCloudAI { Task { await suggestXena() } } },
                             hide: { withAnimation(Motion.fast) { suggest.hidden = true } }
                         )
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -471,8 +471,8 @@ struct XenaConversationView: View {
         guard let tool = pendingTool else { return }
         pendingTool = nil
         switch tool {
-        case .xenaDraft: xenaWrite(polish: false)
-        case .xenaPolish: xenaWrite(polish: true)
+        case .xenaDraft: model.withCloudAI { xenaWrite(polish: false) }
+        case .xenaPolish: model.withCloudAI { xenaWrite(polish: true) }
         case .release: act("release")
         case .suggest: Task { await requestSuggestions() }
         case .photos: showPhotos = true
@@ -560,7 +560,7 @@ struct XenaConversationView: View {
         }
         guard key != suggest.key else { return }
         suggest = ReplySuggestions(key: key)
-        if AppSettings.shared.replySuggest == .auto, ReplySuggestions.needsXena(run) {
+        if AppSettings.shared.replySuggest == .auto, ReplySuggestions.needsXena(run), AppSettings.shared.cloudAIAllowed {
             await suggestXena()
         } else if XenaLocal.shared.available {
             await suggestLocal(again: false)
@@ -574,10 +574,11 @@ struct XenaConversationView: View {
         if suggest.key != key { suggest = ReplySuggestions(key: key) }
         withAnimation(Motion.fast) { suggest.hidden = false }
         guard suggest.replies.isEmpty, suggest.loading == nil else { return }
-        if XenaLocal.shared.available, !(AppSettings.shared.replySuggest == .auto && ReplySuggestions.needsXena(run)) {
+        let wantsXena = AppSettings.shared.replySuggest == .auto && ReplySuggestions.needsXena(run) && AppSettings.shared.cloudAIAllowed
+        if XenaLocal.shared.available, !wantsXena {
             await suggestLocal(again: false)
         } else {
-            await suggestXena()
+            model.withCloudAI { Task { await suggestXena() } }
         }
     }
 

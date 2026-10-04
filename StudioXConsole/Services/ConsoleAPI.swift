@@ -13,6 +13,8 @@ nonisolated enum APIError: LocalizedError {
     case tool(String)
     /// 權限不夠（網站關掉了寫入、職能不夠）
     case scope(String)
+    /// 還沒同意 Xena 使用雲端 AI（CloudAIConsentSheet）：資料不送出去
+    case needsAIConsent
 
     var errorDescription: String? {
         switch self {
@@ -21,6 +23,7 @@ nonisolated enum APIError: LocalizedError {
         case .http(let code): "伺服器回應 \(code)，請稍後再試"
         case .rpc(let message), .tool(let message): message
         case .scope(let message): message
+        case .needsAIConsent: "要先同意 Xena 使用雲端 AI（設定 → AI 與隱私）"
         }
     }
 }
@@ -160,6 +163,7 @@ final class ConsoleAPI {
 
     /// 一句話 → 聲音（console 用金鑰庫的 OpenAI／Google 轉，mp3 或 wav）
     func speech(_ text: String, voice: String) async throws -> Data {
+        try requireCloudAI()
         let body = try JSONEncoder().encode(["text": text, "voice": voice])
         let (data, http) = try await send {
             var r = URLRequest(url: ConsoleConfig.baseURL.appending(path: "api/app/tts"))
@@ -465,6 +469,7 @@ final class ConsoleAPI {
 
     /// console 的 Xena 讀整段對話寫一段回覆（draft：notes 是專人交代的重點；polish：text 是要潤飾的那段）。只回草稿，不會送出
     func replyDraft(site: String, id: String, polish: Bool, text: String) async throws -> String {
+        try requireCloudAI()
         let payload: JSONValue = ["site": .string(site), "id": .string(id), "mode": .string(polish ? "polish" : "draft"), "text": .string(text)]
         let (data, http) = try await send { try appRequest("api/app/reply-draft", method: "POST", body: payload) }
         if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
@@ -476,6 +481,7 @@ final class ConsoleAPI {
 
     /// 回覆建議（Xena 的那一半）：這位客人的分析＋三種下一句。客人同一句話之後再叫拿的是快取，不再算額度
     func replySuggest(site: String, id: String, refresh: Bool = false) async throws -> XenaReplySuggestion {
+        try requireCloudAI()
         let payload: JSONValue = ["site": .string(site), "id": .string(id), "refresh": .bool(refresh)]
         let (data, http) = try await send { try appRequest("api/app/reply-suggest", method: "POST", body: payload) }
         if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
@@ -485,6 +491,11 @@ final class ConsoleAPI {
     }
 
     // MARK: Xena（/api/copilot）
+
+    /// 會把資料交給雲端 AI 的請求，送出前再檢查一次有沒有同意（畫面上漏問了也不會送出去）
+    private func requireCloudAI() throws {
+        guard AppSettings.cloudAIAllowedNow else { throw APIError.needsAIConsent }
+    }
 
     private func copilotRequest(_ path: String, method: String = "GET", body: JSONValue? = nil) throws -> URLRequest {
         var r = URLRequest(url: ConsoleConfig.baseURL.appending(path: path))
@@ -535,6 +546,7 @@ final class ConsoleAPI {
 
     /// 上傳一份文件給 Xena（App 在對話裡附上 .md／.txt）：存成草稿，對話裡帶草稿編號
     func uploadDraft(text: String, name: String) async throws -> DraftUpload {
+        try requireCloudAI()
         let payload: JSONValue = ["text": .string(text), "name": .string(name)]
         let (data, http) = try await send { try copilotRequest("api/copilot/drafts", method: "POST", body: payload) }
         guard http.statusCode == 200 else { throw copilotError(data, http.statusCode) }
@@ -592,6 +604,7 @@ final class ConsoleAPI {
     }
 
     private func openStream(_ payload: JSONValue) async throws -> URLSession.AsyncBytes {
+        try requireCloudAI()
         for attempt in 0..<2 {
             var r = try copilotRequest("api/copilot/chat", method: "POST", body: payload)
             r.timeoutInterval = 160

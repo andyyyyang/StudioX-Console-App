@@ -239,6 +239,10 @@ struct MainView: View {
         .fullScreenCover(isPresented: $model.showVoice) {
             XenaVoiceView()
         }
+        // 第一次用到雲端 AI（Xena 對話、擬回覆、Xena 分析、雲端語音）之前：說明會交給誰、交什麼，同意了才做
+        .sheet(isPresented: $model.showAIConsent) {
+            CloudAIConsentSheet { model.answerCloudAI($0) }
+        }
         .sheet(isPresented: $model.showAccount) {
             AccountView()
                 .presentationDragIndicator(.visible)

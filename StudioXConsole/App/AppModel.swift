@@ -83,19 +83,33 @@ final class AppModel {
     var sitePaths: [String: [Route]] = [:]
     var showXena = false {
         didSet {
-            guard showXena, deckSheet != nil else { return }
-            showXena = false
-            afterClosingDeck { $0.showXena = true }
+            guard showXena else { return }
+            if deckSheet != nil {
+                showXena = false
+                afterClosingDeck { $0.showXena = true }
+            } else if !AppSettings.shared.cloudAIAllowed {
+                // 第一次：先說明會交給雲端 AI 什麼、同意了才打開
+                showXena = false
+                withCloudAI { [weak self] in self?.showXena = true }
+            }
         }
     }
     /// 用說的跟 Xena 聊（整個畫面）
     var showVoice = false {
         didSet {
-            guard showVoice, deckSheet != nil else { return }
-            showVoice = false
-            afterClosingDeck { $0.showVoice = true }
+            guard showVoice else { return }
+            if deckSheet != nil {
+                showVoice = false
+                afterClosingDeck { $0.showVoice = true }
+            } else if !AppSettings.shared.cloudAIAllowed {
+                showVoice = false
+                withCloudAI { [weak self] in self?.showVoice = true }
+            }
         }
     }
+    /// 雲端 AI 的說明與同意（CloudAIConsentSheet）；同意了才做 pendingCloudAI 裡的事
+    var showAIConsent = false
+    @ObservationIgnored private var pendingCloudAI: [() -> Void] = []
     /// 首頁狀況卡片打開的 sheet（今天的總覽，或一個網站）
     var deckSheet: DeckSheet?
     /// 開著幾個對話畫面（客服對話、客服信）：開著時收起 tab bar 上面的 Xena，回覆框貼著畫面底部
@@ -146,6 +160,9 @@ final class AppModel {
         }
         xena.verify = { [weak self] reason in
             await self?.lock.verify(reason) ?? false
+        }
+        xena.askConsent = { [weak self] action in
+            self?.withCloudAI(action)
         }
         push.api = api
         conversation.attach(self)
@@ -543,6 +560,46 @@ final class AppModel {
             show("好，一週後再提醒你", tone: .neutral)
         case .dismiss:
             show("好，這件不做", tone: .neutral)
+        }
+    }
+
+    /// 要把資料交給雲端 AI 的事（Xena 對話、擬回覆、Xena 分析、雲端語音）：同意過就直接做，
+    /// 沒有就先跳說明（App Review 5.1.2(i)），同意了才做；不同意就不做
+    func withCloudAI(_ action: @escaping () -> Void) {
+        if AppSettings.shared.cloudAIAllowed {
+            action()
+            return
+        }
+        pendingCloudAI.append(action)
+        guard !showAIConsent else { return }
+        if showAccount {
+            // 設定頁（sheet）開著：先收起來再問
+            showAccount = false
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                self?.showAIConsent = true
+            }
+        } else if deckSheet != nil {
+            afterClosingDeck { $0.showAIConsent = true }
+        } else {
+            showAIConsent = true
+        }
+    }
+
+    /// 說明頁按了同意／先不要（往下滑掉也算先不要）
+    func answerCloudAI(_ granted: Bool) {
+        let actions = pendingCloudAI
+        pendingCloudAI = []
+        showAIConsent = false
+        guard granted else {
+            if !actions.isEmpty { show("沒問題，Xena 先不用。之後可以在「設定 → AI 與隱私」打開", tone: .neutral) }
+            return
+        }
+        AppSettings.shared.cloudAIConsent = true
+        // 等說明頁收起來再打開 Xena（同一時間只能有一個畫面蓋上來）
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            for action in actions { action() }
         }
     }
 

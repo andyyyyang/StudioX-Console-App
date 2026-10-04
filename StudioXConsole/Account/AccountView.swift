@@ -11,6 +11,18 @@ struct AccountView: View {
     @State private var deleting = false
     @State private var deleteError: String?
     @State private var showingNotifications = false
+    /// 雲端 AI 的說明與同意（打開開關、選雲端語音、看說明）
+    @State private var consent: ConsentFor?
+
+    private enum ConsentFor: String, Identifiable {
+        /// 打開「Xena 使用雲端 AI」
+        case enable
+        /// 選了雲端自然語音
+        case cloudVoice
+        /// 已經同意過，只是看說明
+        case review
+        var id: String { rawValue }
+    }
 
     private var version: String {
         let v = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
@@ -77,7 +89,12 @@ struct AccountView: View {
                                 ChoiceRow(label: "聲音從哪裡來", help: settings.voiceSource == .iphone
                                           ? "iPhone 內建的聲音，不用錢、沒網路也能用。"
                                           : "回答的文字經 StudioX Console 送到 OpenAI（或 Google）轉成聲音，比較像真人；會用到 StudioX 的 AI 額度（大約每說一分鐘不到新台幣 1 元），不會保存。",
-                                          options: AppSettings.VoiceSource.allCases, selection: $settings.voiceSource) { $0.label }
+                                          options: AppSettings.VoiceSource.allCases, selection: Binding(
+                                              get: { settings.voiceSource },
+                                              // 雲端語音會把要念的那句交給 OpenAI／Google：還沒同意就先說明
+                                              set: { source in
+                                                  if source == .cloud, !settings.cloudAIAllowed { consent = .cloudVoice } else { settings.voiceSource = source }
+                                              })) { $0.label }
                                 if settings.voiceSource == .iphone {
                                     HStack(spacing: 12) {
                                         Text("哪個聲音")
@@ -126,6 +143,32 @@ struct AccountView: View {
                             SectionHead("Reply *suggestions*", aside: "回覆客人時，輸入框上面先放幾句可以直接用的", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "下一句誰來想", help: settings.replySuggest.help, options: AppSettings.ReplySuggest.allCases, selection: $settings.replySuggest) { $0.label }
+                            }
+                        }
+
+                        // AI 與隱私：Xena 會把哪些資料交給雲端 AI（App Review 5.1.2(i)），可以隨時關掉
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("AI & *privacy*", aside: "Xena 用雲端 AI 時，會把需要的內容交給 AI 服務處理", role: .h3)
+                            RuledList {
+                                ToggleRow(
+                                    label: "Xena 使用雲端 AI",
+                                    help: settings.cloudAIConsent
+                                        ? "開著：Xena 對話、擬回覆、Xena 分析客人、雲端語音會把需要的內容（你說的話、相關的網站資料與客服對話）經 StudioX Console 交給 OpenAI、Anthropic 或 Google 處理。"
+                                        : "關著：Xena 對話、Xena 擬回覆與分析、雲端語音不能用；Apple Intelligence 在 iPhone 上做的照常。",
+                                    isOn: Binding(
+                                        get: { settings.cloudAIConsent },
+                                        set: { on in
+                                            if on {
+                                                consent = .enable
+                                            } else {
+                                                settings.cloudAIConsent = false
+                                                if settings.voiceSource == .cloud { settings.voiceSource = .iphone }
+                                            }
+                                        }
+                                    )
+                                )
+                                .padding(.vertical, 10)
+                                row("會交出去什麼、交給誰") { consent = .review }
                             }
                         }
 
@@ -239,6 +282,15 @@ struct AccountView: View {
             }
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
             .navigationDestination(isPresented: $showingNotifications) { NotificationSettingsView() }
+            .sheet(item: $consent) { purpose in
+                CloudAIConsentSheet(reviewing: purpose == .review && settings.cloudAIConsent) { granted in
+                    if granted, purpose != .review || !settings.cloudAIConsent {
+                        settings.cloudAIConsent = true
+                        if purpose == .cloudVoice { settings.voiceSource = .cloud }
+                    }
+                    consent = nil
+                }
+            }
             .confirmationDialog("要登出嗎？", isPresented: $confirmingSignOut, titleVisibility: .visible) {
                 Button("登出", role: .destructive) { Task { await model.signOut() } }
                 Button("取消", role: .cancel) {}

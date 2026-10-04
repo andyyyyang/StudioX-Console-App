@@ -193,6 +193,17 @@ final class AppSettings {
     var aiCommands: Bool { didSet { save(aiCommands, "ai.commands") } }
     /// 客服對話輸入框上面的回覆建議（Jev 判斷、Apple Intelligence、Xena）
     var replySuggest: ReplySuggest { didSet { save(replySuggest.rawValue, "ai.replySuggest") } }
+    /// 同意 Xena 用雲端 AI（App Review 5.1.2(i)：個人資料交給第三方 AI 之前要先說明、取得同意，見 CloudAIConsentSheet）。
+    /// 「回到預設值」不會改這個（是隱私的選擇，不是外觀設定）
+    var cloudAIConsent: Bool { didSet { save(cloudAIConsent, "ai.cloudConsent") } }
+
+    /// 現在能不能把資料交給雲端 AI（UI 截圖時當作同意過）
+    var cloudAIAllowed: Bool { cloudAIConsent || DemoServer.screenshots }
+
+    /// 同上，任何地方都能讀（ConsoleAPI 送出前再檢查一次用）
+    nonisolated static var cloudAIAllowedNow: Bool {
+        UserDefaults.standard.bool(forKey: "settings.ai.cloudConsent") || ProcessInfo.processInfo.arguments.contains("-demo")
+    }
 
     private let defaults: UserDefaults
 
@@ -217,6 +228,7 @@ final class AppSettings {
         aiGreeting = defaults.object(forKey: "settings.ai.greeting") as? Bool ?? true
         aiCommands = defaults.object(forKey: "settings.ai.commands") as? Bool ?? true
         replySuggest = value("ai.replySuggest", ReplySuggest.auto)
+        cloudAIConsent = defaults.object(forKey: "settings.ai.cloudConsent") as? Bool ?? false
     }
 
     private func save(_ value: Any, _ key: String) {
