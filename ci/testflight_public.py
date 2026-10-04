@@ -178,21 +178,26 @@ def external_state(build_id):
     return (d.get("attributes") or {}).get("externalBuildState") or ""
 
 
-def what_to_test(app_id, build_id, locale):
-    """外部測試一定要有「測試內容」；TestFlight 的流程寫過就不動"""
+INTRO = ("StudioX 測試版：首頁的 Xena 每日重點、收件匣（網站與 LINE 客服）、訂單、商品、流量。"
+         "沒有 StudioX 帳號的話，登入畫面點「先看看示範（不用登入）」用示範資料試用。"
+         "有問題在 TestFlight 截圖回報。")
+
+
+def what_to_test(build_id, locale):
+    """外部測試一定要有「測試內容」：開頭一段給外部測試員的說明，後面接 TestFlight 流程寫的這一版改了什麼"""
     locs = call("GET", f"/builds/{build_id}/betaBuildLocalizations").get("data", [])
-    if any((x["attributes"].get("whatsNew") or "").strip() for x in locs):
-        return
-    text = ("StudioX 測試版：首頁的 Xena 每日重點、收件匣（網站與 LINE 客服）、訂單、商品、流量。"
-            "沒有 StudioX 帳號的話，登入畫面點「先看看示範（不用登入）」用示範資料試用。"
-            "有問題在 TestFlight 截圖回報，或搖一搖手機。")
-    if locs:
-        call("PATCH", f"/betaBuildLocalizations/{locs[0]['id']}", {"data": {
-            "type": "betaBuildLocalizations", "id": locs[0]["id"], "attributes": {"whatsNew": text}}})
-    else:
+    if not locs:
         call("POST", "/betaBuildLocalizations", {"data": {
-            "type": "betaBuildLocalizations", "attributes": {"locale": locale, "whatsNew": text},
+            "type": "betaBuildLocalizations", "attributes": {"locale": locale, "whatsNew": INTRO},
             "relationships": {"build": {"data": {"type": "builds", "id": build_id}}}}})
+        return
+    for loc in locs:
+        notes = (loc["attributes"].get("whatsNew") or "").strip()
+        if notes.startswith(INTRO):
+            continue
+        text = f"{INTRO}\n\n{notes}" if notes else INTRO
+        call("PATCH", f"/betaBuildLocalizations/{loc['id']}", {"data": {
+            "type": "betaBuildLocalizations", "id": loc["id"], "attributes": {"whatsNew": text[:4000]}}})
 
 
 def give_and_submit(group, build):
@@ -240,7 +245,7 @@ def main():
     group = public_group(a["id"])
     build = pick_build(a["id"], args.version, args.build)
     number = build["attributes"].get("version")
-    what_to_test(a["id"], build["id"], a["attributes"].get("primaryLocale") or m["locale"])
+    what_to_test(build["id"], a["attributes"].get("primaryLocale") or m["locale"])
     state = give_and_submit(group, build)
     summary(f"- Build {args.version}（{number}）：{STATES.get(state, state or '?')}")
 

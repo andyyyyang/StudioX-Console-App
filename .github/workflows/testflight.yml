@@ -251,7 +251,9 @@ jobs:
           {
             echo "${{ needs.build.outputs.version }}（${{ needs.build.outputs.build }}）・${GITHUB_REF_NAME}"
             echo
-            git log -8 --no-merges --pretty=format:'・%s'
+            # 這一版改了什麼：拿掉自動截圖的提交和 [public] 這類流程標記
+            git log -12 --no-merges --pretty=format:'%s' | grep -v '^UI 截圖' | head -8 \
+              | sed -E 's/ *\[[a-z -]+\]//g; s/^/・/'
           } > notes.txt
           python3 ci/asc.py finish \
             --app "${{ needs.prepare.outputs.app_id }}" \
