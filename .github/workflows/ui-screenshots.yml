@@ -106,6 +106,10 @@ jobs:
             "order|-demo -demoRoute order -demoScroll amounts"
             "member|-demo -demoRoute member"
             "inbox|-demo -demoTab inbox"
+            "history|-demo -demoRoute history"
+            "linepush|-demo -demoRoute linepush"
+            "campaign|-demo -demoRoute campaign"
+            "pending|-demo -demoRoute pending"
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )

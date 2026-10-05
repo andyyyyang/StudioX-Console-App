@@ -237,6 +237,12 @@ final class AppModel {
         case "thread": open(.thread(site: shop, id: "t1"))
         case "line": open(.xenaConversation(site: shop, id: "yc1"))
         case "products": open(.collection(site: shop, entity: "product"))
+        case "history":
+            tab = .inbox
+            inboxHistoryMode = true
+        case "linepush": open(.collection(site: shop, entity: "line_campaign"))
+        case "campaign": open(.record(site: shop, entity: "campaign", id: "sc1"))
+        case "pending": open(.collection(site: shop, entity: "pending_notification"))
         case "product": open(.record(site: shop, entity: "product", id: "p1"))
         case "xena": showXena = true
         default: break
