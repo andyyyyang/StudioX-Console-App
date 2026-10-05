@@ -145,6 +145,16 @@ struct MemberView: View {
                 (c["code"]?.string ?? "", [(c["isActive"]?.bool ?? false) ? "可以用" : "停用", c["expiresAt"]?.date.map { "\($0.dayText) 到期" }].compactMap { $0 }.joined(separator: "・"))
             })
         }
+
+        // 這位客人找過我們的紀錄（收件匣的全部紀錄，用 Email 搜）、照現在的規則重算等級
+        VStack(alignment: .leading, spacing: 14) {
+            Eyebrow("更多")
+            if let key = u["email"]?.string ?? u["name"]?.string, !key.isEmpty {
+                Button("看這位的客服紀錄") { model.openInboxHistory(search: key) }
+                    .buttonStyle(.brand(.ghost, size: .sm, arrow: true))
+            }
+            RecomputeTiersButton(site: site, userID: memberID)
+        }
     }
 
     /// RFM 分群（lib/personalized/rfm.ts）

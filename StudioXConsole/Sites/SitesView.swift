@@ -445,8 +445,10 @@ enum EntityStyle {
 
     static func group(_ key: String) -> String {
         switch key {
-        case "product", "category", "bundle", "coupon", "stall_menu", "membership_tier", "campaign", "shipping_settings", "bank_transfer":
+        case "product", "category", "bundle", "coupon", "stall_menu", "membership_tier", "shipping_settings", "bank_transfer":
             "商店"
+        case "campaign", "line_campaign", "line_marketing", "line_theme":
+            "行銷"
         case "user", "mailbox", "pending_notification":
             "顧客"
         case "page_seo", "business_info", "site_settings", "notifications_config", "personalized_config", "assistant_settings", "integration", "service":
@@ -458,7 +460,7 @@ enum EntityStyle {
         }
     }
 
-    static let groupOrder = ["內容", "商店", "顧客", "自動化", "網站設定"]
+    static let groupOrder = ["內容", "商店", "行銷", "顧客", "自動化", "網站設定"]
 
     static func groups(for schema: SiteSchema) -> [Group] {
         let shown = schema.entities.filter { !hidden.contains($0.key) && ($0.canList || $0.singleton || $0.canGet) }
@@ -478,6 +480,9 @@ enum EntityStyle {
         case "milestone": "trophy"
         case "membership_tier": "star"
         case "campaign": "megaphone"
+        case "line_campaign": "paper-airplane"
+        case "line_marketing": "arrow-path"
+        case "line_theme": "swatch"
         case "user": "users"
         case "mailbox": "envelope"
         case "pending_notification": "bell"
@@ -517,7 +522,11 @@ enum EntityStyle {
         case "faq", "content_faq": "*FAQ*"
         case "milestone": "*Milestones*"
         case "membership_tier": "Member *tiers*"
-        case "campaign": "*Campaigns*"
+        case "campaign": "SMS *campaigns*"
+        case "line_campaign": "LINE *push*"
+        case "line_marketing": "Buy-again *reminders*"
+        case "line_theme": "LINE *cards*"
+        case "pending_notification": "Pending *notices*"
         case "user": "*Members*"
         case "mailbox": "*Mailbox*"
         case "projects": "Selected *work*"
@@ -555,7 +564,7 @@ struct EntityRoot: View {
                 if schema.singleton {
                     RecordView(site: site, entity: entity, id: nil)
                 } else {
-                    CollectionView(site: site, entity: entity)
+                    EntityListView(site: site, entity: entity)
                 }
             } else {
                 SkeletonRows(rows: 5).pageWidth().brandPage()

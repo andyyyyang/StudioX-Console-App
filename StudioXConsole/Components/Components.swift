@@ -231,6 +231,44 @@ struct FilterBar<Item: Hashable>: View {
     }
 }
 
+/// 頁面裡的搜尋框（iPad 分欄的清單沒有導覽列，放不了 .searchable）
+struct SearchField: View {
+    @Binding var text: String
+    let prompt: String
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HeroIcon("magnifying-glass", size: 17)
+                .foregroundStyle(Theme.muted)
+            TextField(prompt, text: $text)
+                .focused($focused)
+                .submitLabel(.search)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.brand(15.5, .regular, relativeTo: .body))
+                .foregroundStyle(Theme.ink)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜尋")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(Theme.surface, in: .rect(cornerRadius: Metric.radiusSm))
+        .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(focused ? Theme.ink2 : Theme.line, lineWidth: 1) }
+        .contentShape(.rect)
+        .onTapGesture { focused = true }
+    }
+}
+
 /// 細框的小標籤（.chip：圓角 4、13px）
 struct Chip: View {
     let text: String

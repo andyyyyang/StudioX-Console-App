@@ -39,6 +39,7 @@ struct SearchView: View {
                         SkeletonRows(rows: 4)
                     } else if groups.isEmpty && searched == query {
                         EmptyState(title: "找不到「\(query)」", message: "試試訂單編號、客人的名字或電話、折價碼、商品或文章的名稱。")
+                        historyLink
                     } else {
                         ForEach(groups) { group in
                             VStack(alignment: .leading, spacing: 14) {
@@ -55,6 +56,7 @@ struct SearchView: View {
                                 }
                             }
                         }
+                        historyLink
                     }
                 }
                 .pageWidth()
@@ -77,6 +79,33 @@ struct SearchView: View {
                 await run(q)
             }
         }
+    }
+
+    /// 客服的對話、信、詢問在收件匣的全部紀錄裡搜（內容多，不在這裡一起搜）
+    private var historyLink: some View {
+        Button {
+            model.openInboxHistory(search: query.trimmingCharacters(in: .whitespaces))
+        } label: {
+            HStack(spacing: 12) {
+                HeroIcon("inbox-stack", size: 20)
+                    .foregroundStyle(Theme.ink2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("在客服紀錄找「\(query.trimmingCharacters(in: .whitespaces))」")
+                        .textRole(.h4)
+                        .foregroundStyle(Theme.ink)
+                    Text("官網、LINE 的對話，客服信和專案詢問，結束了的也找得到")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 8)
+                HeroIcon("chevron-right", size: 14)
+                    .foregroundStyle(Theme.muted)
+            }
+            .padding(16)
+            .overlay { RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Theme.line, lineWidth: 1) }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.press)
     }
 
     private var intro: some View {

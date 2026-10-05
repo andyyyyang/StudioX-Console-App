@@ -195,6 +195,8 @@ struct InboxList: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    /// 全部紀錄的搜尋（打字停一下才去搜）
+    @State private var search = ""
 
     var body: some View {
         let b = model.briefing
@@ -205,8 +207,17 @@ struct InboxList: View {
         let shown = all.only(topic)
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
-                header(all, updatedAt: b.updatedAt)
-                if b.updatedAt == nil && all.isEmpty {
+                VStack(alignment: .leading, spacing: 22) {
+                    header(all, updatedAt: b.updatedAt)
+                    modePicker
+                }
+                if model.inboxHistoryMode {
+                    InboxHistoryList(history: model.inboxHistory, search: $search) { item in
+                        open(item.route) {
+                            InboxRow(item: item, site: model.sites.count > 1 ? model.site(item.site) : nil)
+                        }
+                    }
+                } else if b.updatedAt == nil && all.isEmpty {
                     SkeletonRows(rows: 5)
                 } else if all.isEmpty {
                     EmptyState(title: "收件匣是空的", message: "客人在官網、LINE、Email 或聯絡表單找你時會出現在這裡；Xena 正在回答的對話也看得到。")
@@ -238,7 +249,35 @@ struct InboxList: View {
             .padding(.top, 16)
             .padding(.bottom, 48)
         }
-        .refreshable { [model] in await Task { await model.refreshAll() }.value }
+        .scrollDismissesKeyboard(.immediately)
+        .refreshable { [model] in
+            await Task {
+                if model.inboxHistoryMode {
+                    await model.inboxHistory.restart(sites: model.sites)
+                } else {
+                    await model.refreshAll()
+                }
+            }.value
+        }
+        // 別的頁面要搜的字（會員頁、搜尋頁）
+        .onChange(of: model.inboxSearch, initial: true) { _, q in
+            guard let q else { return }
+            search = q
+            model.inboxSearch = nil
+        }
+        // 第一次打開全部紀錄才載
+        .task(id: model.inboxHistoryMode) {
+            guard model.inboxHistoryMode, !model.inboxHistory.loaded, !model.inboxHistory.loading else { return }
+            await model.inboxHistory.restart(sites: model.sites)
+        }
+        // 搜尋：打字停 0.35 秒才去搜（清掉也是重新載）
+        .task(id: search) {
+            let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard model.inboxHistoryMode, q != model.inboxHistory.query else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await model.inboxHistory.restart(sites: model.sites, query: q)
+        }
         .brandPage()
         .navigationTitle("收件匣")
         .navigationBarTitleDisplayMode(.inline)
@@ -251,6 +290,19 @@ struct InboxList: View {
                 await model.briefing.refresh(sites: model.sites)
             }
         }
+    }
+
+    /// 現在（要不要你）／全部紀錄
+    private var modePicker: some View {
+        Picker("收件匣", selection: Binding(get: { model.inboxHistoryMode }, set: { on in
+            withAnimation(Motion.ease) { model.inboxHistoryMode = on }
+        })) {
+            Text("現在").tag(false)
+            Text("全部紀錄").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 320)
+        .accessibilityHint("全部紀錄有過去的對話、客服信和詢問，結束了的也在")
     }
 
     private func header(_ all: InboxSections, updatedAt: Date?) -> some View {
@@ -384,12 +436,15 @@ struct InquiryView: View {
     @State private var data: JSONValue?
     @State private var error: String?
     @State private var copied = false
+    @State private var proposal: Proposal?
+    @State private var working = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if let data {
                     content(data)
+                    statusActions(data["status"]?.string ?? "new")
                 } else if let error {
                     ErrorNote(message: error) { Task { await load() } }
                 } else {
@@ -404,6 +459,51 @@ struct InquiryView: View {
         .navigationTitle("專案詢問")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { _ in
+            model.show("已更新")
+            Task {
+                await load()
+                await model.refreshAll()
+            }
+        }
+    }
+
+    /// 回了信就標「已回覆」；不做的「封存」；封存、回過的可以改回新詢問（網站的 update inquiry，照樣先確認）
+    @ViewBuilder
+    private func statusActions(_ status: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Eyebrow("處理狀態")
+            FlowLayout(spacing: 8) {
+                if status != "replied" {
+                    Button("標成已回覆") { Task { await setStatus("replied") } }
+                        .buttonStyle(.brand(.ghost, size: .sm))
+                }
+                if status != "archived" {
+                    Button("封存") { Task { await setStatus("archived") } }
+                        .buttonStyle(.brand(.ghost, size: .sm))
+                }
+                if status != "new" {
+                    Button("改回新詢問") { Task { await setStatus("new") } }
+                        .buttonStyle(.brand(.ghost, size: .sm))
+                }
+            }
+            .disabled(working)
+        }
+    }
+
+    private func setStatus(_ status: String) async {
+        working = true
+        defer { working = false }
+        do {
+            switch try await model.api.proposeUpdate(site: site, entity: "inquiry", id: inquiryID, fields: ["status": .string(status)]) {
+            case .needsConfirmation(let p): proposal = p
+            case .done:
+                model.show("已更新")
+                await load()
+            }
+        } catch {
+            model.show(error.localizedDescription, tone: .danger)
+        }
     }
 
     private func load() async {

@@ -67,11 +67,15 @@ struct ImageGallery: View {
                                     if index == 0 { StatusBadge("主圖", tone: .gold).padding(8) }
                                 }
                                 .contextMenu {
-                                    Button("看大圖") { viewing = url }
+                                    Button("看大圖", systemImage: "arrow.up.left.and.arrow.down.right") { viewing = url }
                                     if index > 0 {
-                                        Button("設成主圖") { Task { await propose(setCover: url) } }
+                                        Button("設成主圖", systemImage: "star") { Task { await propose(setCover: url) } }
+                                        Button("往前移", systemImage: "arrow.left") { Task { await propose(move: index, by: -1) } }
                                     }
-                                    Button("移除", role: .destructive) { Task { await propose(remove: url) } }
+                                    if index < images.count - 1 {
+                                        Button("往後移", systemImage: "arrow.right") { Task { await propose(move: index, by: 1) } }
+                                    }
+                                    Button("移除", systemImage: "trash", role: .destructive) { Task { await propose(remove: url) } }
                                 }
                                 .onTapGesture { viewing = url }
                         }
@@ -79,7 +83,7 @@ struct ImageGallery: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollClipDisabled()
-                Text("長按圖片可以設成主圖或移除。")
+                Text("長按圖片可以設成主圖、調整順序或移除。")
                     .textRole(.xs)
                     .foregroundStyle(Theme.muted)
             }
@@ -156,6 +160,20 @@ struct ImageGallery: View {
     private func propose(remove url: String) async {
         do {
             let outcome = try await model.api.proposeImages(site: site, entity: entity, id: id, remove: [url])
+            if case .needsConfirmation(let p) = outcome { proposal = p }
+        } catch {
+            model.show(error.localizedDescription, tone: .danger)
+        }
+    }
+
+    /// 調整順序：整組新的順序交給網站（第一張是主圖）
+    private func propose(move index: Int, by offset: Int) async {
+        let to = index + offset
+        guard images.indices.contains(index), images.indices.contains(to) else { return }
+        var order = images
+        order.swapAt(index, to)
+        do {
+            let outcome = try await model.api.proposeImages(site: site, entity: entity, id: id, order: order)
             if case .needsConfirmation(let p) = outcome { proposal = p }
         } catch {
             model.show(error.localizedDescription, tone: .danger)

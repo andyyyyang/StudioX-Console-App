@@ -154,6 +154,16 @@ nonisolated enum DemoServer {
         if name == "reply_xena", args["action"]?.string == "attach" {
             return #"{"uploadUrl":"https://demo.studiox.tw/u/img/demo-upload-token","expiresInMinutes":30}"#
         }
+        // 試算人數（不發送、不用確認）
+        if args["dryRun"]?.bool == true {
+            switch name {
+            case "send_campaign": return #"{"recipientCount":186,"usedToday":0,"cap":500,"capRemaining":500,"isQuietHour":false}"#
+            case "send_line_campaign":
+                let kind = args["audience"]?["kind"]?.string
+                return #"{"recipients":\#(kind == "members" ? 214 : kind == "inactive" ? 57 : kind == "bought" ? 33 : 642)}"#
+            default: break
+            }
+        }
         if !readTools.contains(name) {
             if args["confirmToken"]?.string != nil { return #"{"ok":true,"demo":true}"# }
             return #"{"needsConfirmation":true,"title":"確認（示範模式）","detail":"這是示範模式：按確認會顯示完成，但不會真的送出或修改任何資料。","confirmToken":"demo"}"#
@@ -166,17 +176,33 @@ nonisolated enum DemoServer {
         case ("get", "order"): return order(id: args["id"]?.string ?? "o1")
         case ("get", "user"): return member(id: args["id"]?.string ?? "u1")
         case ("list", "coupon"): return coupons
-        case ("list", "support_thread"): return site == "chenmai.studiox.tw" ? threads : #"{"threads":[]}"#
+        case ("list", "support_thread"):
+            guard site == "chenmai.studiox.tw" else { return #"{"threads":[]}"# }
+            // 全部紀錄（status: all）：連已回覆、已結案的一起
+            return args["status"]?.string == "all" ? history(threadHistory, key: "threads", args: args) : threads
         case ("get", "support_thread"): return thread
         case ("list", "assistant_conversation"):
             // 和網站一樣照 status 篩：open＝等專人＋專人接手、ai＝Xena 回答中
             let all = site == "studiox.tw" ? conversations : site == "chenmai.studiox.tw" ? shopConversations : nil
+            if args["status"]?.string == "all" {
+                // 全部紀錄：現在的加上結束了的
+                let past = site == "chenmai.studiox.tw" ? shopHistory : site == "studiox.tw" ? studioHistory : nil
+                return all.map { history(merged($0, past), key: "items", args: args) }
+            }
             return all.map { filtered($0, status: args["status"]?.string) }
         case ("get", "assistant_conversation"): return args["id"]?.string == "yc1" ? lineConversation : conversation
-        case ("list", "inquiry"): return site == "studiox.tw" ? inquiries : nil
+        case ("list", "inquiry"):
+            guard site == "studiox.tw" else { return nil }
+            return args["status"]?.string == "all" ? history(inquiryHistory, key: "items", args: args) : inquiries
         case ("get", "inquiry"): return inquiryDetail
         case ("list", "mailbox"): return site == "chenmai.studiox.tw" ? mailbox : #"{"items":[]}"#
         case ("list", "product"): return products
+        case ("list", "campaign"): return campaigns
+        case ("get", "campaign"): return campaign(id: args["id"]?.string ?? "sc1")
+        case ("list", "line_campaign"): return lineCampaigns
+        case ("get", "line_theme"): return #"{"name":"晨麥手作","primary":"#B5651D","accent":"#B5651D","text":"#2B2118"}"#
+        case ("list", "pending_notification"): return pendingNotifications
+        case ("list", "integration"): return integrations
         case ("list", _): return #"{"items":[]}"#
         default: return nil
         }
@@ -204,7 +230,7 @@ nonisolated enum DemoServer {
 
     // MARK: 我與網站
 
-    private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","reply_xena","traffic_report","search_report","issue_coupons"]"#
+    private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","reply_xena","traffic_report","search_report","issue_coupons","send_campaign","send_line_campaign","manage_notification","recompute_tiers","test_integration"]"#
     private static let studioTools = #"["list","get","search","update","create","delete","set_images","traffic_report","search_report","reply_support","reply_xena"]"#
     private static let basicTools = #"["list","get","search","update","traffic_report"]"#
 
@@ -344,6 +370,67 @@ nonisolated enum DemoServer {
         return String(decoding: data, as: UTF8.self)
     }
 
+    /// 全部紀錄的篩選（照網站：channel、query 找名字和內容；示範只有一頁，next 是 null）
+    private static func history(_ json: String, key: String, args: JSONValue) -> String {
+        guard case .object(var o) = parse(json), let rows = o[key]?.array else { return json }
+        let channel = args["channel"]?.string
+        let query = (args["query"]?.string ?? "").lowercased()
+        let kept = rows.filter { row in
+            if let channel, (row["channel"]?.string ?? "web") != channel { return false }
+            guard !query.isEmpty else { return true }
+            guard let data = try? JSONEncoder().encode(row) else { return false }
+            return String(decoding: data, as: UTF8.self).lowercased().contains(query)
+        }
+        o[key] = .array(kept)
+        o["next"] = .null
+        guard let data = try? JSONEncoder().encode(JSONValue.object(o)) else { return json }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func merged(_ now: String, _ past: String?) -> String {
+        guard let past, case .object(var o) = parse(now), let a = o["items"]?.array, let b = parse(past)["items"]?.array else { return now }
+        o["items"] = .array(a + b)
+        guard let data = try? JSONEncoder().encode(JSONValue.object(o)) else { return now }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// 晨麥手作結束了的對話（全部紀錄）
+    private static var shopHistory: String { """
+    {"items":[
+     {"id":"yh1","at":"\(ago(hours: 27))","status":"closed","channel":"web","attention":false,"tags":["訂單查詢"],"contact":{"name":"陳太太"},"turns":6,"questions":["上週訂的禮盒還沒到"],"last":{"role":"staff","text":"幫你查好了，物流明天上午送達，謝謝耐心等候！"}},
+     {"id":"yh2","at":"\(ago(hours: 75))","status":"closed","channel":"line","line":{"name":"Mia"},"attention":false,"tags":["商品詢問"],"contact":{"name":"Mia"},"turns":4,"questions":["芝麻薄餅素食可以吃嗎？"],"last":{"role":"assistant","text":"芝麻薄餅是奶素，蛋奶素的朋友可以放心吃。"}},
+     {"id":"yh3","at":"\(ago(hours: 150))","status":"closed","channel":"web","attention":false,"tags":["改單退款"],"contact":{"name":"張先生"},"turns":7,"questions":["訂錯口味可以換嗎？"],"last":{"role":"staff","text":"已經幫你換成原味，差額退回原付款方式。"}},
+     {"id":"yh4","at":"\(ago(hours: 330))","status":"ai","channel":"line","line":{"name":"小蘋"},"attention":false,"tags":["優惠"],"contact":{"name":"小蘋"},"turns":3,"questions":["中秋有優惠嗎？"],"last":{"role":"assistant","text":"中秋禮盒 3 盒以上 9 折，結帳輸入 MOON10 就可以。"}}
+    ]}
+    """ }
+
+    /// StudioX.tw 結束了的對話（全部紀錄）
+    private static var studioHistory: String { """
+    {"items":[
+     {"id":"sh1","at":"\(ago(hours: 52))","status":"closed","channel":"web","attention":false,"tags":["費用報價"],"contact":{"name":"Leo"},"turns":5,"questions":["品牌改版大概多少預算？"],"last":{"role":"staff","text":"已經把報價單寄到你的信箱，有問題隨時找我。"}},
+     {"id":"sh2","at":"\(ago(hours: 200))","status":"closed","channel":"line","line":{"name":"Joy"},"attention":false,"tags":["服務內容"],"turns":3,"questions":["有做 App 嗎？"],"last":{"role":"assistant","text":"有的，我們做過 iOS 與 Android 的會員 App，作品在這裡。"}}
+    ]}
+    """ }
+
+    /// 晨麥手作的客服信（全部紀錄：等回覆、已回覆、已結案）
+    private static var threadHistory: String { """
+    {"threads":[
+     {"id":"t1","subject":"訂單什麼時候會出貨？","categoryLabel":"訂單與物流","status":"open","statusLabel":"等回覆","waitingHours":5.2,"messageCount":3,"orderNumber":"CM-24100607","customer":"陳柏宇","lastMessageAt":"\(ago(hours: 5.2))","lastMessage":{"text":"好的謝謝！可以順便加一罐芝麻薄餅嗎？","fromCustomer":true}},
+     {"id":"t2","subject":"可以改成超商取貨嗎","categoryLabel":"訂單與物流","status":"open","statusLabel":"等回覆","waitingHours":1.4,"messageCount":1,"customer":"王怡君","lastMessageAt":"\(ago(hours: 1.4))","lastMessage":{"text":"我下午不在家，可以改到 7-11 嗎？","fromCustomer":true}},
+     {"id":"t3","subject":"發票可以開統編嗎","categoryLabel":"其他","status":"answered","statusLabel":"已回覆","messageCount":2,"customer":"李思妤","lastMessageAt":"\(ago(hours: 46))","lastMessage":{"text":"可以的，結帳時在備註寫統編就好。","fromCustomer":false}},
+     {"id":"t4","subject":"禮盒可以附卡片嗎","categoryLabel":"商品","status":"closed","statusLabel":"已結案","messageCount":4,"orderNumber":"CM-24092288","customer":"黃冠廷","lastMessageAt":"\(ago(hours: 220))","lastMessage":{"text":"收到了，卡片很漂亮，謝謝！","fromCustomer":true}}
+    ]}
+    """ }
+
+    /// StudioX.tw 的專案詢問（全部紀錄）
+    private static var inquiryHistory: String { """
+    {"items":[
+     {"id":"q1","at":"\(ago(hours: 20))","status":"new","name":"Kevin","company":"小路咖啡","email":"demo-inquiry@example.com","types":["品牌官網","電商"],"budget":"30–60 萬","message":"我們想把門市的訂購搬到線上，需要會員與訂閱制。"},
+     {"id":"q2","at":"\(ago(hours: 98))","status":"replied","name":"Emma","company":"青田花藝","email":"demo-inquiry@example.com","types":["品牌官網"],"budget":"15–30 萬","message":"想做一個可以預約花藝課的網站。"},
+     {"id":"q3","at":"\(ago(hours: 720))","status":"archived","name":"Ken","company":"山下工作室","email":"demo-inquiry@example.com","types":["SEO"],"message":"想了解 SEO 顧問的服務內容。"}
+    ]}
+    """ }
+
     private static var mailbox: String { """
     {"box":"inbox","items":[
      {"id":"mb1","from":"好日子選物 <buyer@example.com>","subject":"團購合作邀約：中秋禮盒 200 組","receivedAt":"\(ago(hours: 26))","unread":true,"preview":"您好，我們是好日子選物，想洽談中秋禮盒團購…","attachmentCount":1}
@@ -443,7 +530,9 @@ nonisolated enum DemoServer {
         let entities: [String]
         switch site {
         case "chenmai.studiox.tw":
-            entities = [product, simple("coupon", "折價券"), simple("banner", "商店橫幅"), simple("news", "公告"), simple("faq", "常見問題"), simple("user", "會員")]
+            entities = [product, simple("coupon", "折價券"), simple("banner", "商店橫幅"), simple("news", "公告"), simple("faq", "常見問題"), simple("user", "會員"),
+                        simple("membership_tier", "會員等級規則"), simple("campaign", "行銷簡訊活動"), simple("line_campaign", "LINE 優惠推播"),
+                        simple("pending_notification", "待發通知"), simple("integration", "整合狀態")]
         case "studiox.tw":
             entities = [simple("news", "文章"), simple("inquiry", "專案詢問"), simple("automation", "自動化流程")]
         default:
@@ -451,6 +540,50 @@ nonisolated enum DemoServer {
         }
         return #"{"site":{"name":"\#(site)","host":"\#(site)"},"level":"owner","tools":[],"entities":[\#(entities.joined(separator: ","))]}"#
     }
+
+    // MARK: 行銷、通知、整合
+
+    private static var campaigns: String { """
+    {"campaigns":[
+     {"id":"sc1","name":"中秋禮盒預購","body":"【晨麥手作】中秋禮盒開放預購，3 盒以上 9 折，9/30 前下單免運。","status":"draft","createdAt":"\(ago(hours: 5))","totalRecipients":0,"successCount":0,"failedCount":0},
+     {"id":"sc2","name":"週年感謝","body":"【晨麥手作】謝謝你陪我們一年！本週全館蛋捲買二送一。","status":"sent","createdAt":"\(ago(hours: 400))","sentAt":"\(ago(hours: 398))","totalRecipients":172,"successCount":169,"failedCount":3}
+    ]}
+    """ }
+
+    private static func campaign(id: String) -> String {
+        let sent = id == "sc2"
+        return """
+    {"campaign":{"id":"\(id)","name":"\(sent ? "週年感謝" : "中秋禮盒預購")","body":"\(sent ? "【晨麥手作】謝謝你陪我們一年！本週全館蛋捲買二送一。" : "【晨麥手作】中秋禮盒開放預購，3 盒以上 9 折，9/30 前下單免運。")",
+      "status":"\(sent ? "sent" : "draft")","createdAt":"\(ago(hours: sent ? 400 : 5))",\(sent ? #""sentAt":"\#(ago(hours: 398))","totalRecipients":172,"successCount":169,"failedCount":3"# : #""totalRecipients":0,"successCount":0,"failedCount":0"#)},
+     "sends":\(sent ? #"[{"status":"failed","error":"空號"},{"status":"failed","error":"空號"},{"status":"failed","error":"拒收廣告簡訊"}]"# : "[]")}
+    """ }
+
+    private static var lineCampaigns: String { """
+    {"campaigns":[
+     {"id":"lc1","title":"中秋禮盒 3 盒 9 折","body":"中秋前下單，3 盒以上結帳輸入優惠碼就打 9 折，寄台北隔天到。","couponCode":"MOON10","buttonLabel":"去訂購","buttonUrl":"/zh/shop","audience":{"kind":"members"},"status":"sent","recipients":214,"sent":214,"createdAt":"\(ago(hours: 30))","sentAt":"\(ago(hours: 30))"},
+     {"id":"lc2","title":"好久不見，送你免運","body":"想念蛋捲的味道嗎？這週下單免運費。","couponCode":"SHIPFREE","audience":{"kind":"inactive","days":90},"status":"sent","recipients":57,"sent":57,"createdAt":"\(ago(hours: 220))","sentAt":"\(ago(hours: 220))"}
+    ]}
+    """ }
+
+    private static var pendingNotifications: String { """
+    {"pending":[
+     {"id":"pn1","kind":"order.status_changed","kindLabel":"訂單狀態更新","userName":"林小涵","scheduledAt":"\(ago(hours: -0.12))","status":"pending","description":"CM-24100612：已付款 → 已出貨"},
+     {"id":"pn2","kind":"coupon.issued","kindLabel":"折價券已發放","userName":"陳柏宇","scheduledAt":"\(ago(hours: -0.2))","status":"pending","description":"WELCOME100（折 NT$100）"}
+    ],
+     "recent":[
+     {"id":"pn3","kind":"user.tier_changed","kindLabel":"會員等級變動","userName":"王怡君","scheduledAt":"\(ago(hours: 6))","status":"sent","sentAt":"\(ago(hours: 6))"},
+     {"id":"pn4","kind":"order.status_changed","kindLabel":"訂單狀態更新","userName":"張家豪","scheduledAt":"\(ago(hours: 26))","status":"cancelled","cancelledAt":"\(ago(hours: 26.1))"}
+    ]}
+    """ }
+
+    private static var integrations: String { """
+    {"integrations":[
+     {"provider":"resend","enabled":true,"config":{},"updatedAt":"\(ago(hours: 900))"},
+     {"provider":"mitake","enabled":true,"config":{},"updatedAt":"\(ago(hours: 1400))"},
+     {"provider":"notifications","enabled":true,"config":{},"updatedAt":"\(ago(hours: 300))"},
+     {"provider":"personalized_coupons","enabled":false,"config":{},"updatedAt":null}
+    ]}
+    """ }
 
     private static var coupons: String { """
     {"items":[

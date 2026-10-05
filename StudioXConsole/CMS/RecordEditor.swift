@@ -19,6 +19,8 @@ struct RecordView: View {
                 StallMenuView(site: site)
             } else if entity == "mailbox", let id {
                 MailboxItemView(site: site, itemID: id)
+            } else if entity == "campaign", let id {
+                CampaignView(site: site, campaignID: id)
             } else if entity == "faq", schema?.collection == nil, let id, !id.contains("/") {
                 FaqPageView(site: site, pageKey: id)
             } else {

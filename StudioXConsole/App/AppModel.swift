@@ -133,6 +133,10 @@ final class AppModel {
 
     /// 收件匣只看哪一類（Jev 自動分的類別；nil＝全部。點通知打開收件匣時回到全部）
     var inboxTopic: String?
+    /// 收件匣看「現在」（要不要你）還是「全部紀錄」（過去的對話、信、詢問）
+    var inboxHistoryMode = false
+    /// 別的頁面要收件匣的全部紀錄搜這個（會員頁「看這位的客服紀錄」、搜尋頁）；收件匣拿去用了就清掉
+    var inboxSearch: String?
     /// iPad：收件匣、訂單右邊打開的是哪一個（左邊清單標起來；通知、首頁點進來也是選這一個，不另外推一頁）
     var inboxPicked: Route?
     var ordersPicked: String?
@@ -142,6 +146,8 @@ final class AppModel {
     /// 用說的（耳朵、嘴巴、一來一往）
     let conversation = XenaConversation()
     let briefing: Briefing
+    /// 收件匣的全部紀錄（第一次打開才載）
+    let inboxHistory: InboxHistory
     /// 通知（Apple 的 token、登記到 console、點通知打開的頁面）
     let push = PushCenter.shared
     /// Face ID 鎖
@@ -153,6 +159,7 @@ final class AppModel {
         self.api = api
         self.xena = XenaSession(api: api)
         self.briefing = Briefing(api: api)
+        self.inboxHistory = InboxHistory(api: api)
         self.phase = api.isSignedIn ? .loading : .welcome
         api.onSignedOut = { [weak self] in self?.didSignOut(message: "登入已經過期，請重新登入") }
         xena.onDidWrite = { [weak self] in
@@ -184,6 +191,16 @@ final class AppModel {
 
     func site(_ id: String) -> SiteSummary? {
         sites.first { $0.id == id }
+    }
+
+    /// 打開收件匣的全部紀錄、搜這個字（手機回到收件匣第一層；iPad 右邊不動）
+    func openInboxHistory(search: String) {
+        showXena = false
+        showAccount = false
+        inboxHistoryMode = true
+        inboxSearch = search
+        inboxPath = []
+        tab = .inbox
     }
 
     /// 收件匣的數字（客人在等回覆＋需要專人看的 Xena 對話＋新的詢問）：專人已經回過、客人還沒再說話的不算
@@ -298,7 +315,9 @@ final class AppModel {
         schemaTasks = [:]
         xena.reset()
         briefing.reset()
+        inboxHistory.reset()
         inboxTopic = nil
+        inboxHistoryMode = false
         lock.reset()
         // 登入過期：token 已經沒了、叫不了 console；unregister 會向 Apple 取消這台的通知代碼，console 下次送就知道它失效了
         Task { await push.unregister() }
@@ -492,6 +511,7 @@ final class AppModel {
             showXena = false
             showAccount = false
             inboxTopic = nil
+            inboxHistoryMode = false
             inboxPath = []
             tab = .inbox
         case .home:

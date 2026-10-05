@@ -55,12 +55,19 @@ struct OrdersList: View {
     @State private var selecting = false
     @State private var selected: Set<String> = []
     @State private var proposal: Proposal?
+    /// 搜尋框裡的字；query 是停下來之後真的拿去搜的
+    @State private var search = ""
+    @State private var query = ""
+    /// 下一頁（更早的訂單）的 before；nil＝沒有更早的了
+    @State private var next: String?
+    @State private var loadingMore = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case toShip = "paid"
         case unpaid = "unpaid"
         case shipped = "shipped"
         case completed = "completed"
+        case cancelled = "cancelled"
         case all = "all"
 
         var id: String { rawValue }
@@ -71,6 +78,7 @@ struct OrdersList: View {
             case .unpaid: "待付款"
             case .shipped: "已出貨"
             case .completed: "已完成"
+            case .cancelled: "已取消"
             case .all: "全部"
             }
         }
@@ -86,7 +94,13 @@ struct OrdersList: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 header
-                FilterBar(items: Filter.allCases, selection: Binding(get: { filter }, set: { model.ordersStatus = $0.rawValue }), title: \.label)
+                VStack(alignment: .leading, spacing: 14) {
+                    SearchField(text: $search, prompt: "訂單編號、收件人、電話、Email")
+                    // 搜尋是找全部狀態的
+                    if query.isEmpty {
+                        FilterBar(items: Filter.allCases, selection: Binding(get: { filter }, set: { model.ordersStatus = $0.rawValue }), title: \.label)
+                    }
+                }
                 if let error {
                     ErrorNote(message: error) { Task { await load() } }
                 }
@@ -94,14 +108,22 @@ struct OrdersList: View {
                     if loading {
                         SkeletonRows(rows: 5)
                     } else if error == nil {
-                        EmptyState(title: filter == .toShip ? "沒有等出貨的訂單" : "沒有訂單", message: filter == .toShip ? "已付款的訂單都出貨了。" : nil)
+                        if !query.isEmpty {
+                            EmptyState(title: "找不到「\(query)」", message: "試試訂單編號、收件人的名字、電話或 Email。")
+                        } else {
+                            EmptyState(title: filter == .toShip ? "沒有等出貨的訂單" : "沒有訂單", message: filter == .toShip ? "已付款的訂單都出貨了。" : nil)
+                        }
                     }
                 } else {
                     RuledList {
                         ForEach(Array(orders.enumerated()), id: \.element.id) { index, order in
                             row(order)
-                                .reveal(index)
+                                .reveal(min(index, 12))
                         }
+                    }
+                    if next != nil {
+                        LoadingRow(text: "載入更早的訂單…")
+                            .onAppear { Task { await loadMore() } }
                     }
                 }
             }
@@ -109,6 +131,7 @@ struct OrdersList: View {
             .padding(.top, 16)
             .padding(.bottom, selecting ? 110 : 48)
         }
+        .scrollDismissesKeyboard(.immediately)
         .refreshable { await Task { await load() }.value }
         .brandPage()
         .navigationTitle("訂單")
@@ -122,9 +145,9 @@ struct OrdersList: View {
         .safeAreaInset(edge: .bottom) {
             if selecting {
                 Button {
-                    Task { await bulkShip() }
+                    Task { await bulkUpdate() }
                 } label: {
-                    Text("標記已出貨（\(selected.count)）")
+                    Text("\(bulkTarget == "completed" ? "標記已完成" : "標記已出貨")（\(selected.count)）")
                 }
                 .buttonStyle(.brand(.accent, size: .lg, fullWidth: true, arrow: true))
                 .disabled(selected.isEmpty)
@@ -136,7 +159,7 @@ struct OrdersList: View {
         }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             let n = result["updated"]?.int ?? selected.count
-            model.show("已標記 \(n) 張訂單出貨")
+            model.show("已標記 \(n) 張訂單\(bulkTarget == "completed" ? "完成" : "出貨")")
             selecting = false
             selected = []
             Task {
@@ -144,7 +167,17 @@ struct OrdersList: View {
                 await model.refreshAll()
             }
         }
-        .task(id: "\(site?.id ?? "")|\(filter.rawValue)") { await load() }
+        .task(id: "\(site?.id ?? "")|\(filter.rawValue)|\(query)") { await load() }
+        // 搜尋：打字停 0.35 秒才去搜
+        .task(id: search) {
+            let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard q != query else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            selecting = false
+            selected = []
+            query = q
+        }
     }
 
     private var header: some View {
@@ -178,8 +211,10 @@ struct OrdersList: View {
         }
     }
 
-    /// 等出貨的訂單可以一次選幾張、一起標出貨
-    private var canSelect: Bool { filter == .toShip && !orders.isEmpty }
+    /// 等出貨的可以一次選幾張標出貨；已出貨的一次標完成
+    private var canSelect: Bool { query.isEmpty && (filter == .toShip || filter == .shipped) && !orders.isEmpty }
+
+    private var bulkTarget: String { filter == .shipped ? "completed" : "shipped" }
 
     private var selectButton: some View {
         Button(selecting ? "完成" : "選取") {
@@ -226,32 +261,68 @@ struct OrdersList: View {
         }
     }
 
+    /// 這一頁現在是什麼（網站、篩選、搜尋）：翻頁回來時還是同一個才接上去
+    private var listKey: String { "\(site?.id ?? "")|\(filter.rawValue)|\(query)" }
+
+    /// 一頁要拿的狀態（搜尋是全部狀態）
+    private var pageStatus: String? { query.isEmpty && filter != .all ? filter.rawValue : nil }
+
     private func load() async {
         guard let site else { return }
+        let key = listKey
         loading = true
         defer { loading = false }
         error = nil
+        // 換了篩選、搜尋：上一張清單的下一頁不能接到這裡
+        next = nil
         do {
-            switch filter {
-            case .unpaid:
+            if query.isEmpty && filter == .unpaid {
                 let pending = try await model.api.orders(site: site.id, status: "pending")
                 let awaiting = try await model.api.orders(site: site.id, status: "awaiting_payment")
+                guard key == listKey else { return }
                 orders = (pending + awaiting).sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
-            case .all:
-                orders = try await model.api.orders(site: site.id, limit: 100)
-            default:
-                orders = try await model.api.orders(site: site.id, status: filter.rawValue)
+                next = nil
+            } else {
+                let page = try await model.api.orderPage(site: site.id, status: pageStatus, query: query.isEmpty ? nil : query, before: nil, limit: 60)
+                guard key == listKey else { return }
+                orders = page.paged || query.isEmpty ? page.items : Self.matching(page.items, query)
+                next = page.next
             }
         } catch {
+            guard key == listKey else { return }
             self.error = error.localizedDescription
         }
     }
 
-    private func bulkShip() async {
+    /// 捲到底：接上更早的一頁
+    private func loadMore() async {
+        guard let site, let before = next, !loadingMore, !loading else { return }
+        let key = listKey
+        loadingMore = true
+        defer { loadingMore = false }
+        do {
+            let page = try await model.api.orderPage(site: site.id, status: pageStatus, query: query.isEmpty ? nil : query, before: before, limit: 60)
+            guard key == listKey else { return }
+            let have = Set(orders.map(\.id))
+            orders += page.items.filter { !have.contains($0.id) }
+            next = page.items.isEmpty ? nil : page.next
+        } catch {
+            guard key == listKey else { return }
+            next = nil
+            model.show(error.localizedDescription, tone: .danger)
+        }
+    }
+
+    /// 舊版網站不認得搜尋：照單號和收件人篩
+    private static func matching(_ orders: [OrderSummary], _ q: String) -> [OrderSummary] {
+        orders.filter { $0.number.localizedCaseInsensitiveContains(q) || $0.customer.localizedCaseInsensitiveContains(q) }
+    }
+
+    private func bulkUpdate() async {
         guard let site, !selected.isEmpty else { return }
         let numbers = orders.filter { selected.contains($0.id) }.map(\.number)
         do {
-            let outcome = try await model.api.proposeBulkStatus(site: site.id, ids: numbers, status: "shipped")
+            let outcome = try await model.api.proposeBulkStatus(site: site.id, ids: numbers, status: bulkTarget)
             switch outcome {
             case .needsConfirmation(let p): proposal = p
             case .done: await load()

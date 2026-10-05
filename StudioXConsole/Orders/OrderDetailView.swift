@@ -13,6 +13,8 @@ struct OrderDetailView: View {
     @State private var error: String?
     @State private var proposal: Proposal?
     @State private var shipping = false
+    /// 出貨之後改物流單號（打錯、換一箱寄）
+    @State private var editingTracking = false
     @State private var refunding = false
     @State private var working = false
     /// 這個人在這個網站看得到會員、折價券（看不到就不放連結）
@@ -68,6 +70,11 @@ struct OrderDetailView: View {
         .sheet(isPresented: $shipping) {
             ShipSheet { tracking in
                 Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "shipped", trackingNumber: tracking) } }
+            }
+        }
+        .sheet(isPresented: $editingTracking) {
+            ShipSheet(editing: detail?.trackingNumber ?? "") { tracking in
+                Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, trackingNumber: tracking ?? "") } }
             }
         }
         .sheet(isPresented: $refunding) {
@@ -162,6 +169,8 @@ struct OrderDetailView: View {
                         Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "completed") } }
                     } label: { Text("標記已完成") }
                     .buttonStyle(.brand(.primary, size: .lg, fullWidth: true, arrow: true))
+                    Button { editingTracking = true } label: { Text(d.trackingNumber == nil ? "補上物流單號" : "改物流單號") }
+                        .buttonStyle(.brand(.ghost, size: .md, fullWidth: true))
                 }
                 if canConfirmTransfer {
                     VStack(alignment: .leading, spacing: 8) {
@@ -423,6 +432,8 @@ struct OrderDetailView: View {
 
 /// 標記出貨：可以順便填物流單號
 private struct ShipSheet: View {
+    /// 已經出貨、改單號：現在的單號（nil＝標記出貨）
+    var editing: String?
     var onSubmit: (String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var tracking = ""
@@ -431,7 +442,7 @@ private struct ShipSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 20) {
-                Headline("Mark as *shipped*", role: .h2)
+                Headline(editing == nil ? "Mark as *shipped*" : "Tracking *number*", role: .h2)
                 FieldBlock(label: "物流單號（選填）", hint: "黑貓的單號填了之後，網站每 15 分鐘自動更新貨態", focused: focused) {
                     TextField("例如黑貓的託運單號", text: $tracking)
                         .keyboardType(.asciiCapable)
@@ -456,7 +467,10 @@ private struct ShipSheet: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.height(380)])
-        .onAppear { focused = true }
+        .onAppear {
+            if let editing, tracking.isEmpty { tracking = editing }
+            focused = true
+        }
     }
 }
 

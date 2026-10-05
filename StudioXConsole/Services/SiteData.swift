@@ -13,6 +13,16 @@ extension ConsoleAPI {
         return (r["orders"]?.array ?? []).map { OrderSummary(site: site, $0) }
     }
 
+    /// 一頁訂單（最新的在前）：status 沒給＝全部；query：訂單編號、收件人、Email、電話；before：上一頁的 next
+    func orderPage(site: String, status: String?, query: String?, before: String?, limit: Int = 50) async throws -> ListPage<OrderSummary> {
+        var args: [String: JSONValue] = ["entity": "order", "limit": .number(Double(limit))]
+        if let status { args["status"] = .string(status) }
+        if let query, !query.isEmpty { args["query"] = .string(query) }
+        if let before { args["before"] = .string(before) }
+        let r = try await tool("list", site: site, args)
+        return ListPage(items: (r["orders"]?.array ?? []).map { OrderSummary(site: site, $0) }, r)
+    }
+
     func order(site: String, id: String) async throws -> OrderDetail {
         OrderDetail(site: site, try await tool("get", site: site, ["entity": "order", "id": .string(id)]))
     }
@@ -64,6 +74,36 @@ extension ConsoleAPI {
             default: throw error
             }
         }
+    }
+
+    // MARK: 紀錄（往前翻頁：before＝上一頁回的 next；網站沒給 next 就是沒有更早的了）
+
+    /// 所有的 Xena 對話（官網、LINE；任何狀態），最近有動靜的在前。channel：web / line；query：客人、內容
+    func xenaConversationPage(site: String, channel: String?, query: String?, before: String?, limit: Int = 30) async throws -> ListPage<XenaConversationSummary> {
+        var args: [String: JSONValue] = ["entity": "assistant_conversation", "status": "all", "limit": .number(Double(limit))]
+        if let channel { args["channel"] = .string(channel) }
+        if let query, !query.isEmpty { args["query"] = .string(query) }
+        if let before { args["before"] = .string(before) }
+        let r = try await tool("list", site: site, args)
+        return ListPage(items: (r["items"]?.array ?? []).map { XenaConversationSummary(site: site, $0) }, r)
+    }
+
+    /// 所有的客服信（等回覆、已回覆、已結案），最後一封最近的在前。query：主旨、客人
+    func supportThreadPage(site: String, query: String?, before: String?, limit: Int = 30) async throws -> ListPage<SupportThreadSummary> {
+        var args: [String: JSONValue] = ["entity": "support_thread", "status": "all", "limit": .number(Double(limit))]
+        if let query, !query.isEmpty { args["query"] = .string(query) }
+        if let before { args["before"] = .string(before) }
+        let r = try await tool("list", site: site, args)
+        return ListPage(items: (r["threads"]?.array ?? []).map { SupportThreadSummary(site: site, $0) }, r)
+    }
+
+    /// 所有的專案詢問（新的、已回覆、已封存），新的在前。query：名字、公司、Email、內容
+    func inquiryPage(site: String, query: String?, before: String?, limit: Int = 30) async throws -> ListPage<InquirySummary> {
+        var args: [String: JSONValue] = ["entity": "inquiry", "status": "all", "limit": .number(Double(limit))]
+        if let query, !query.isEmpty { args["query"] = .string(query) }
+        if let before { args["before"] = .string(before) }
+        let r = try await tool("list", site: site, args)
+        return ListPage(items: (r["items"]?.array ?? []).map { InquirySummary(site: site, $0) }, r)
     }
 
     /// 流量（days：1＝今天）
@@ -212,5 +252,25 @@ extension ConsoleAPI {
     /// 客服信的狀態：open / answered / closed
     func proposeThreadStatus(site: String, id: String, status: String) async throws -> WriteOutcome {
         try await propose("update", site: site, ["entity": "support_thread", "id": .string(id), "fields": ["status": .string(status)]])
+    }
+}
+
+/// 一頁清單：next 是下一頁的 before（沒有更早的就是 nil）
+struct ListPage<Item> {
+    var items: [Item]
+    var next: String?
+    /// 網站認得翻頁和搜尋（回應裡有 next，就算是 null）；舊版網站沒有，搜尋要在 App 這邊再篩
+    var paged = true
+
+    init(items: [Item], next: String?, paged: Bool = true) {
+        self.items = items
+        self.next = next
+        self.paged = paged
+    }
+
+    init(items: [Item], _ response: JSONValue) {
+        self.items = items
+        next = response["next"]?.string
+        paged = response["next"] != nil
     }
 }

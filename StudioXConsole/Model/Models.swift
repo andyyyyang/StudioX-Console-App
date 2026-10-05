@@ -399,10 +399,18 @@ struct SupportThreadSummary: Identifiable, Hashable {
     var messageCount: Int
     var orderNumber: String?
     var customer: String
+    /// 最後一封的時間（紀錄照這個排；舊版網站沒給就是建立時間）
+    var at: Date?
+    /// 最後一封的開頭（客人寫的照原樣，我們寫的前面標「我們：」）
+    var lastMessage: String?
 
     init(site: String, _ json: JSONValue) {
         id = json["id"]?.string ?? UUID().uuidString
         self.site = site
+        at = json["lastMessageAt"]?.date ?? json["lastMessage"]?["at"]?.date ?? json["createdAt"]?.date
+        if let last = json["lastMessage"], let text = last["text"]?.string, !text.isEmpty {
+            lastMessage = last["fromCustomer"]?.bool == false ? "我們：\(text)" : text
+        }
         subject = json["subject"]?.string ?? "（沒有主旨）"
         categoryLabel = json["categoryLabel"]?.string ?? ""
         status = json["status"]?.string ?? "open"
