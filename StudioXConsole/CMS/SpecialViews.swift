@@ -31,8 +31,7 @@ struct MemberView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("會員")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle(data?["user"]?["name"]?.string ?? "會員")
         .toolbar {
             if model.site(site)?.tools.contains("issue_coupons") == true {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -70,7 +69,7 @@ struct MemberView: View {
                     }
                 }
             }
-            Headline(u["name"]?.string ?? "（沒有名字）", role: .h1)
+            PageHeader(u["name"]?.string ?? "（沒有名字）")
             VStack(alignment: .leading, spacing: 6) {
                 if let email = u["email"]?.string, let url = URL(string: "mailto:\(email)") {
                     Link(email, destination: url)
@@ -189,7 +188,7 @@ struct IssueCouponSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    Headline("Send a *coupon*", role: .h2)
+                    Headline("發折價券", role: .h2)
                     Text("給 \(to)：一張一次性的券，網站會通知他。")
                         .textRole(.small)
                         .foregroundStyle(Theme.ink2)
@@ -276,14 +275,8 @@ struct StallMenuView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(model.site(site)?.name ?? site)
-                    Headline("The *menu*", role: .h1)
-                    Text("攤位現場的價目表：菜單頁與 Xena 回答「現場多少錢」都用這份。價格是元。")
-                        .textRole(.small)
-                        .foregroundStyle(Theme.ink2)
-                }
-                .reveal()
+                PageHeader("攤位菜單", eyebrow: model.site(site)?.name ?? site, subtitle: "攤位現場的價目表：菜單頁與 Xena 回答「現場多少錢」都用這份。價格是元。")
+                    .reveal()
                 if let data {
                     ForEach(Array((data["sections"]?.array ?? []).enumerated()), id: \.offset) { _, section in
                         sectionView(section)
@@ -301,8 +294,7 @@ struct StallMenuView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("攤位菜單")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("攤位菜單")
         .sheet(item: $editing) { item in
             StallItemSheet(item: item) { fields in
                 Task { await propose(item: item, fields: fields) }
@@ -429,7 +421,7 @@ private struct StallItemSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
-                    Headline(item.isNew ? "New *item*" : (item.values["nameZh"]?.string ?? "品項"), role: .h2)
+                    Headline(item.isNew ? "新增品項" : (item.values["nameZh"]?.string ?? "品項"), role: .h2)
                     Eyebrow(item.section)
                     TextBlock(label: "名稱", limit: 60, required: true, value: bind("nameZh"))
                     TextBlock(label: "英文名稱", limit: 80, value: bind("nameEn"))
@@ -496,14 +488,8 @@ struct FaqPageView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(model.site(site)?.name ?? site)
-                    Headline("*FAQ*・\(pageKey)", role: .h1)
-                    if let url = data?["publicUrl"]?.string {
-                        Text(url).textRole(.xs).foregroundStyle(Theme.muted)
-                    }
-                }
-                .reveal()
+                PageHeader("常見問題・\(pageKey)", eyebrow: model.site(site)?.name ?? site, subtitle: data?["publicUrl"]?.string)
+                    .reveal()
                 if let data {
                     let groups = Self.groups(data)
                     ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
@@ -529,8 +515,7 @@ struct FaqPageView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("FAQ")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("常見問題")
         .task { await load() }
     }
 

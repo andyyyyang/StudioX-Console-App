@@ -136,7 +136,7 @@ private struct LoadingScreen: View {
             VStack(alignment: .leading, spacing: 20) {
                 Spacer()
                 XenaOrb(mood: .idle, size: 72)
-                Headline("Something's *off*.", role: .h1)
+                Headline("出了點問題", role: .h1)
                 Text(error)
                     .textRole(.lead)
                     .foregroundStyle(Theme.ink2)

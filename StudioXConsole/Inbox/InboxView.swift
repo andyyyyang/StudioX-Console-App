@@ -1,13 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// 收件匣：所有網站、所有管道（官網、LINE、Email、聯絡表單）放在同一個清單，照「要不要你」分段：
-///   要你處理：等專人的 Xena 對話、客人在等回覆的客服信、新的專案詢問（等最久的在上面）
-///   Xena 正在回答：官網、LINE 上 Xena 正在回答的對話（24 小時內），點進去看、隨時可以接手
-///   你們接手的：專人處理中、客人還沒再說話的
-///   信箱：寄到網站信箱、還沒轉成客服對話的信
-/// 每一列的類別是 Jev 自動判斷的（訂單、收貨問題、費用報價…）；類別多於一種時上面一排可以只看某一類。
-/// iPad：左邊清單、右邊內容。
+/// 收件匣：所有網站、所有管道（官網、LINE、Email、聯絡表單）的客服放在同一個清單，最近有動靜的在前，
+/// 結束了的也在（往下捲載入更早的，見 InboxHistory）。上面一排篩選：全部、要你處理（等專人的對話、
+/// 客人在等回覆的信、新的詢問，等最久的在上面）、各管道；右上角的放大鏡搜尋客人與內容。
+/// 每一列標出來源、Jev 判斷的類別（訂單、收貨問題、費用報價…）和現在的狀態。iPad：左邊清單、右邊內容。
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -25,7 +22,9 @@ struct InboxView: View {
                             RouteView(route: picked).id(picked)
                         } else {
                             VStack(alignment: .leading, spacing: 14) {
-                                Headline("Pick a *conversation*", role: .h2)
+                                Text("選一段對話")
+                                    .textRole(.h2)
+                                    .foregroundStyle(Theme.ink)
                                 Text("從左邊選一段對話、一封信或一筆詢問。")
                                     .textRole(.small)
                                     .foregroundStyle(Theme.muted)
@@ -146,12 +145,9 @@ struct InboxItem: Identifiable {
     }
 }
 
-/// 收件匣的四段（照「要不要你」分）
+/// 首頁的待辦裡「要你處理」的那幾件（收件匣的「要你處理」篩選）
 struct InboxSections {
     var needsYou: [InboxItem] = []
-    var live: [InboxItem] = []
-    var yours: [InboxItem] = []
-    var mail: [InboxItem] = []
 
     init(_ b: Briefing) {
         // 同一段對話可能同時在兩份清單裡（例如剛轉給專人）：留第一次看到的
@@ -162,29 +158,6 @@ struct InboxSections {
         let xenaNeeds = xena.filter(\.attention).map { InboxItem($0, needsYou: true) }
         needsYou = (xenaNeeds + b.awaiting.map { InboxItem($0) } + b.inquiries.map { InboxItem($0) })
             .sorted { ($0.since ?? .distantFuture) < ($1.since ?? .distantFuture) }
-        live = xena.filter { $0.status == "ai" && !$0.attention }.map { InboxItem($0) }
-        yours = xena.filter { $0.status == "human" && !$0.attention }.map { InboxItem($0) }
-        mail = b.mail.map { InboxItem($0) }
-    }
-
-    var all: [InboxItem] { needsYou + live + yours + mail }
-    var isEmpty: Bool { all.isEmpty }
-
-    /// 有哪些類別（多的在前）
-    var topics: [(name: String, count: Int)] {
-        let counts = Dictionary(grouping: all.compactMap(\.topic), by: { $0 }).mapValues(\.count)
-        return counts.map { (name: $0.key, count: $0.value) }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.name < $1.name }
-    }
-
-    /// 只看某一類
-    func only(_ topic: String?) -> InboxSections {
-        guard let topic else { return self }
-        var s = self
-        s.needsYou = needsYou.filter { $0.topic == topic }
-        s.live = live.filter { $0.topic == topic }
-        s.yours = yours.filter { $0.topic == topic }
-        s.mail = mail.filter { $0.topic == topic }
-        return s
     }
 }
 
@@ -195,53 +168,29 @@ struct InboxList: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    /// 全部紀錄的搜尋（打字停一下才去搜）
+    /// 搜尋（右上角的放大鏡打開；打字停一下才去搜）
     @State private var search = ""
+    @State private var searching = false
 
     var body: some View {
         let b = model.briefing
-        let all = InboxSections(b)
-        let topics = all.topics
-        // 選的類別已經沒有東西了：回到全部
-        let topic = model.inboxTopic.flatMap { t in topics.contains { $0.name == t } ? t : nil }
-        let shown = all.only(topic)
+        let needsYou = InboxSections(b).needsYou
+        let history = model.inboxHistory
         ScrollView {
-            VStack(alignment: .leading, spacing: 40) {
-                VStack(alignment: .leading, spacing: 22) {
-                    header(all, updatedAt: b.updatedAt)
-                    modePicker
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 18) {
+                    PageHeader("收件匣", subtitle: summary(needsYou, live: b.live.filter { $0.status == "ai" }.count)) {
+                        // iPad 的分欄沒有導覽列：放大鏡放在大標旁邊
+                        if picked != nil { SearchToggle(shown: $searching, text: $search) }
+                    }
+                    if searching {
+                        SearchField(text: $search, prompt: "搜尋客人、Email、對話內容", autofocus: true)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-                if model.inboxHistoryMode {
-                    InboxHistoryList(history: model.inboxHistory, search: $search) { item in
-                        open(item.route) {
-                            InboxRow(item: item, site: model.sites.count > 1 ? model.site(item.site) : nil)
-                        }
-                    }
-                } else if b.updatedAt == nil && all.isEmpty {
-                    SkeletonRows(rows: 5)
-                } else if all.isEmpty {
-                    EmptyState(title: "收件匣是空的", message: "客人在官網、LINE、Email 或聯絡表單找你時會出現在這裡；Xena 正在回答的對話也看得到。")
-                } else {
-                    if topics.count > 1 {
-                        FilterBar(
-                            items: [nil] + topics.map { Optional($0.name) },
-                            selection: Binding(get: { topic }, set: { model.inboxTopic = $0 }),
-                            title: { $0 ?? "全部" },
-                            count: { t in t.map { name in topics.first { $0.name == name }?.count ?? 0 } ?? all.all.count }
-                        )
-                    }
-                    // 沒有要你處理的：上面那行已經說了，不再放一大塊「都處理好了」
-                    if !shown.needsYou.isEmpty {
-                        section("Needs *you*", aside: "客人在等你，等最久的在上面。", items: shown.needsYou, waiting: true)
-                    }
-                    if !shown.live.isEmpty {
-                        section("Xena is *on it*", aside: "她在回答的對話，需要時點進去接手。", items: shown.live)
-                    }
-                    if !shown.yours.isEmpty {
-                        section("In your *hands*", aside: "你們接手了、客人還沒再說話的。", items: shown.yours)
-                    }
-                    if !shown.mail.isEmpty {
-                        section("Unsorted *mail*", aside: "寄到網站信箱、還沒轉成客服對話的信。", items: shown.mail)
+                InboxFeedList(history: history, needsYou: needsYou) { item, waiting in
+                    open(item.route) {
+                        InboxRow(item: item, waiting: waiting, site: model.sites.count > 1 ? model.site(item.site) : nil)
                     }
                 }
             }
@@ -252,35 +201,42 @@ struct InboxList: View {
         .scrollDismissesKeyboard(.immediately)
         .refreshable { [model] in
             await Task {
-                if model.inboxHistoryMode {
-                    await model.inboxHistory.restart(sites: model.sites)
-                } else {
-                    await model.refreshAll()
-                }
+                async let all: Void = model.refreshAll()
+                async let list: Void = model.inboxHistory.restart(sites: model.sites)
+                _ = await (all, list)
             }.value
+        }
+        .brandPage()
+        .pageTitle("收件匣")
+        .toolbar {
+            if picked == nil {
+                ToolbarItem(placement: .topBarTrailing) { SearchToggle(shown: $searching, text: $search) }
+            }
+        }
+        // 第一次打開才載
+        .task {
+            guard !history.loaded, !history.loading else { return }
+            await history.restart(sites: model.sites)
         }
         // 別的頁面要搜的字（會員頁、搜尋頁）
         .onChange(of: model.inboxSearch, initial: true) { _, q in
             guard let q else { return }
+            searching = true
             search = q
             model.inboxSearch = nil
-        }
-        // 第一次打開全部紀錄才載
-        .task(id: model.inboxHistoryMode) {
-            guard model.inboxHistoryMode, !model.inboxHistory.loaded, !model.inboxHistory.loading else { return }
-            await model.inboxHistory.restart(sites: model.sites)
         }
         // 搜尋：打字停 0.35 秒才去搜（清掉也是重新載）
         .task(id: search) {
             let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard model.inboxHistoryMode, q != model.inboxHistory.query else { return }
+            guard q != history.query else { return }
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            await model.inboxHistory.restart(sites: model.sites, query: q)
+            await history.restart(sites: model.sites, query: q)
         }
-        .brandPage()
-        .navigationTitle("收件匣")
-        .navigationBarTitleDisplayMode(.inline)
+        // 首頁的待辦更新了（每分鐘、通知進來、下拉）：清單最上面也拿一次新的
+        .onChange(of: b.updatedAt) {
+            Task { await history.refreshHead() }
+        }
         // 開著收件匣時每分鐘更新一次（Xena 正在回答的對話、新進來的客人）
         .task(id: scenePhase) {
             guard scenePhase == .active, !DemoServer.screenshots else { return }
@@ -292,55 +248,11 @@ struct InboxList: View {
         }
     }
 
-    /// 現在（要不要你）／全部紀錄
-    private var modePicker: some View {
-        Picker("收件匣", selection: Binding(get: { model.inboxHistoryMode }, set: { on in
-            withAnimation(Motion.ease) { model.inboxHistoryMode = on }
-        })) {
-            Text("現在").tag(false)
-            Text("全部紀錄").tag(true)
-        }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 320)
-        .accessibilityHint("全部紀錄有過去的對話、客服信和詢問，結束了的也在")
-    }
-
-    private func header(_ all: InboxSections, updatedAt: Date?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Headline("Your *inbox*", role: .h1)
-            if updatedAt != nil {
-                Text(summary(all))
-                    .textRole(.small)
-                    .foregroundStyle(Theme.ink2)
-            }
-            Text(updatedAt.map { "\($0.clockText) 更新・下拉重新整理" } ?? "Xena 正在看各網站…")
-                .textRole(.xs)
-                .foregroundStyle(Theme.muted)
-        }
-    }
-
-    private func summary(_ all: InboxSections) -> String {
-        var parts = [all.needsYou.isEmpty ? "沒有要你處理的事" : "\(all.needsYou.count) 件要你處理"]
-        if !all.live.isEmpty { parts.append("Xena 回答中 \(all.live.count) 段") }
+    private func summary(_ needsYou: [InboxItem], live: Int) -> String? {
+        guard model.briefing.updatedAt != nil else { return nil }
+        var parts = [needsYou.isEmpty ? "沒有要你處理的事" : "\(needsYou.count) 件要你處理"]
+        if live > 0 { parts.append("Xena 回答中 \(live) 段") }
         return parts.joined(separator: "・")
-    }
-
-    private func section(_ title: String, aside: String, items: [InboxItem], waiting: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHead(title, aside: aside, role: .h3)
-            rows(items, waiting: waiting)
-        }
-    }
-
-    private func rows(_ items: [InboxItem], waiting: Bool) -> some View {
-        RuledList {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                open(item.route) {
-                    InboxRow(item: item, waiting: waiting, site: model.sites.count > 1 ? model.site(item.site) : nil)
-                }
-                .reveal(min(index, 8))
-            }
-        }
     }
 
     /// 點一列：手機推下一頁，iPad 在右邊打開
@@ -456,8 +368,7 @@ struct InquiryView: View {
             .padding(.bottom, 48)
         }
         .brandPage()
-        .navigationTitle("專案詢問")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle(data?["name"]?.string ?? "專案詢問")
         .task { await load() }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { _ in
             model.show("已更新")
@@ -522,14 +433,7 @@ struct InquiryView: View {
         let types = (d["types"]?.array ?? []).compactMap(\.string)
         let budget = d["budget"]?.string
         VStack(alignment: .leading, spacing: 12) {
-            Eyebrow("專案詢問・\(model.site(site)?.name ?? site)")
-            Text(name)
-                .textRole(.h1)
-                .foregroundStyle(Theme.ink)
-            if let company = d["company"]?.string, !company.isEmpty {
-                Text(company)
-                    .textRole(.lead)
-            }
+            PageHeader(name, eyebrow: "專案詢問・\(model.site(site)?.name ?? site)", subtitle: d["company"]?.string)
             HStack(spacing: 8) {
                 StatusBadge(Self.statusLabel(d["status"]?.string), tone: d["status"]?.string == "new" ? .gold : .neutral)
                 if let at = d["createdAt"]?.date {

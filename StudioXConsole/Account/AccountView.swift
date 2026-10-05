@@ -54,7 +54,7 @@ struct AccountView: View {
 
                         // 外觀：主題、字的大小、觸覺回饋
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Appearance*", role: .h3)
+                            SectionHead("外觀", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "主題", options: AppSettings.Appearance.allCases, selection: $settings.appearance) { $0.label }
                                 ChoiceRow(label: "文字大小", options: AppSettings.TextSize.allCases, selection: $settings.textSize) { $0.label }
@@ -65,7 +65,7 @@ struct AccountView: View {
 
                         // Xena：首頁開場要不要說話、說多快、水珠會不會動
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Xena*", role: .h3)
+                            SectionHead("Xena", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "首頁開場說今天的狀況", help: settings.greeting.help,
                                           options: AppSettings.Greeting.allCases, selection: $settings.greeting) { $0.label }
@@ -82,7 +82,7 @@ struct AccountView: View {
 
                         // 聲音：用說的時 Xena 用哪個聲音回答（預設 iPhone 內建、免費）
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Voice*", role: .h3)
+                            SectionHead("聲音", role: .h3)
                             RuledList {
                                 ToggleRow(label: "用說的時，Xena 開口回答", isOn: $settings.speakReplies)
                                     .padding(.vertical, 10)
@@ -127,7 +127,7 @@ struct AccountView: View {
 
                         // Apple Intelligence：手機上的模型（離線、資料不出手機）
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("Apple *Intelligence*", aside: XenaLocal.shared.status, role: .h3)
+                            SectionHead("Apple Intelligence", aside: XenaLocal.shared.status, role: .h3)
                             RuledList {
                                 ToggleRow(label: "寫首頁的開場白", help: "用手機上的模型把今天的狀況寫成她會說的話；數字會一個一個核對，對不上就用原本的句子。", isOn: $settings.aiGreeting)
                                     .padding(.vertical, 10)
@@ -140,7 +140,7 @@ struct AccountView: View {
 
                         // 客服對話：輸入框上面的回覆建議
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("Reply *suggestions*", aside: "回覆客人時，輸入框上面先放幾句可以直接用的", role: .h3)
+                            SectionHead("回覆建議", aside: "回覆客人時，輸入框上面先放幾句可以直接用的", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "下一句誰來想", help: settings.replySuggest.help, options: AppSettings.ReplySuggest.allCases, selection: $settings.replySuggest) { $0.label }
                             }
@@ -148,7 +148,7 @@ struct AccountView: View {
 
                         // AI 與隱私：Xena 會把哪些資料交給雲端 AI（App Review 5.1.2(i)），可以隨時關掉
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("AI & *privacy*", aside: "Xena 用雲端 AI 時，會把需要的內容交給 AI 服務處理", role: .h3)
+                            SectionHead("AI 與隱私", aside: "Xena 用雲端 AI 時，會把需要的內容交給 AI 服務處理", role: .h3)
                             RuledList {
                                 ToggleRow(
                                     label: "Xena 使用雲端 AI",
@@ -174,7 +174,7 @@ struct AccountView: View {
 
                         // 首頁：打開 App 先看哪一頁、首頁放哪些
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Home*", role: .h3)
+                            SectionHead("首頁", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "打開 App 先看", options: startTabs, selection: $settings.startTab) { $0.label }
                                 ForEach(AppSettings.HomeSection.allCases) { section in
@@ -188,7 +188,7 @@ struct AccountView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Notifications*", role: .h3)
+                            SectionHead("通知", role: .h3)
                             RuledList {
                                 row("通知", value: notificationStatus) { showingNotifications = true }
                             }
@@ -197,7 +197,7 @@ struct AccountView: View {
                         SecuritySection()
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("Your *roles*", role: .h3)
+                            SectionHead("你的職能", role: .h3)
                             RuledList {
                                 ForEach(model.sites) { site in
                                     HStack(spacing: 14) {
@@ -215,7 +215,7 @@ struct AccountView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("*Console*", role: .h3)
+                            SectionHead("Console", role: .h3)
                             RuledList {
                                 row("網站與成員") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
                                 row("連接外部 AI 的授權") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
@@ -417,7 +417,7 @@ private struct SecuritySection: View {
     var body: some View {
         let lock = model.lock
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("*Security*", aside: lock.available ? nil : "這台裝置沒有設定密碼，不能鎖。", role: .h3)
+            SectionHead("安全", aside: lock.available ? nil : "這台裝置沒有設定密碼，不能鎖。", role: .h3)
             RuledList {
                 ToggleRow(label: "用\(lock.method.name)鎖住 App", help: "打開 App、離開一陣子回來，要先解鎖。切換 App 時畫面會蓋起來。", isOn: Binding(
                     get: { lock.enabled },

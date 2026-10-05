@@ -29,7 +29,7 @@ struct LockView: View {
                 XenaOrb(mood: .idle, size: 72)
                     .padding(.leading, -12)
                 Eyebrow("已鎖定")
-                Headline("Welcome *back*.", role: .hero)
+                Headline("歡迎回來", role: .hero)
                 Text("用\(lock.method.name)解鎖，繼續管理你的網站。")
                     .textRole(.lead)
                     .foregroundStyle(Theme.ink2)

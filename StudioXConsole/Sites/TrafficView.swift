@@ -87,11 +87,7 @@ struct TrafficView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 56) {
                 VStack(alignment: .leading, spacing: 18) {
-                    Eyebrow(model.site(siteID)?.name ?? siteID)
-                    Headline("*Traffic*", role: .h1)
-                    Text("訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
-                        .textRole(.small)
-                        .foregroundStyle(Theme.muted)
+                    PageHeader("流量", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
                     FilterBar(items: [1, 7, 30, 90, 365], selection: $days, title: { $0 == 1 ? "今天" : $0 == 365 ? "一年" : "\($0) 天" })
                 }
                 .reveal()
@@ -114,8 +110,7 @@ struct TrafficView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("流量")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("流量")
         .task(id: days) { await load() }
     }
 
@@ -164,7 +159,7 @@ struct TrafficView: View {
 
         if r.weekHours.count == 7, r.weekHours.contains(where: { $0.contains { $0 > 0 } }) {
             VStack(alignment: .leading, spacing: 20) {
-                SectionHead("When they *come*", role: .h3)
+                SectionHead("什麼時候來", role: .h3)
                 WeekHeatmap(grid: r.weekHours)
             }
         }
@@ -352,7 +347,7 @@ struct FunnelView: View {
     var body: some View {
         let first = max(report.funnel.first?.visitors ?? 1, 1)
         VStack(alignment: .leading, spacing: 24) {
-            SectionHead("The *funnel*", role: .h3)
+            SectionHead("購物漏斗", role: .h3)
             VStack(spacing: 0) {
                 ForEach(Array(report.funnel.enumerated()), id: \.element.id) { i, step in
                     let ratio = Double(step.visitors) / Double(first)
@@ -426,7 +421,7 @@ struct ContentImpactView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("Content that *sells*", role: .h3)
+            SectionHead("帶來生意的內容", role: .h3)
             RuledList(color: Theme.hair) {
                 ForEach(pages.prefix(12)) { p in
                     VStack(alignment: .leading, spacing: 6) {
@@ -473,11 +468,7 @@ struct SearchConsoleView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 56) {
                 VStack(alignment: .leading, spacing: 18) {
-                    Eyebrow(model.site(siteID)?.name ?? siteID)
-                    Headline("Found on *Google*", role: .h1)
-                    Text("Google Search Console 的資料，大約晚 1～2 天。")
-                        .textRole(.small)
-                        .foregroundStyle(Theme.muted)
+                    PageHeader("Google 搜尋", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "Google Search Console 的資料，大約晚 1～2 天。")
                     FilterBar(items: [7, 28, 90, 365], selection: $days, title: { $0 == 365 ? "一年" : "\($0) 天" })
                 }
                 .reveal()
@@ -503,8 +494,7 @@ struct SearchConsoleView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("Google 搜尋")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("Google 搜尋")
         .task(id: days) { await load() }
     }
 

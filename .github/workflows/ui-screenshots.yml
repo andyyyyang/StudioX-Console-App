@@ -106,7 +106,7 @@ jobs:
             "order|-demo -demoRoute order -demoScroll amounts"
             "member|-demo -demoRoute member"
             "inbox|-demo -demoTab inbox"
-            "history|-demo -demoRoute history"
+            "order-progress|-demo -demoRoute shipped"
             "linepush|-demo -demoRoute linepush"
             "campaign|-demo -demoRoute campaign"
             "pending|-demo -demoRoute pending"

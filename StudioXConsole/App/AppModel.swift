@@ -133,11 +133,7 @@ final class AppModel {
     /// 寬的畫面（iPad 的一般寬度）：網站直接放在側欄
     var regular = false
 
-    /// 收件匣只看哪一類（Jev 自動分的類別；nil＝全部。點通知打開收件匣時回到全部）
-    var inboxTopic: String?
-    /// 收件匣看「現在」（要不要你）還是「全部紀錄」（過去的對話、信、詢問）
-    var inboxHistoryMode = false
-    /// 別的頁面要收件匣的全部紀錄搜這個（會員頁「看這位的客服紀錄」、搜尋頁）；收件匣拿去用了就清掉
+    /// 別的頁面要收件匣搜這個（會員頁「看這位的客服紀錄」、搜尋頁）；收件匣拿去用了就清掉
     var inboxSearch: String?
     /// iPad：收件匣、訂單右邊打開的是哪一個（左邊清單標起來；通知、首頁點進來也是選這一個，不另外推一頁）
     var inboxPicked: Route?
@@ -195,11 +191,10 @@ final class AppModel {
         sites.first { $0.id == id }
     }
 
-    /// 打開收件匣的全部紀錄、搜這個字（手機回到收件匣第一層；iPad 右邊不動）
+    /// 打開收件匣、搜這個字（手機回到收件匣第一層；iPad 右邊不動）
     func openInboxHistory(search: String) {
         showXena = false
         showAccount = false
-        inboxHistoryMode = true
         inboxSearch = search
         inboxPath = []
         tab = .inbox
@@ -239,9 +234,7 @@ final class AppModel {
         case "thread": open(.thread(site: shop, id: "t1"))
         case "line": open(.xenaConversation(site: shop, id: "yc1"))
         case "products": open(.collection(site: shop, entity: "product"))
-        case "history":
-            tab = .inbox
-            inboxHistoryMode = true
+        case "shipped": open(.order(site: shop, id: "o3"))
         case "linepush": open(.collection(site: shop, entity: "line_campaign"))
         case "campaign": open(.record(site: shop, entity: "campaign", id: "sc1"))
         case "pending": open(.collection(site: shop, entity: "pending_notification"))
@@ -325,8 +318,6 @@ final class AppModel {
         xena.reset()
         briefing.reset()
         inboxHistory.reset()
-        inboxTopic = nil
-        inboxHistoryMode = false
         lock.reset()
         // 登入過期：token 已經沒了、叫不了 console；unregister 會向 Apple 取消這台的通知代碼，console 下次送就知道它失效了
         Task { await push.unregister() }
@@ -519,8 +510,6 @@ final class AppModel {
         case .inbox:
             showXena = false
             showAccount = false
-            inboxTopic = nil
-            inboxHistoryMode = false
             inboxPath = []
             tab = .inbox
         case .home:

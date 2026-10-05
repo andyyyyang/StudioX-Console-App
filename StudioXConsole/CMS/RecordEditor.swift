@@ -106,8 +106,7 @@ struct RecordEditor: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .brandPage()
-        .navigationTitle(navigationTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle(navigationTitle)
         .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             Task { await finished(result) }
@@ -248,8 +247,7 @@ struct RecordEditor: View {
 
     private func header(_ s: EntitySchema) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Eyebrow([model.site(site)?.name, s.label].compactMap { $0 }.joined(separator: " · "))
-            Headline(mode == .create ? "New *\(s.label)*" : (displayTitle ?? s.label), role: .h1)
+            PageHeader(mode == .create ? "新增\(s.label)" : (displayTitle ?? s.label), eyebrow: [model.site(site)?.name, s.label].compactMap { $0 }.joined(separator: " · "))
             HStack(spacing: 8) {
                 if let badge = statusBadge { StatusBadge(badge.0, tone: badge.1) }
                 if !s.canUpdate && mode != .create {

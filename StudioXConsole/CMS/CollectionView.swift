@@ -53,8 +53,7 @@ struct CollectionView: View {
         .searchable(text: $query, prompt: Text("搜尋\(schema?.label ?? "")"))
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle(schema?.label ?? "")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle(schema?.label ?? "")
         .toolbar {
             if schema?.canCreate == true {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -140,8 +139,7 @@ struct CollectionView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Eyebrow(model.site(site)?.name ?? site)
-            Headline(EntityStyle.headline(entity) ?? "*\(schema?.label ?? entity)*", role: .h1)
+            PageHeader(schema?.label ?? entity, eyebrow: model.site(site)?.name ?? site)
             HStack(spacing: 10) {
                 if !loading {
                     Text("\(shown.count) 筆")

@@ -63,8 +63,7 @@ struct CampaignView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("簡訊活動")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle(data?["campaign"]?["name"]?.string ?? "簡訊活動")
         .task { await load() }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             if deleting {
@@ -92,8 +91,7 @@ struct CampaignView: View {
         let status = c["status"]?.string ?? "draft"
         let text = c["body"]?.string ?? ""
         VStack(alignment: .leading, spacing: 12) {
-            Eyebrow("簡訊活動・\(model.site(site)?.name ?? site)")
-            Headline(c["name"]?.string ?? "簡訊活動", role: .h1)
+            PageHeader(c["name"]?.string ?? "簡訊活動", eyebrow: "簡訊活動・\(model.site(site)?.name ?? site)")
             HStack(spacing: 8) {
                 let s = campaignStatus(status)
                 StatusBadge(s.0, tone: s.1)
@@ -217,11 +215,7 @@ struct LineCampaignsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(model.site(site)?.name ?? site)
-                    Headline("LINE *push*", role: .h1)
-                    Text("傳一張品牌樣式的優惠卡片給 LINE 好友：可以選所有好友、綁定的會員、很久沒買的，或買過某個商品的。")
-                        .textRole(.small)
-                        .foregroundStyle(Theme.ink2)
+                    PageHeader("LINE 推播", eyebrow: model.site(site)?.name ?? site, subtitle: "傳一張品牌樣式的優惠卡片給 LINE 好友：可以選所有好友、綁定的會員、很久沒買的，或買過某個商品的。")
                     if model.site(site)?.tools.contains("send_line_campaign") == true {
                         Button("寫一則推播") { composing = true }
                             .buttonStyle(.brand(.accent, size: .md, arrow: true))
@@ -250,8 +244,7 @@ struct LineCampaignsView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("LINE 推播")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("LINE 推播")
         .sheet(isPresented: $composing) {
             LineCampaignComposer(site: site) { Task { await load() } }
         }
@@ -370,7 +363,6 @@ struct LineCampaignComposer: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    Headline("LINE *push*", role: .h2)
                     LineCardPreview(values: values, theme: theme)
                     TextBlock(label: "標題", limit: 80, required: true, value: bind("title"), placeholder: "例如：中秋禮盒 3 盒 9 折")
                     TextBlock(label: "說明", limit: 500, required: true, multiline: true, value: bind("body"), placeholder: "優惠內容、期限、怎麼用")
@@ -659,11 +651,7 @@ struct PendingNotificationsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 36) {
                 VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(model.site(site)?.name ?? site)
-                    Headline("Pending *notices*", role: .h1)
-                    Text("改訂單狀態、會員等級、發折價券之後，通知會先等幾分鐘才寄給客人；改錯了可以在這裡取消，狀態會一起復原。")
-                        .textRole(.small)
-                        .foregroundStyle(Theme.ink2)
+                    PageHeader("待發通知", eyebrow: model.site(site)?.name ?? site, subtitle: "改訂單狀態、會員等級、發折價券之後，通知會先等幾分鐘才寄給客人；改錯了可以在這裡取消，狀態會一起復原。")
                 }
                 if let error {
                     ErrorNote(message: error) { Task { await load() } }
@@ -702,8 +690,7 @@ struct PendingNotificationsView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("待發通知")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("待發通知")
         .task {
             // 倒數會變：開著的時候每 30 秒更新
             while !Task.isCancelled {
@@ -814,11 +801,7 @@ struct IntegrationsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(model.site(site)?.name ?? site)
-                    Headline("*Integrations*", role: .h1)
-                    Text("網站寄信、發簡訊用的服務。金鑰只顯示片段，要改到後台；這裡可以寄一封測試信、送一則測試簡訊確認設定沒問題。")
-                        .textRole(.small)
-                        .foregroundStyle(Theme.ink2)
+                    PageHeader("整合", eyebrow: model.site(site)?.name ?? site, subtitle: "網站寄信、發簡訊用的服務。金鑰只顯示片段，要改到後台；這裡可以寄一封測試信、送一則測試簡訊確認設定沒問題。")
                 }
                 if let error {
                     ErrorNote(message: error) { Task { await load() } }
@@ -843,8 +826,7 @@ struct IntegrationsView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("整合")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("整合")
         .task { await load() }
         .sheet(item: Binding(get: { testing.map(TestKind.init) }, set: { testing = $0?.id })) { kind in
             IntegrationTestSheet(kind: kind.id, defaultTo: kind.id == "email" ? (model.me?.email ?? "") : "") { to, message in
@@ -924,7 +906,7 @@ private struct IntegrationTestSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 22) {
-                Headline(kind == "sms" ? "Test *SMS*" : "Test *email*", role: .h2)
+                Headline(kind == "sms" ? "送測試簡訊" : "寄測試信", role: .h2)
                 FieldBlock(label: kind == "sms" ? "手機號碼" : "收件 Email", required: true, focused: focused == 0) {
                     TextField(kind == "sms" ? "09xxxxxxxx" : "you@example.com", text: $to)
                         .keyboardType(kind == "sms" ? .phonePad : .emailAddress)

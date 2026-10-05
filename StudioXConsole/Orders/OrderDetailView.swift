@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 一張訂單：金額、品項、收件、付款、物流與貨態、發票；出貨、完成、取消、退款、確認收款
 /// （都先出網站的確認，按了才執行）
@@ -27,7 +28,11 @@ struct OrderDetailView: View {
                 VStack(alignment: .leading, spacing: 44) {
                     if let d = detail {
                         header(d)
+                        OrderProgress(detail: d)
                         actions(d)
+                        if let shipment = d.shipment, !shipment.events.isEmpty || shipment.trackingNumber != nil {
+                            ShipmentSection(shipment: shipment, completed: d.summary.status == .completed)
+                        }
                         if sizeClass == .regular {
                             HStack(alignment: .top, spacing: 48) {
                                 items(d).frame(maxWidth: .infinity, alignment: .topLeading)
@@ -43,6 +48,7 @@ struct OrderDetailView: View {
                             payment(d)
                         }
                         links(d)
+                        dangerZone(d)
                     } else if let error {
                         ErrorNote(message: error) { Task { await load() } }
                     } else {
@@ -62,8 +68,7 @@ struct OrderDetailView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle(detail.map { "#\($0.summary.number)" } ?? "訂單")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle(detail.map { "#\($0.summary.number)" } ?? "訂單")
         .xenaFocus("order-\(site)-\(orderID)", prompt: "幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
         .toolbar { AskXenaToolbar(model: model) }
         .task { await load() }
@@ -139,9 +144,6 @@ struct OrderDetailView: View {
                 if let refund = d.summary.refundStatus {
                     StatusBadge(refund == "succeeded" ? "已退款" : refund == "failed" ? "退款失敗" : "退款中", tone: refund == "failed" ? .danger : .neutral)
                 }
-                if let logistics = d.logisticsStatus {
-                    StatusBadge(logistics, tone: logistics.contains("送達") ? .active : .info)
-                }
             }
             Text("\(d.summary.customer)・\(d.shippingMethod)")
                 .textRole(.lead)
@@ -157,8 +159,7 @@ struct OrderDetailView: View {
         let status = d.summary.status
         let s = model.site(site)
         let canConfirmTransfer = s?.tools.contains("confirm_bank_transfer") == true && d.bankTransfer?.awaiting == true
-        let canRefund = s?.canRefund == true && [.paid, .shipped, .completed].contains(status) && d.refundCents < d.totalCents
-        if status == .paid || status == .shipped || status == .pending || status == .awaitingPayment || canConfirmTransfer || canRefund {
+        if status == .paid || status == .shipped || canConfirmTransfer {
             VStack(alignment: .leading, spacing: 10) {
                 if status == .paid {
                     Button { shipping = true } label: { Text("標記已出貨") }
@@ -183,20 +184,38 @@ struct OrderDetailView: View {
                             .foregroundStyle(Theme.muted)
                     }
                 }
+            }
+            .disabled(working)
+        }
+    }
+
+    /// 取消、退款：不常用、做了收不回來，放在最下面
+    @ViewBuilder
+    private func dangerZone(_ d: OrderDetail) -> some View {
+        let status = d.summary.status
+        let canCancel = status == .pending || status == .awaitingPayment
+        let canRefund = model.site(site)?.canRefund == true && [.paid, .shipped, .completed].contains(status) && d.refundCents < d.totalCents
+        if canCancel || canRefund {
+            VStack(alignment: .leading, spacing: 12) {
+                Eyebrow("取消與退款")
                 HStack(spacing: 10) {
-                    if status == .pending || status == .awaitingPayment {
+                    if canCancel {
                         Button {
                             Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "cancelled") } }
                         } label: { Text("取消訂單") }
                         .buttonStyle(.brand(.danger, fullWidth: true))
                     }
                     if canRefund {
-                        Button { refunding = true } label: { Text("退款…") }
+                        Button { refunding = true } label: { Text(d.refundCents > 0 ? "再退一筆…" : "退款…") }
                             .buttonStyle(.brand(.danger, fullWidth: true))
                     }
                 }
+                Text(canRefund ? "退款會退回原付款方式（金額可以只退一部分）；下一步要打「退款」才會執行，金額超過門檻還要店主的驗證碼。" : "取消之後客人就不能付款了。")
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
             }
             .disabled(working)
+            .padding(.top, 8)
         }
     }
 
@@ -377,9 +396,12 @@ struct OrderDetailView: View {
                             .padding(.bottom, 8)
                     }
                 }
-                if let tracking = d.trackingNumber { infoRow("物流單號", tracking) }
-                if let logistics = d.logisticsStatus {
-                    infoRow("貨態", logistics + (d.logisticsUpdatedAt.map { "・\($0.shortText)" } ?? ""))
+                // 有配送進度時單號、貨態在上面的「配送進度」
+                if d.shipment == nil {
+                    if let tracking = d.trackingNumber { infoRow("物流單號", tracking) }
+                    if let logistics = d.logisticsStatus {
+                        infoRow("貨態", logistics + (d.logisticsUpdatedAt.map { "・\($0.shortText)" } ?? ""))
+                    }
                 }
                 if let waybill = d.waybillURL {
                     Button { openURL(waybill) } label: { infoRow("託運單", "打開 PDF", link: true) }
@@ -442,7 +464,7 @@ private struct ShipSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 20) {
-                Headline(editing == nil ? "Mark as *shipped*" : "Tracking *number*", role: .h2)
+                Headline(editing == nil ? "標記已出貨" : "物流單號", role: .h2)
                 FieldBlock(label: "物流單號（選填）", hint: "黑貓的單號填了之後，網站每 15 分鐘自動更新貨態", focused: focused) {
                     TextField("例如黑貓的託運單號", text: $tracking)
                         .keyboardType(.asciiCapable)
@@ -509,7 +531,7 @@ private struct RefundSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 22) {
-                Headline("*Refund*", role: .h2)
+                Headline("退款", role: .h2)
                 FieldBlock(label: "退多少（元）", hint: "空白＝全額退剩下的 NT$\(maxNtd.formatted())", error: valid ? nil : "請填 1 到 \(maxNtd) 之間的整數", focused: focused == 0) {
                     HStack(spacing: 6) {
                         Text("NT$").foregroundStyle(Theme.muted)
@@ -542,3 +564,236 @@ private struct RefundSheet: View {
         .presentationDetents([.medium, .large])
     }
 }
+
+// MARK: - 訂單進度（和網站「我的訂單」同一條：下單 → 已付款 → 已出貨 → 已完成；取消的是 下單 → 已取消）
+
+private struct OrderProgress: View {
+    let detail: OrderDetail
+
+    private struct Step {
+        let label: String
+        let time: Date?
+        /// 這一站下面多一行（已出貨：黑貓現在的貨態）
+        var note: String?
+    }
+
+    /// 現在在第幾站
+    private static func index(_ status: OrderStatus) -> Int {
+        switch status {
+        case .paid: return 1
+        case .shipped: return 2
+        case .completed: return 3
+        case .cancelled: return 1
+        default: return 0
+        }
+    }
+
+    var body: some View {
+        let d = detail
+        let status = d.summary.status
+        let cancelled = status == .cancelled
+        let current = Self.index(status)
+        let firstLabel = d.bankTransfer != nil && (status == .pending || status == .awaitingPayment) ? "待匯款" : "下單"
+        let steps: [Step] = cancelled
+            ? [Step(label: firstLabel, time: d.summary.createdAt), Step(label: "已取消", time: d.updatedAt)]
+            : [
+                Step(label: firstLabel, time: d.summary.createdAt),
+                Step(label: "已付款", time: d.summary.paidAt),
+                Step(label: "已出貨", time: current == 2 ? (d.shipment?.events.last?.at ?? d.updatedAt) : nil,
+                     note: status == .shipped ? d.shipment?.events.first?.status : nil),
+                Step(label: "已完成", time: current == 3 ? d.updatedAt : nil),
+            ]
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
+                let done = i < current
+                let here = i == current
+                VStack(spacing: 8) {
+                    dot(done: done, here: here, cancelled: cancelled && here)
+                        .frame(height: 22)
+                    VStack(spacing: 3) {
+                        Text(step.label)
+                            .font(.brand(13, here || done ? .semibold : .medium))
+                            .foregroundStyle(here || done ? Theme.ink : Theme.muted)
+                        if let note = step.note {
+                            Text(note)
+                                .font(.brand(11, .medium))
+                                .foregroundStyle(Theme.accentText)
+                                .lineLimit(1)
+                        }
+                        Text(step.time.map(Self.time) ?? " ")
+                            .font(.brand(11, .regular).monospacedDigit())
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        // 站和站之間的線（走過的是品牌色），在圓點後面
+        .background(alignment: .top) { connectors(count: steps.count, current: current, cancelled: cancelled) }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("訂單進度：" + steps.enumerated().map { i, s in i < current ? "\(s.label) 完成" : i == current ? "現在 \(s.label)" : s.label }.joined(separator: "，"))
+    }
+
+    /// 站和站之間的線：畫在圓點的中心高度，從這一站的中心到下一站的中心
+    private func connectors(count: Int, current: Int, cancelled: Bool) -> some View {
+        GeometryReader { g in
+            let w = g.size.width / CGFloat(count)
+            ForEach(0..<max(0, count - 1), id: \.self) { i in
+                Rectangle()
+                    .fill(i < current && !cancelled ? Theme.accent : Theme.line)
+                    .frame(width: max(0, w - 30), height: 2)
+                    .position(x: w * CGFloat(i) + w, y: 11)
+            }
+        }
+        .frame(height: 22)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func dot(done: Bool, here: Bool, cancelled: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(cancelled ? Theme.dangerFG : done || here ? Theme.accent : Theme.surface)
+                .frame(width: here ? 22 : 18, height: here ? 22 : 18)
+                .overlay { Circle().strokeBorder(done || here ? .clear : Theme.line, lineWidth: 1.5) }
+            if done {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.onAccent)
+            } else if cancelled {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+            } else if here {
+                Circle().fill(Theme.onAccent).frame(width: 7, height: 7)
+            }
+        }
+    }
+
+    private static func time(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.timeZone = TimeZone(identifier: "Asia/Taipei")
+        f.dateFormat = "M/d HH:mm"
+        return f.string(from: date)
+    }
+}
+
+// MARK: - 配送進度（黑貓四站、目前的貨態、時間軸；和客人的追蹤頁同一份）
+
+private struct ShipmentSection: View {
+    let shipment: Shipment
+    let completed: Bool
+
+    @Environment(\.openURL) private var openURL
+    @State private var showAll = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Eyebrow("配送進度")
+            if shipment.isTcat {
+                stations
+            }
+            if let tracking = shipment.trackingNumber {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(shipment.isTcat ? "黑貓單號" : "物流單號")
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.muted)
+                        Text(tracking)
+                            .font(.system(size: 16, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Theme.ink)
+                            .textSelection(.enabled)
+                    }
+                    Spacer(minLength: 8)
+                    Button(copied ? "已複製" : "複製") {
+                        UIPasteboard.general.string = tracking
+                        copied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            copied = false
+                        }
+                    }
+                    .buttonStyle(.brand(.ghost, size: .sm))
+                    if let url = shipment.carrierTrackURL {
+                        Button("到黑貓查 ↗") { openURL(url) }
+                            .buttonStyle(.brand(.ghost, size: .sm))
+                    }
+                }
+            }
+            if !shipment.events.isEmpty {
+                timeline
+            } else {
+                Text("物流商還沒有回報貨態；黑貓收件後網站每 15 分鐘自動更新。")
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
+            }
+        }
+        .panel(padding: 18)
+    }
+
+    /// 黑貓四站：走到哪一站；最新一筆是異常就標紅
+    private var stations: some View {
+        let step = shipment.step(completed: completed)
+        let exception = shipment.exception
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(0..<Shipment.steps.count, id: \.self) { i in
+                    Capsule()
+                        .fill(i <= step ? (exception && i == step ? Theme.dangerFG : Theme.accent) : Theme.line)
+                        .frame(height: 5)
+                }
+            }
+            HStack(spacing: 4) {
+                ForEach(Array(Shipment.steps.enumerated()), id: \.offset) { i, label in
+                    Text(label)
+                        .font(.brand(11.5, i == step ? .semibold : .medium))
+                        .foregroundStyle(i <= step ? Theme.ink : Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: i == 0 ? .leading : i == Shipment.steps.count - 1 ? .trailing : .center)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(step < 0 ? "黑貓還沒收件" : "黑貓：\(Shipment.steps[step])\(exception ? "，有異常" : "")")
+    }
+
+    /// 時間軸：新的在上面；最新那筆用品牌色（異常用紅色）
+    private var timeline: some View {
+        let events = showAll ? shipment.events : Array(shipment.events.prefix(4))
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(events.enumerated()), id: \.element.id) { i, e in
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(spacing: 0) {
+                        Circle()
+                            .fill(i == 0 ? (shipment.exception ? Theme.dangerFG : Theme.accent) : Theme.line)
+                            .frame(width: 9, height: 9)
+                            .padding(.top, 5)
+                        if i < events.count - 1 {
+                            Rectangle().fill(Theme.line).frame(width: 1.5).frame(maxHeight: .infinity)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(e.status)
+                            .textRole(.small)
+                            .foregroundStyle(i == 0 ? Theme.ink : Theme.ink2)
+                        Text([e.office, e.at?.shortText].compactMap { $0 }.joined(separator: "・"))
+                            .textRole(.xs)
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .padding(.bottom, 14)
+                    Spacer(minLength: 0)
+                }
+            }
+            if shipment.events.count > 4 {
+                Button(showAll ? "收起來" : "看全部 \(shipment.events.count) 筆") {
+                    withAnimation(Motion.ease) { showAll.toggle() }
+                }
+                .buttonStyle(.brand(.quiet, size: .sm))
+            }
+        }
+    }
+}
+

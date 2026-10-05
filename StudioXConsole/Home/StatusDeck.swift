@@ -147,7 +147,7 @@ private struct TodaySheet: View {
                     .id("decisions")
                 if !model.sites.isEmpty {
                     VStack(alignment: .leading, spacing: 20) {
-                        SectionHead("Your *sites*")
+                        SectionHead("你的網站")
                         RuledList {
                             ForEach(model.sites) { site in
                                 NavigationLink(value: Route.site(site.id)) { SiteRow(site: site) }

@@ -21,7 +21,7 @@ struct OrdersView: View {
                                 .id(picked)
                         } else {
                             VStack(alignment: .leading, spacing: 14) {
-                                Headline("Pick an *order*", role: .h2)
+                                Headline("選一張訂單", role: .h2)
                                 Text("從左邊選一張訂單。")
                                     .textRole(.small)
                                     .foregroundStyle(Theme.muted)
@@ -58,6 +58,8 @@ struct OrdersList: View {
     /// 搜尋框裡的字；query 是停下來之後真的拿去搜的
     @State private var search = ""
     @State private var query = ""
+    /// 搜尋框打開了（右上角的放大鏡）
+    @State private var searching = false
     /// 下一頁（更早的訂單）的 before；nil＝沒有更早的了
     @State private var next: String?
     @State private var loadingMore = false
@@ -95,7 +97,10 @@ struct OrdersList: View {
             VStack(alignment: .leading, spacing: 28) {
                 header
                 VStack(alignment: .leading, spacing: 14) {
-                    SearchField(text: $search, prompt: "訂單編號、收件人、電話、Email")
+                    if searching {
+                        SearchField(text: $search, prompt: "訂單編號、收件人、電話、Email", autofocus: true)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                     // 搜尋是找全部狀態的
                     if query.isEmpty {
                         FilterBar(items: Filter.allCases, selection: Binding(get: { filter }, set: { model.ordersStatus = $0.rawValue }), title: \.label)
@@ -134,12 +139,14 @@ struct OrdersList: View {
         .scrollDismissesKeyboard(.immediately)
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("訂單")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("訂單")
         .toolbar {
-            // iPad 的分欄沒有導覽列：「選取」放在大標旁邊
-            if picked == nil, canSelect {
-                ToolbarItem(placement: .topBarTrailing) { selectButton }
+            // iPad 的分欄沒有導覽列：放大鏡、「選取」放在大標旁邊
+            if picked == nil {
+                ToolbarItem(placement: .topBarTrailing) { SearchToggle(shown: $searching, text: $search) }
+                if canSelect {
+                    ToolbarItem(placement: .topBarTrailing) { selectButton }
+                }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -197,15 +204,16 @@ struct OrdersList: View {
                         HeroIcon("chevron-down", size: 12).foregroundStyle(Theme.muted)
                     }
                 }
-            } else if let site {
-                Eyebrow(site.name)
             }
-            HStack(alignment: .firstTextBaseline) {
-                Headline("*Orders*", role: .h1)
-                Spacer(minLength: 12)
-                if picked != nil, canSelect {
-                    selectButton
-                        .buttonStyle(.brand(.ghost, size: .sm))
+            PageHeader("訂單", eyebrow: model.orderSites.count > 1 ? nil : site?.name) {
+                if picked != nil {
+                    HStack(spacing: 14) {
+                        if canSelect {
+                            selectButton
+                                .buttonStyle(.brand(.ghost, size: .sm))
+                        }
+                        SearchToggle(shown: $searching, text: $search)
+                    }
                 }
             }
         }

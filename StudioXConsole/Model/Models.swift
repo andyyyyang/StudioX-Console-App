@@ -178,6 +178,75 @@ struct OrderLine: Identifiable {
     var totalCents: Int { unitCents * quantity }
 }
 
+/// 配送進度（和客人的追蹤頁同一份）：黑貓宅配四站走到哪、目前的貨態、時間軸
+struct Shipment {
+    /// tcat＝黑貓宅配；其他是網站的運送方式代號（超商取貨…）
+    var carrier: String?
+    var trackingNumber: String?
+    /// 到黑貓查詢
+    var carrierTrackURL: URL?
+    /// 新的在前
+    var events: [ShipmentEvent]
+
+    init(_ json: JSONValue) {
+        carrier = json["carrier"]?.string
+        trackingNumber = json["trackingNumber"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        carrierTrackURL = json["carrierTrackUrl"]?.string.flatMap(URL.init(string:))
+        events = (json["events"]?.array ?? []).enumerated().map { ShipmentEvent(index: $0.offset, $0.element) }
+    }
+
+    /// 黑貓的四站
+    static let steps = ["黑貓收件", "轉運中", "配送中", "已送達"]
+
+    var isTcat: Bool { carrier == "tcat" }
+
+    /// 走到第幾站（-1＝黑貓還沒收件）；訂單已完成就是最後一站
+    func step(completed: Bool) -> Int {
+        if completed { return Self.steps.count - 1 }
+        return events.reduce(-1) { max($0, $1.step) }
+    }
+
+    /// 最新的一筆是異常（不在家、退回、暫置…）
+    var exception: Bool {
+        guard let current = events.first, current.stage != "delivered", current.stage != "picked_up" else { return false }
+        return current.stage == "exception" || ["退回", "不在", "異常", "拒收", "暫置", "地址不明", "破損"].contains { current.status.contains($0) }
+    }
+}
+
+struct ShipmentEvent: Identifiable {
+    let id: Int
+    /// 物流商的原文（「已集貨」）；括號裡的營業所拆到 office
+    var status: String
+    var office: String?
+    /// accepted／in_transit／out_for_delivery／delivered／in_store／picked_up／exception
+    var stage: String?
+    var at: Date?
+
+    init(index: Int, _ json: JSONValue) {
+        id = index
+        let text = (json["status"]?.string ?? "").trimmingCharacters(in: .whitespaces)
+        // 「已集貨（新竹營業所）」→ 已集貨、新竹營業所
+        if let open = text.lastIndex(of: "（"), text.hasSuffix("）"), open > text.startIndex {
+            status = String(text[..<open])
+            office = String(text[text.index(after: open)..<text.index(before: text.endIndex)])
+        } else {
+            status = text.isEmpty ? "貨態更新" : text
+        }
+        stage = json["stage"]?.string
+        at = json["at"]?.date
+    }
+
+    /// 這一筆代表黑貓走到第幾站（看不出來的算收件）
+    var step: Int {
+        switch stage {
+        case "in_transit": 1
+        case "out_for_delivery", "in_store": 2
+        case "delivered", "picked_up": 3
+        default: 0
+        }
+    }
+}
+
 /// 匯款單：客人回報的戶名／後五碼（是客人說的，不是驗證過的）
 struct BankTransferInfo {
     var name: String?
@@ -288,6 +357,10 @@ struct OrderDetail {
     var packingSlipURL: URL?
     var adminURL: URL?
     var bankTransfer: BankTransferInfo?
+    /// 最後一次改狀態的時間（進度條上「現在這一站」的時間）
+    var updatedAt: Date?
+    /// 配送進度：物流商回報的貨態（網站的 get order 有 logistics 才有）
+    var shipment: Shipment?
 
     init(site: String, _ json: JSONValue) {
         let o = json["order"] ?? .null
@@ -333,6 +406,10 @@ struct OrderDetail {
         trackURL = json["trackUrl"]?.string.flatMap(URL.init(string:))
         packingSlipURL = json["packingSlipUrl"]?.string.flatMap(URL.init(string:))
         adminURL = json["adminUrl"]?.string.flatMap(URL.init(string:))
+        updatedAt = o["updatedAt"]?.date
+        if let l = json["logistics"], !l.isNull {
+            shipment = Shipment(l)
+        }
         if let b = json["bankTransfer"], !b.isNull {
             bankTransfer = BankTransferInfo(
                 name: b["customerReportedName"]?.string,

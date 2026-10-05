@@ -257,7 +257,7 @@ struct AttentionList: View {
     var body: some View {
         let items = model.briefing.attention(sites: model.sites)
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Needs *you*") {
+            SectionHead("要你處理") {
                 if model.briefing.loading {
                     ProgressView().controlSize(.small)
                 }
@@ -367,7 +367,7 @@ private struct NotificationPrompt: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Eyebrow("通知")
-            Headline("Let me *tap your shoulder*.", role: .h3)
+            Headline("有事我第一時間告訴你", role: .h3)
             Text("客人在等回覆、對話轉給專人、有事等你決定時，我第一時間跟你說。哪些事要通知、什麼時候安靜，都可以在「我 → 通知」調整。")
                 .textRole(.small)
                 .foregroundStyle(Theme.ink2)
@@ -396,7 +396,7 @@ struct DecisionList: View {
         let items = model.briefing.decisions
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 24) {
-                SectionHead("Your *call*", aside: "我看了各網站的數據，這些做了會更好。要不要做，你決定。")
+                SectionHead("等你決定", aside: "我看了各網站的數據，這些做了會更好。要不要做，你決定。")
                 VStack(spacing: 14) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, decision in
                         DecisionCard(decision: decision, site: model.site(decision.site))

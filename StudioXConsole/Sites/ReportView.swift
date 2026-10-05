@@ -17,9 +17,8 @@ struct OpsReportView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(site?.name ?? siteID)
-                    Headline("Store *report*", role: .h1)
+                VStack(alignment: .leading, spacing: 18) {
+                    PageHeader("營運報表", eyebrow: site?.name ?? siteID)
                     FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "昨天" : "\($0) 天" })
                 }
                 if let error {
@@ -41,8 +40,7 @@ struct OpsReportView: View {
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
-        .navigationTitle("營運報表")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("營運報表")
         .task(id: days) { await load() }
     }
 
@@ -67,7 +65,7 @@ struct OpsReportView: View {
     private func orders(_ r: JSONValue) -> some View {
         let ops = OpsReport(r)
         VStack(alignment: .leading, spacing: 24) {
-            SectionHead("Orders, *\(ops.rangeLabel.isEmpty ? (days == 1 ? "昨天" : "\(days) 天") : ops.rangeLabel)*", role: .h3) {
+            SectionHead("訂單與收款・\(ops.rangeLabel.isEmpty ? (days == 1 ? "昨天" : "最近 \(days) 天") : ops.rangeLabel)", role: .h3) {
                 MoreLink("看訂單") {
                     model.ordersSite = siteID
                     model.ordersStatus = "all"
@@ -90,7 +88,7 @@ struct OpsReportView: View {
             }
         }
         VStack(alignment: .leading, spacing: 18) {
-            SectionHead("Right *now*", role: .h3)
+            SectionHead("現在", role: .h3)
             StatGrid {
                 Stat(value: Double(ops.paidButUnfulfilled), label: "等出貨")
                 Stat(value: Double(ops.awaitingPayment), label: "等付款")
@@ -125,7 +123,7 @@ struct OpsReportView: View {
     @ViewBuilder
     private func memberSection(_ m: JSONValue) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            SectionHead("*Members*", role: .h3)
+            SectionHead("會員", role: .h3)
             StatGrid(columns: 3) {
                 Stat(value: Double(m["total"]?.int ?? 0), label: "會員")
                 Stat(value: Double(m["newThisMonth"]?.int ?? 0), label: "這個月新加入")

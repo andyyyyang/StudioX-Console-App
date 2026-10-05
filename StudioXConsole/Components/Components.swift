@@ -231,10 +231,117 @@ struct FilterBar<Item: Hashable>: View {
     }
 }
 
+// MARK: - 頁首（全 App 同一個樣子）
+
+/// 每一頁最上面的標題：小字的來處（哪個網站）、大標、一行說明；右邊可以放按鈕（iPad 分欄沒有導覽列時的搜尋、選取）。
+/// 大標和導覽列的標題是同一個字：導覽列平常不寫，捲過大標才淡入（.pageTitle），不會上下各寫一次
+struct PageHeader<Trailing: View>: View {
+    let title: String
+    var eyebrow: String?
+    var subtitle: String?
+    let trailing: Trailing
+
+    init(_ title: String, eyebrow: String? = nil, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.eyebrow = eyebrow
+        self.subtitle = subtitle
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let eyebrow, !eyebrow.isEmpty {
+                Eyebrow(eyebrow)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Headline(title, role: .h1)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                trailing
+            }
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+extension PageHeader where Trailing == EmptyView {
+    init(_ title: String, eyebrow: String? = nil, subtitle: String? = nil) {
+        self.init(title, eyebrow: eyebrow, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+/// 導覽列的標題：平常空著（頁面上已經有同一個大標），捲過大標才淡入；放在頁面的 ScrollView 上
+struct PageTitle: ViewModifier {
+    let title: String
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: Bool.self) { g in
+                g.contentOffset.y + g.contentInsets.top > 72
+            } action: { _, past in
+                withAnimation(Motion.fast) { shown = past }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.brand(17, .semibold, relativeTo: .headline))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .opacity(shown ? 1 : 0)
+                        .accessibilityHidden(!shown)
+                }
+            }
+    }
+}
+
+extension View {
+    /// 這一頁的標題（導覽列捲過大標才出現；返回、多工切換照樣用這個字）
+    func pageTitle(_ title: String) -> some View { modifier(PageTitle(title: title)) }
+}
+
+/// 收起來的搜尋：右上角的放大鏡（打開時變成 ✕），點了才出現搜尋框
+struct SearchToggle: View {
+    @Binding var shown: Bool
+    @Binding var text: String
+
+    var body: some View {
+        Button {
+            withAnimation(Motion.ease) {
+                if shown { text = "" }
+                shown.toggle()
+            }
+        } label: {
+            Group {
+                if shown {
+                    Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
+                } else {
+                    HeroIcon("magnifying-glass", size: 19)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(.rect)
+        }
+        .foregroundStyle(Theme.ink)
+        .accessibilityLabel(shown ? "關閉搜尋" : "搜尋")
+        .keyboardShortcut("f", modifiers: .command)
+    }
+}
+
 /// 頁面裡的搜尋框（iPad 分欄的清單沒有導覽列，放不了 .searchable）
 struct SearchField: View {
     @Binding var text: String
     let prompt: String
+    /// 一出現就可以打字（從放大鏡打開的）
+    var autofocus = false
 
     @FocusState private var focused: Bool
 
@@ -266,6 +373,11 @@ struct SearchField: View {
         .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(focused ? Theme.ink2 : Theme.line, lineWidth: 1) }
         .contentShape(.rect)
         .onTapGesture { focused = true }
+        .task {
+            guard autofocus else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            focused = true
+        }
     }
 }
 
@@ -534,8 +646,8 @@ struct RuledList<Content: View>: View {
 
 // MARK: - 區塊標題（SectionHead.astro）
 
-/// 區塊標題：英文大字＋襯線強調詞，旁邊一句中文說明、右邊一個動作。
-/// `SectionHead("Needs *you*", aside: "要你處理的事")`
+/// 區塊標題：一頁裡的一段（大字），旁邊一句說明、右邊一個動作。
+/// `SectionHead("要你處理", aside: "客人在等你，等最久的在上面")`
 struct SectionHead<Action: View>: View {
     let title: String
     var aside: String?

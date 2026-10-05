@@ -65,7 +65,7 @@ struct SearchView: View {
             }
             .scrollDismissesKeyboard(.immediately)
             .brandPage()
-            .navigationTitle("搜尋")
+            .pageTitle("搜尋")
             .searchable(text: $query, prompt: Text("訂單、客人、折價碼、商品、文章…"))
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
             .task(id: query) {
@@ -110,10 +110,7 @@ struct SearchView: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Headline("Find *anything*", role: .h1)
-            Text("一次搜你所有的網站：訂單編號、收件人、電話、會員、折價碼、商品，以及每個網站的文章、作品、服務、FAQ。")
-                .textRole(.lead)
-                .foregroundStyle(Theme.ink2)
+            PageHeader("搜尋", subtitle: "一次搜你所有的網站：訂單編號、收件人、電話、會員、折價碼、商品，以及每個網站的文章、作品、服務、FAQ。")
         }
         .reveal()
     }

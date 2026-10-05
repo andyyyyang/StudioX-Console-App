@@ -284,8 +284,19 @@ nonisolated enum DemoServer {
         return #"{"orders":[\#(rows.joined(separator: ","))]}"#
     }
 
-    private static func order(id: String) -> String { """
-    {"order":{"id":"\(id)","orderNumber":"CM-24100612","status":"paid","total":112000,"totalLabel":"NT$1,120","subtotal":118000,"shippingFee":10000,"discountAmount":16000,"userId":"u1","couponId":"cp1",
+    private static func order(id: String) -> String {
+        // o3：已出貨、黑貓配送中（訂單進度、配送進度的示範）
+        let shipped = id == "o3"
+        let logistics = shipped ? """
+     "logistics":{"carrier":"tcat","trackingNumber":"9050-1234-5678","carrierTrackUrl":"https://www.t-cat.com.tw/inquire/trace.aspx",
+      "events":[{"status":"配送中（台南中西營業所）","stage":"out_for_delivery","at":"\(ago(hours: 2))"},
+                {"status":"到著（台南中西營業所）","stage":"in_transit","at":"\(ago(hours: 9))"},
+                {"status":"轉運中（台中轉運中心）","stage":"in_transit","at":"\(ago(hours: 16))"},
+                {"status":"已集貨（新竹營業所）","stage":"accepted","at":"\(ago(hours: 22))"}]},
+    """ : #""logistics":{"carrier":"tcat","trackingNumber":null,"carrierTrackUrl":null,"events":[]},"#
+        return """
+    {\(logistics)
+     "order":{"id":"\(id)","orderNumber":"CM-24100612","status":"\(shipped ? "shipped" : "paid")","updatedAt":"\(ago(hours: shipped ? 22 : 2))",\(shipped ? #""trackingNumber":"9050-1234-5678","# : "")"total":112000,"totalLabel":"NT$1,120","subtotal":118000,"shippingFee":10000,"discountAmount":16000,"userId":"u1","couponId":"cp1",
       "shippingName":"林小涵","shippingPhone":"0912-000-000","email":"demo-customer@example.com","shippingMethod":"home","shippingAddress":"台南市中西區民族路二段 1 號",
       "paymentProvider":"payuni","createdAt":"\(ago(hours: 3))","paidAt":"\(ago(hours: 2))","note":"請下午送達，謝謝"},
      "items":[{"id":"i1","productName":"手工蛋捲禮盒","variantName":"原味・12 入","quantity":2,"unitPrice":45000},
@@ -294,7 +305,8 @@ nonisolated enum DemoServer {
                   {"couponId":"cp2","code":"YG-K7Q2M9","name":"林小涵 專屬折價","type":"percentage","personalized":true,"offer":"85 折","amount":4200,"amountLabel":"NT$42"}],
      "member":{"id":"u1","name":"林小涵","email":"demo-customer@example.com","tier":"金卡會員","paidOrderCount":4,"lifetimeSpendCents":684000,"lifetimeSpendLabel":"NT$6,840"},
      "trackUrl":null}
-    """ }
+    """
+    }
 
     private static func member(id: String) -> String { """
     {"user":{"id":"\(id)","name":"\(id == "u2" ? "小雯" : "林小涵")","email":"demo-customer@example.com","phone":"0912-000-000","phoneVerified":"\(ago(hours: 2000))","role":"customer","tier":"金卡會員",

@@ -16,20 +16,14 @@ struct NotificationSettingsView: View {
         let push = model.push
         ScrollView {
             VStack(alignment: .leading, spacing: 48) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow("通知")
-                    Headline("Stay *in the loop*.", role: .h1)
-                    Text("網站有需要你處理的事，Xena 會從這裡告訴你：客人在等回覆、對話轉給專人、等你決定的自動化。內容和網站後台的手機推播一樣。")
-                        .textRole(.lead)
-                        .foregroundStyle(Theme.ink2)
-                }
-                .reveal()
+                PageHeader("通知", subtitle: "網站有需要你處理的事，Xena 會從這裡告訴你：客人在等回覆、對話轉給專人、等你決定的自動化。內容和網站後台的手機推播一樣。")
+                    .reveal()
 
                 status(push)
 
                 if push.permission == .allowed && push.device != nil {
                     VStack(alignment: .leading, spacing: 20) {
-                        SectionHead("Your *sites*", role: .h3)
+                        SectionHead("網站", role: .h3)
                         RuledList {
                             ForEach(model.sites) { site in
                                 siteRow(site)
@@ -48,8 +42,7 @@ struct NotificationSettingsView: View {
             .padding(.bottom, 64)
         }
         .brandPage()
-        .navigationTitle("通知")
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("通知")
         .task { await load() }
         .onChange(of: scenePhase) { _, phase in
             // 從「設定」打開通知回來
@@ -227,14 +220,8 @@ struct SiteNotificationPrefsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 48) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Eyebrow(site.name)
-                    Headline("What *matters*.", role: .h1)
-                    Text("和網站後台「通知設定 → 手機推播」是同一份：瀏覽器和 App 都照這裡。")
-                        .textRole(.lead)
-                        .foregroundStyle(Theme.ink2)
-                }
-                .reveal()
+                PageHeader("通知內容", eyebrow: site.name, subtitle: "和網站後台「通知設定 → 手機推播」是同一份：瀏覽器和 App 都照這裡。")
+                    .reveal()
 
                 ForEach(prefs.groups) { group in
                     let events = prefs.events.filter { $0.group == group.id }
@@ -251,7 +238,7 @@ struct SiteNotificationPrefsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    SectionHead("Quiet *hours*", aside: "這段時間只送緊急的（台北時間）。", role: .h3)
+                    SectionHead("勿擾時段", aside: "這段時間只送緊急的（台北時間）。", role: .h3)
                     RuledList {
                         ToggleRow(label: "勿擾時段", isOn: quietOn)
                             .padding(.vertical, 10)
@@ -280,7 +267,7 @@ struct SiteNotificationPrefsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    SectionHead("*Preview*", role: .h3)
+                    SectionHead("預覽", role: .h3)
                     RuledList {
                         ToggleRow(label: "顯示訊息預覽", help: "通知裡帶客人訊息的前幾個字。鎖定畫面上旁邊的人也看得到。", isOn: Binding(
                             get: { prefs.preview },
@@ -299,8 +286,7 @@ struct SiteNotificationPrefsView: View {
             .padding(.bottom, 64)
         }
         .brandPage()
-        .navigationTitle(site.name)
-        .navigationBarTitleDisplayMode(.inline)
+        .pageTitle("通知內容")
         .toolbar {
             if saving > 0 {
                 ToolbarItem(placement: .topBarTrailing) { ProgressView().controlSize(.small) }

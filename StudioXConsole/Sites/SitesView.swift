@@ -10,13 +10,8 @@ struct SitesView: View {
         NavigationStack(path: Bindable(model).sitesPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 40) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Headline("Your *sites*", role: .h1)
-                        Text(summary)
-                            .textRole(.lead)
-                            .foregroundStyle(Theme.ink2)
-                    }
-                    .reveal()
+                    PageHeader("網站", subtitle: summary)
+                        .reveal()
                     if model.sites.isEmpty {
                         EmptyState(title: "目前沒有可以管理的網站", message: "收到邀請連結的話，直接打開連結就能加入網站。")
                     } else {
@@ -38,8 +33,7 @@ struct SitesView: View {
             }
             .refreshable { [model] in await Task { await model.refreshAll() }.value }
             .brandPage()
-            .navigationTitle("網站")
-            .navigationBarTitleDisplayMode(.inline)
+            .pageTitle("網站")
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
         }
     }
@@ -104,8 +98,7 @@ struct SiteHomeView: View {
                 .padding(.bottom, 56)
             }
             .brandPage()
-            .navigationTitle(site.name)
-            .navigationBarTitleDisplayMode(.inline)
+            .pageTitle(site.name)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
             .toolbar { AskXenaToolbar(model: model) }
         } else {
@@ -164,8 +157,7 @@ struct SiteWorkspace: View {
                 .padding(.bottom, 64)
             }
             .brandPage()
-            .navigationTitle("概況")
-            .navigationBarTitleDisplayMode(.inline)
+            .pageTitle(site.name)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
             .toolbar { AskXenaToolbar(model: model) }
         case .traffic:
@@ -244,7 +236,7 @@ struct SiteHeader: View {
                         .foregroundStyle(Theme.muted)
                 }
             }
-            Headline(site.name, role: .h1)
+            PageHeader(site.name)
             HStack(spacing: 10) {
                 if let url = site.adminURL {
                     Button { openURL(url) } label: { Text("開啟後台") }
@@ -300,7 +292,7 @@ struct SiteOverview: View {
 
     private var traffic: some View {
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Traffic") {
+            SectionHead("流量") {
                 // 在哪一疊頁面裡就往下推（首頁卡片的 sheet 裡也是）
                 NavigationLink(value: Route.traffic(site: site.id)) { MoreLinkLabel(title: "完整報表") }
                     .buttonStyle(.press)
@@ -330,7 +322,7 @@ struct SiteOverview: View {
 
     private func store(_ ops: OpsReport) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("Store, *yesterday*") {
+            SectionHead("昨天的商店") {
                 NavigationLink(value: Route.report(site: site.id)) { MoreLinkLabel(title: "完整報表") }
                     .buttonStyle(.press)
             }
@@ -367,7 +359,7 @@ struct SiteSections: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 40) {
-            SectionHead("Manage")
+            SectionHead("管理")
             RuledList {
                 if site.tools.contains("ops_report") {
                     sectionRow(icon: "presentation-chart-line", title: "營運報表", detail: "訂單、收款、等出貨、會員、異常", route: .report(site: site.id))
@@ -507,35 +499,6 @@ enum EntityStyle {
         case "service": "puzzle-piece"
         case "integration": "link"
         default: "rectangle-stack"
-        }
-    }
-
-    /// 英文大標（網站的區塊標題：英文大字＋襯線強調詞）
-    static func headline(_ key: String) -> String? {
-        switch key {
-        case "product": "*Products*"
-        case "category": "*Categories*"
-        case "bundle": "*Bundles*"
-        case "coupon": "*Coupons*"
-        case "news", "content_news": "Latest *news*"
-        case "banner": "*Banners*"
-        case "faq", "content_faq": "*FAQ*"
-        case "milestone": "*Milestones*"
-        case "membership_tier": "Member *tiers*"
-        case "campaign": "SMS *campaigns*"
-        case "line_campaign": "LINE *push*"
-        case "line_marketing": "Buy-again *reminders*"
-        case "line_theme": "LINE *cards*"
-        case "pending_notification": "Pending *notices*"
-        case "user": "*Members*"
-        case "mailbox": "*Mailbox*"
-        case "projects": "Selected *work*"
-        case "services": "What we *do*"
-        case "engagements": "How we *work*"
-        case "page_seo": "Search *appearance*"
-        case "automation": "*Automations*"
-        case "stall_menu": "The *menu*"
-        default: nil
         }
     }
 
