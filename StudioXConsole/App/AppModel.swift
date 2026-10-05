@@ -27,6 +27,8 @@ enum Route: Hashable {
     case traffic(site: String)
     /// Google 搜尋成效
     case searchConsole(site: String)
+    /// 營運報表（訂單、收款、會員）
+    case report(site: String)
     /// 會員
     case member(site: String, id: String)
 
@@ -35,7 +37,7 @@ enum Route: Hashable {
         case .site(let s): s
         case .order(let s, _), .thread(let s, _), .xenaConversation(let s, _), .inquiry(let s, _), .collection(let s, _), .record(let s, _, _),
              .create(let s, _), .member(let s, _): s
-        case .traffic(let s), .searchConsole(let s): s
+        case .traffic(let s), .searchConsole(let s), .report(let s): s
         }
     }
 }
@@ -243,6 +245,7 @@ final class AppModel {
         case "linepush": open(.collection(site: shop, entity: "line_campaign"))
         case "campaign": open(.record(site: shop, entity: "campaign", id: "sc1"))
         case "pending": open(.collection(site: shop, entity: "pending_notification"))
+        case "report": open(.report(site: shop))
         case "product": open(.record(site: shop, entity: "product", id: "p1"))
         case "xena": showXena = true
         default: break

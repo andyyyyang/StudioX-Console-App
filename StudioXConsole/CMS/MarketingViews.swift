@@ -252,14 +252,6 @@ struct LineCampaignsView: View {
         .brandPage()
         .navigationTitle("LINE 推播")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if model.site(site)?.tools.contains("send_line_campaign") == true {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { composing = true } label: { HeroIcon("plus", size: 20) }
-                        .accessibilityLabel("寫一則推播")
-                }
-            }
-        }
         .sheet(isPresented: $composing) {
             LineCampaignComposer(site: site) { Task { await load() } }
         }

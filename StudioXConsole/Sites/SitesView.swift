@@ -331,11 +331,8 @@ struct SiteOverview: View {
     private func store(_ ops: OpsReport) -> some View {
         VStack(alignment: .leading, spacing: 28) {
             SectionHead("Store, *yesterday*") {
-                MoreLink("看訂單") {
-                    model.ordersSite = site.id
-                    model.ordersStatus = "paid"
-                    model.tab = .orders
-                }
+                NavigationLink(value: Route.report(site: site.id)) { MoreLinkLabel(title: "完整報表") }
+                    .buttonStyle(.press)
             }
             StatGrid {
                 Stat(value: Double(ops.createdTotal), label: "新訂單")
@@ -372,6 +369,9 @@ struct SiteSections: View {
         VStack(alignment: .leading, spacing: 40) {
             SectionHead("Manage")
             RuledList {
+                if site.tools.contains("ops_report") {
+                    sectionRow(icon: "presentation-chart-line", title: "營運報表", detail: "訂單、收款、等出貨、會員、異常", route: .report(site: site.id))
+                }
                 if site.hasTraffic {
                     sectionRow(icon: "chart-bar", title: "流量", detail: "訪客、熱門頁面、來源、時段", route: .traffic(site: site.id))
                 }

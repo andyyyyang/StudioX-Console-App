@@ -169,7 +169,9 @@ nonisolated enum DemoServer {
             return #"{"needsConfirmation":true,"title":"確認（示範模式）","detail":"這是示範模式：按確認會顯示完成，但不會真的送出或修改任何資料。","confirmToken":"demo"}"#
         }
         switch (name, entity) {
-        case ("ops_report", _): return site == "chenmai.studiox.tw" ? ops : nil
+        case ("ops_report", _):
+            guard site == "chenmai.studiox.tw" else { return nil }
+            return args["section"]?.string == "members" ? membersReport : ops(days: args["days"]?.int ?? 1)
         case ("traffic_report", _): return traffic(site: site, days: args["days"]?.int ?? 7)
         case ("search_report", _): return search
         case ("list", "order"): return orders(status: args["status"]?.string)
@@ -249,12 +251,27 @@ nonisolated enum DemoServer {
 
     // MARK: 營運、訂單
 
-    private static var ops: String { """
-    {"summary":"昨天 14 筆訂單、收款 NT$12,860","range":{"label":"昨天"},"created":{"total":14},"paid":{"count":12,"revenueCents":1286000},
+    private static func ops(days: Int) -> String {
+        let k = days == 1 ? 1 : days
+        let created = days == 1 ? 14 : 13 * k
+        let paid = days == 1 ? 12 : 11 * k
+        let revenue = days == 1 ? 1286000 : 1104000 * k
+        return """
+    {"summary":"\(days == 1 ? "昨天 14 筆訂單、收款 NT$12,860" : "")","range":{"label":"\(days == 1 ? "昨天" : "最近 \(days) 天")"},
+     "created":{"total":\(created),"byStatus":[{"status":"completed","count":\(created * 6 / 10)},{"status":"shipped","count":\(created * 2 / 10)},{"status":"paid","count":\(created / 10)},{"status":"awaiting_payment","count":\(max(1, created / 20))},{"status":"cancelled","count":\(max(1, created / 30))}]},
+     "paid":{"count":\(paid),"revenueCents":\(revenue)},
      "awaitingPayment":2,"paidButUnfulfilled":5,"notificationsOverdue":0,
      "support":{"awaitingReply":2,"oldestWaitHours":5,"unmatchedInbound":1},
      "alerts":["1 筆物流異常：包裹退回（CM-24100612）"]}
+    """
+    }
+
+    private static var membersReport: String { """
+    {"total":1286,"newThisMonth":48,"totalSpendLabel":"NT$2,418,600",
+     "tiers":[{"name":"一般會員","count":1012},{"name":"銀卡會員","count":203},{"name":"金卡會員","count":71}],
+     "topSpenders":[{"id":"u1","name":"林小涵","spendLabel":"NT$28,400"},{"id":"u3","name":"陳柏宇","spendLabel":"NT$24,960"},{"id":"u4","name":"王怡君","spendLabel":"NT$19,320"},{"id":"u5","name":"張家豪","spendLabel":"NT$16,880"},{"id":"u6","name":"李思妤","spendLabel":"NT$15,200"}]}
     """ }
+
 
     private static let customers = ["林小涵", "陳柏宇", "王怡君", "張家豪", "李思妤", "黃冠廷", "吳佩珊"]
 

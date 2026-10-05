@@ -283,6 +283,7 @@ struct RouteView: View {
         case .create(let site, let entity): RecordEditor(site: site, entity: entity, mode: .create)
         case .traffic(let site): TrafficView(siteID: site)
         case .searchConsole(let site): SearchConsoleView(siteID: site)
+        case .report(let site): OpsReportView(siteID: site)
         case .member(let site, let id): MemberView(site: site, memberID: id)
         }
     }
