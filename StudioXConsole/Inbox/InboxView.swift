@@ -624,6 +624,8 @@ struct SupportThreadView: View {
     @State private var closeAfter = false
     @State private var proposal: Proposal?
     @State private var working = false
+    /// Xena 正在寫回覆
+    @State private var drafting = false
     @State private var position = ScrollPosition(edge: .bottom)
 
     var body: some View {
@@ -673,10 +675,11 @@ struct SupportThreadView: View {
             if detail != nil {
                 ChatComposer(
                     text: $draft,
-                    placeholder: "回覆客人…",
+                    placeholder: drafting ? "Xena 正在寫…" : "回覆客人…",
                     hint: detail.map { "寄到 \($0.contactEmail)" },
                     sending: working,
-                    draftWithXena: askXenaForDraft,
+                    draftWithXena: { xenaWrite(polish: false) },
+                    sendBlocked: drafting,
                     send: send
                 ) {
                     if !draft.isEmpty {
@@ -697,7 +700,10 @@ struct SupportThreadView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("請 Xena 擬回覆", systemImage: "sparkles") { askXenaForDraft() }
+                    Button("請 Xena 擬回覆", systemImage: "sparkles") { xenaWrite(polish: false) }
+                    if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("請 Xena 潤飾我寫的", systemImage: "wand.and.stars") { xenaWrite(polish: true) }
+                    }
                     if detail?.summary.status != "closed" {
                         Button("結案", systemImage: "checkmark.circle") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "closed") } } }
                     } else {
@@ -742,8 +748,26 @@ struct SupportThreadView: View {
         }
     }
 
-    private func askXenaForDraft() {
-        model.askXena("幫我擬一封回覆給\(model.site(site)?.name ?? site)的客服信「\(detail?.summary.subject ?? "")」（\(threadID)）")
+    /// Xena 讀整串信、這位客人的訂單擬一封回覆（輸入框有字就當重點），或潤飾輸入框裡的那段；放進輸入框，不會自己寄出。
+    /// 要先同意 Xena 使用雲端 AI
+    private func xenaWrite(polish: Bool) {
+        guard !drafting else { return }
+        model.withCloudAI {
+            let input = draft
+            drafting = true
+            Task {
+                defer { drafting = false }
+                do {
+                    let text = try await model.api.replyDraft(site: site, id: threadID, polish: polish, text: input, kind: "thread")
+                    withAnimation(Motion.ease) {
+                        // 寫的時候又打了字：接在後面，不蓋掉
+                        draft = draft == input ? text : draft + "\n\n" + text
+                    }
+                } catch {
+                    model.show(error.localizedDescription, tone: .danger)
+                }
+            }
+        }
     }
 
     private func send() {

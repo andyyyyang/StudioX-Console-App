@@ -467,10 +467,11 @@ final class ConsoleAPI {
 
     // MARK: 客服對話的「Xena 擬回覆／潤飾」（/api/app/reply-draft）
 
-    /// console 的 Xena 讀整段對話寫一段回覆（draft：notes 是專人交代的重點；polish：text 是要潤飾的那段）。只回草稿，不會送出
-    func replyDraft(site: String, id: String, polish: Bool, text: String) async throws -> String {
+    /// console 的 Xena 讀整段對話寫一段回覆（draft：notes 是專人交代的重點；polish：text 是要潤飾的那段）。只回草稿，不會送出。
+    /// kind：conversation＝Xena 對話（官網、LINE）、thread＝Email 客服信
+    func replyDraft(site: String, id: String, polish: Bool, text: String, kind: String = "conversation") async throws -> String {
         try requireCloudAI()
-        let payload: JSONValue = ["site": .string(site), "id": .string(id), "mode": .string(polish ? "polish" : "draft"), "text": .string(text)]
+        let payload: JSONValue = ["site": .string(site), "id": .string(id), "mode": .string(polish ? "polish" : "draft"), "text": .string(text), "kind": .string(kind)]
         let (data, http) = try await send { try appRequest("api/app/reply-draft", method: "POST", body: payload) }
         if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
         guard let draft = try appReply(data, http, fallback: "Xena 寫不出來")["text"]?.string, !draft.isEmpty else {
