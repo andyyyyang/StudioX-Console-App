@@ -200,7 +200,8 @@ nonisolated enum DemoServer {
         case ("list", "campaign"): return campaigns
         case ("get", "campaign"): return campaign(id: args["id"]?.string ?? "sc1")
         case ("list", "line_campaign"): return lineCampaigns
-        case ("get", "line_theme"): return #"{"name":"晨麥手作","primary":"#B5651D","accent":"#B5651D","text":"#2B2118"}"#
+        // 顏色是 "#…"：要用 ## 的原始字串
+        case ("get", "line_theme"): return ##"{"name":"晨麥手作","primary":"#B5651D","accent":"#B5651D","text":"#2B2118"}"##
         case ("list", "pending_notification"): return pendingNotifications
         case ("list", "integration"): return integrations
         case ("list", _): return #"{"items":[]}"#
