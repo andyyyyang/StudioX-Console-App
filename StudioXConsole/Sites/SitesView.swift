@@ -230,7 +230,8 @@ struct SiteHeader: View {
             HStack(spacing: 14) {
                 SiteIconView(site: site, size: 56)
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow([site.org, site.levelLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    // 公司名稱和網站名稱一樣時不重複寫（大標就是網站名稱）
+                    Eyebrow([site.org == site.name ? nil : site.org, site.levelLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                     Text(site.host)
                         .textRole(.small)
                         .foregroundStyle(Theme.muted)

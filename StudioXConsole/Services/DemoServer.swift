@@ -298,7 +298,7 @@ nonisolated enum DemoServer {
     {\(logistics)
      "order":{"id":"\(id)","orderNumber":"CM-24100612","status":"\(shipped ? "shipped" : "paid")","updatedAt":"\(ago(hours: shipped ? 22 : 2))",\(shipped ? #""trackingNumber":"9050-1234-5678","# : "")"total":112000,"totalLabel":"NT$1,120","subtotal":118000,"shippingFee":10000,"discountAmount":16000,"userId":"u1","couponId":"cp1",
       "shippingName":"林小涵","shippingPhone":"0912-000-000","email":"demo-customer@example.com","shippingMethod":"home","shippingAddress":"台南市中西區民族路二段 1 號",
-      "paymentProvider":"payuni","createdAt":"\(ago(hours: 3))","paidAt":"\(ago(hours: 2))","note":"請下午送達，謝謝"},
+      "paymentProvider":"payuni","createdAt":"\(ago(hours: shipped ? 30 : 3))","paidAt":"\(ago(hours: shipped ? 29 : 2))","note":"請下午送達，謝謝"},
      "items":[{"id":"i1","productName":"手工蛋捲禮盒","variantName":"原味・12 入","quantity":2,"unitPrice":45000},
               {"id":"i2","productName":"芝麻薄餅","variantName":"罐裝","quantity":1,"unitPrice":28000}],
      "discounts":[{"couponId":"cp1","code":"MOON10","name":"中秋禮盒 9 折","type":"percentage","personalized":false,"offer":"9 折","amount":11800,"amountLabel":"NT$118"},
