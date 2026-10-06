@@ -233,6 +233,11 @@ extension ConsoleAPI {
         return try await propose("send_email", site: site, args)
     }
 
+    /// 重寄一則沒寄出去的回覆（resend_support_email）：內容、簽名照原本那一則，不會多一則
+    func proposeResendEmail(site: String, messageID: String) async throws -> WriteOutcome {
+        try await propose("resend_support_email", site: site, ["messageId": .string(messageID)])
+    }
+
     /// 寄信時信末的簽名（這個網站寄出時的樣子：名字｜職稱、品牌、電話・Email・網址）
     func emailSignature(site: String) async throws -> [String] {
         let r = try await tool("email_signature", site: site)

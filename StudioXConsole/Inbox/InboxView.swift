@@ -647,6 +647,11 @@ struct SupportThreadView: View {
     /// Xena 正在寫回覆
     @State private var drafting = false
     @State private var position = ScrollPosition(edge: .bottom)
+    /// 正在準備重寄的那一則
+    @State private var resendingID: String?
+
+    /// 網站有重寄的工具（新版後台）才放「重寄」
+    private var canResend: Bool { model.site(site)?.tools.contains("resend_support_email") == true }
 
     var body: some View {
         ScrollView {
@@ -659,8 +664,12 @@ struct SupportThreadView: View {
                                 .padding(.top, 20)
                                 .padding(.bottom, 4)
                         }
-                        MessageBubble(message: row.message, first: row.first, last: row.last)
-                            .padding(.top, row.first ? 10 : 2)
+                        MessageBubble(
+                            message: row.message, first: row.first, last: row.last,
+                            resend: canResend && !row.message.fromCustomer ? { resend(row.message) } : nil,
+                            resending: resendingID == row.message.id
+                        )
+                        .padding(.top, row.first ? 10 : 2)
                     }
                     if !d.orders.isEmpty { orders(d) }
                 } else if let error {
@@ -796,8 +805,27 @@ struct SupportThreadView: View {
         Task { await propose(reply: true) { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
     }
 
+    /// 重寄沒寄出去的那一則：先跳確認（收件人、全文），內容照舊
+    private func resend(_ message: SupportMessage) {
+        guard resendingID == nil, !working else { return }
+        resendingID = message.id
+        Task {
+            defer { resendingID = nil }
+            await propose { try await model.api.proposeResendEmail(site: site, messageID: message.id) }
+        }
+    }
+
     /// 寫入完成：回覆有沒有寄出（信沒寄出要讓專人知道）
     private func announce(_ result: JSONValue) {
+        // 重寄（resend_support_email）：結果直接帶 emailSent／emailError
+        if result["messageId"] != nil, result["sent"] == nil {
+            if let error = result["emailError"]?.string, !error.isEmpty {
+                model.show("還是沒寄出：\(error)", tone: .danger)
+            } else {
+                model.show("已重寄")
+            }
+            return
+        }
         let sent = result["sent"]?.array.first
         if let error = sent?["emailError"]?.string, !error.isEmpty {
             model.show("回覆存了，但信沒寄出：\(error)", tone: .danger)
@@ -910,6 +938,9 @@ private struct MessageBubble: View {
     let message: SupportMessage
     var first = true
     var last = true
+    /// 信沒寄出時的「重寄」；nil＝不放
+    var resend: (() -> Void)? = nil
+    var resending = false
 
     private var mine: Bool { !message.fromCustomer }
 
@@ -941,6 +972,14 @@ private struct MessageBubble: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.dangerFG)
                     .padding(.horizontal, 8)
+                if let resend {
+                    Button(action: resend) {
+                        if resending { ProgressView().controlSize(.small) } else { Text("重寄") }
+                    }
+                    .buttonStyle(.brand(.ghost, size: .sm))
+                    .disabled(resending)
+                    .padding(.horizontal, 4)
+                }
             }
         }
         .frame(maxWidth: 520, alignment: mine ? .trailing : .leading)
