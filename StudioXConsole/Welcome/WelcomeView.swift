@@ -1,7 +1,7 @@
 import AuthenticationServices
 import SwiftUI
 
-/// 歡迎頁＝登入頁：和 console 的網頁登入同一套品牌（atelier-cms 的 auth/AuthScreen.tsx）。
+/// 歡迎頁＝登入頁：和 console 的網頁登入同一套品牌（studiox-cms 的 auth/AuthScreen.tsx）。
 ///   上面：大字 StudioX ＋ 3D 玻璃 Logo（studiox.tw 首頁同一份：三塊積木轉著散開又組合，可以用手指抓著玩）
 ///   下面：透明的玻璃面板，Xena 打招呼；「用 StudioX 帳號登入」打開 console 的登入頁（Apple、Email、邀請都一樣）
 struct WelcomeView: View {

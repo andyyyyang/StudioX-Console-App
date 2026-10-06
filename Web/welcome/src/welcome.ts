@@ -1,5 +1,5 @@
 /**
- * App 歡迎頁：和 console 的網頁登入（atelier-cms 的 auth/AuthScreen.tsx）同一個上半部 ——
+ * App 歡迎頁：和 console 的網頁登入（studiox-cms 的 auth/AuthScreen.tsx）同一個上半部 ——
  * 大字品牌名＋ 3D 玻璃 Logo（studiox.tw 首頁的 logo3d.ts：三塊積木各自散開漂浮又組合起來，可以用手指抓著玩）。
  * 下半部的登入面板是 App 自己畫的（SwiftUI），疊在這一頁上面。
  *

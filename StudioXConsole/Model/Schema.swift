@@ -35,7 +35,7 @@ struct EntitySchema: Identifiable, Hashable {
     var deleteConfirm: String?
     var fields: [FieldSpec]
     var createFields: [FieldSpec]
-    /// 內容集合（atelier-cms 的 collections）：欄位樹、翻譯
+    /// 內容集合（studiox-cms 的 collections）：欄位樹、翻譯
     var collection: CollectionSchema?
 
     var id: String { key }
@@ -128,7 +128,7 @@ struct FieldSpec: Identifiable, Hashable {
     var isEnglish: Bool { key.hasSuffix("En") || key.hasSuffix("_en") }
 }
 
-// MARK: - 內容集合（atelier-cms 的 collections/types.ts 的 FieldDef）
+// MARK: - 內容集合（studiox-cms 的 collections/types.ts 的 FieldDef）
 
 struct CollectionSchema: Hashable {
     var key: String

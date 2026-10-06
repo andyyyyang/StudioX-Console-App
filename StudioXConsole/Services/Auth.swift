@@ -4,7 +4,7 @@ import Foundation
 import Security
 import SwiftUI
 
-/// console 的網址與 App 的 OAuth client（atelier-cms 的 src/lib/oauth.ts 的 APP_CLIENT_ID）
+/// console 的網址與 App 的 OAuth client（studiox-cms 的 src/lib/oauth.ts 的 APP_CLIENT_ID）
 enum ConsoleConfig {
     static let baseURL = URL(string: "https://console.studiox.tw")!
     static let clientID = "studiox-app"

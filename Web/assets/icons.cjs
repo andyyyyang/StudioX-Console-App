@@ -1,5 +1,5 @@
 // 把後台用的 Heroicons（@heroicons/react 24/outline）輸出成 App 的向量圖示（asset catalog，template）
-// 用法（在 atelier-cms 裝好套件之後）：NODE_PATH=../atelier-cms/node_modules node Web/assets/icons.cjs StudioXConsole/Assets.xcassets/Icons
+// 用法（在 studiox-cms 裝好套件之後）：NODE_PATH=../studiox-cms/node_modules node Web/assets/icons.cjs StudioXConsole/Assets.xcassets/Icons
 const fs = require('fs'), path = require('path')
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')

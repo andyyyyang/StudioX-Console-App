@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// StudioX 標誌（平面版）：大三角形＋方塊，方塊沿對角線一半是品牌橘（摺角）。
-/// 幾何和 atelier-cms 的 lib/brand-mark.ts、studiox.tw 的 Logo 相同（32 單位的方格）；3D 版在歡迎頁（Welcome/）。
+/// 幾何和 studiox-cms 的 lib/brand-mark.ts、studiox.tw 的 Logo 相同（32 單位的方格）；3D 版在歡迎頁（Welcome/）。
 /// 主體跟著前景色。
 struct BrandMark: View {
     var body: some View {

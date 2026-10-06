@@ -3,7 +3,7 @@ import UIKit
 
 /// StudioX 的顏色。版面與字照 studiox.tw（studio_website 的 src/styles/global.css :root）：
 /// 暖紙色的底、墨色的字、一條條細線、品牌橘只點在重點上；亮色、暗色各自選色，跟著裝置切換。
-/// 狀態色、圖表色、系統控制項的主色照後台（atelier-cms 的 src/app/admin/_ui/theme.ts）。
+/// 狀態色、圖表色、系統控制項的主色照後台（studiox-cms 的 src/app/admin/_ui/theme.ts）。
 /// 頁面裡一律用這裡的名字，不寫色碼。
 enum Theme {
     // MARK: 底（global.css）

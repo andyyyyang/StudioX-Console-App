@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 // 正式資料：/api/app/me 與各網站的工具（MCP，經 console 的閘道）回來的 JSON。
-// 欄位名稱照 atelier-cms 與 yellowgirl-website 的 mcp-entities.ts、mcp-tools.ts、analytics.ts、ops-report.ts。
+// 欄位名稱照 studiox-cms 與 yellowgirl-website 的 mcp-entities.ts、mcp-tools.ts、analytics.ts、ops-report.ts。
 // 金額在資料庫是「分」（1/100 元），*Label 是排好的字串（NT$1,234）。
 
 /// 分 → NT$1,234
@@ -569,7 +569,7 @@ struct SupportThreadDetail {
     }
 }
 
-// MARK: - Xena 的客服對話（assistant_conversation：atelier-cms 的網站、黃毛丫頭的官網＋LINE）
+// MARK: - Xena 的客服對話（assistant_conversation：studiox-cms 的網站、黃毛丫頭的官網＋LINE）
 
 /// 對話從哪裡來：官網右下角的 Xena，或網站的 LINE 官方帳號（黃毛丫頭）
 enum XenaChannel: String, Hashable, Sendable {
@@ -863,7 +863,7 @@ struct XenaConversationDetail {
         handoffReason = json["handoff"]?["reason"]?.string ?? json["handoffReason"]?.string
         handoffAt = json["handoff"]?["at"]?.date
         startedAt = json["startedAt"]?.date
-        // atelier-cms：tags 是代號、tagLabels 是中文；黃毛丫頭的 tags 就是中文
+        // studiox-cms：tags 是代號、tagLabels 是中文；黃毛丫頭的 tags 就是中文
         topics = (json["tagLabels"]?.array ?? json["tags"]?.array ?? []).compactMap(\.string)
         replyGoesTo = json["replyGoesTo"]?.string
         messages = (json["messages"]?.array ?? []).enumerated().map { XenaConversationMessage(id: $0, $1) }
@@ -889,7 +889,7 @@ struct XenaConversationDetail {
     }
 }
 
-// MARK: - 專案詢問（inquiry，atelier-cms 的網站）
+// MARK: - 專案詢問（inquiry，studiox-cms 的網站）
 
 struct InquirySummary: Identifiable, Hashable {
     let id: String
@@ -972,7 +972,7 @@ struct ContentPageImpact: Identifiable {
     let ordered: Int
 }
 
-/// 流量（traffic_report；atelier-cms 與 yellowgirl-website 的 lib/analytics.ts）
+/// 流量（traffic_report；studiox-cms 與 yellowgirl-website 的 lib/analytics.ts）
 struct TrafficReport {
     var installed: Bool
     var days: Int

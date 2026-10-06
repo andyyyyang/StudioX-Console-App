@@ -287,7 +287,7 @@ struct XenaConversationView: View {
 
     private var statusTone: Tone { status.map(XenaConversationSummary.tone) ?? .neutral }
 
-    /// 誰接手：自己就說「你」；網站給的是 Email（atelier-cms）就不顯示地址
+    /// 誰接手：自己就說「你」；網站給的是 Email（studiox-cms）就不顯示地址
     private var assigneeLabel: String {
         guard let a = detail?.assignee, !a.isEmpty else { return "專人" }
         if let me = model.me, a.caseInsensitiveCompare(me.email) == .orderedSame || a == me.name { return "你" }

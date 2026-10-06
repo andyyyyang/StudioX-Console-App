@@ -39,8 +39,8 @@ extension ConsoleAPI {
         SupportThreadDetail(site: site, try await tool("get", site: site, ["entity": "support_thread", "id": .string(id)]))
     }
 
-    /// Xena 在網站上的客服對話（atelier-cms 的網站；黃毛丫頭的官網＋LINE。沒有就回空的）
-    /// status：open＝等專人＋專人處理中（黃毛丫頭的網站照這個篩；atelier-cms 的網站不認得，回最近的，由呼叫的人自己篩）
+    /// Xena 在網站上的客服對話（studiox-cms 的網站；黃毛丫頭的官網＋LINE。沒有就回空的）
+    /// status：open＝等專人＋專人處理中（黃毛丫頭的網站照這個篩；studiox-cms 的網站不認得，回最近的，由呼叫的人自己篩）
     func xenaConversations(site: String, status: String? = "open") async throws -> [XenaConversationSummary] {
         do {
             var args: [String: JSONValue] = ["entity": "assistant_conversation", "limit": 40]
@@ -60,7 +60,7 @@ extension ConsoleAPI {
         XenaConversationDetail(try await tool("get", site: site, ["entity": "assistant_conversation", "id": .string(id)]))
     }
 
-    /// 專案詢問（只有 atelier-cms 的網站有；沒有就回空的）
+    /// 專案詢問（只有 studiox-cms 的網站有；沒有就回空的）
     func inquiries(site: String, status: String? = "new") async throws -> [InquirySummary] {
         do {
             var args: [String: JSONValue] = ["entity": "inquiry", "limit": 40]

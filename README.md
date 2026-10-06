@@ -113,7 +113,7 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
 - App 圖示上的數字＝收件匣在等的（客人在等回覆＋轉給專人＋新的詢問）
 - 登出時從 console 移除這台裝置；撤銷 App 的授權、被移出網站的人也不會再收到
 
-伺服器要設定 Apple 的推播金鑰（console 的 `APNS_KEY`、`APNS_KEY_ID`、`APNS_TEAM_ID`，見 atelier-cms 的 README）；
+伺服器要設定 Apple 的推播金鑰（console 的 `APNS_KEY`、`APNS_KEY_ID`、`APNS_TEAM_ID`，見 studiox-cms 的 README）；
 沒設定時「我 → 通知」會說「伺服器還沒設定推播」。
 
 ### Face ID
@@ -140,7 +140,7 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
 按「確認執行」才用同一組參數加確認碼真的送出；退款要打字確認，超過門檻還要店主的驗證碼。
 權限照各網站的職能。App 是人在操作的後台，網站的「AI 連接器」設定（關閉、只能查詢、方案不含外部 AI）只管 Claude／ChatGPT 這類 AI，不影響 App。
 
-## 伺服器（atelier-cms，console）
+## 伺服器（studiox-cms，console）
 
 | 端點 | 用途 |
 |---|---|

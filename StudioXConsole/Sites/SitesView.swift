@@ -44,7 +44,7 @@ struct SitesView: View {
     }
 }
 
-/// 連接 Claude／ChatGPT（console 一個網址管所有網站；atelier-cms 的「AI → 連接外部 AI」）
+/// 連接 Claude／ChatGPT（console 一個網址管所有網站；studiox-cms 的「AI → 連接外部 AI」）
 struct ConnectorCard: View {
     @State private var copied = false
 

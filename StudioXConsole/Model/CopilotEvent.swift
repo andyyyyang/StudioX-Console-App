@@ -1,6 +1,6 @@
 import Foundation
 
-// Xena 對話的資料型別：和 atelier-cms 的 src/lib/copilot/engine.ts、cards.ts 一致，
+// Xena 對話的資料型別：和 studiox-cms 的 src/lib/copilot/engine.ts、cards.ts 一致，
 // App 直接解 /api/copilot/chat 的 SSE 事件。
 
 nonisolated enum ConfirmStatus: String, Codable, Sendable {
