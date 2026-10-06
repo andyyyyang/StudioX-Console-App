@@ -57,6 +57,7 @@ nonisolated enum DemoServer {
         case "/api/app/decisions": body = request.httpMethod == "POST" ? ["ok": true] : parse(decisions)
         case "/api/app/reply-draft": body = ["text": .string(replyDraft(request.httpBody))]
         case "/api/app/reply-suggest": body = parse(replySuggestion)
+        case "/api/app/signature": body = ["name": "示範帳號", "title": "店長", "phone": ""]
         default:
             status = 404
             body = ["error": "not_found", "message": "示範模式沒有這個資料"]
@@ -147,7 +148,7 @@ nonisolated enum DemoServer {
     }
 
     /// 只是查資料的工具；其他都是寫入（示範模式：先跳確認，確認後回「已完成」，什麼都不會真的改）
-    private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites"]
+    private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites", "email_signature"]
 
     private static func tool(_ name: String, site: String, entity: String, args: JSONValue) -> String? {
         // 附件的上傳連結（只是上傳，不用確認；示範模式的上傳不會真的送出去）
@@ -169,6 +170,7 @@ nonisolated enum DemoServer {
             return #"{"needsConfirmation":true,"title":"確認（示範模式）","detail":"這是示範模式：按確認會顯示完成，但不會真的送出或修改任何資料。","confirmToken":"demo"}"#
         }
         switch (name, entity) {
+        case ("email_signature", _): return #"{"lines":["示範帳號｜店長","晨麥手作","02 2345 6789 · hello@chenmai.tw · chenmai.studiox.tw"]}"#
         case ("ops_report", _):
             guard site == "chenmai.studiox.tw" else { return nil }
             return args["section"]?.string == "members" ? membersReport : ops(days: args["days"]?.int ?? 1)

@@ -1204,6 +1204,19 @@ struct OpsReport {
 
 // MARK: - 要確認的寫入（兩步驟：第一次回 needsConfirmation，確認後用一樣的參數加 confirmToken 再送）
 
+/// 自己寄信時的簽名（/api/app/signature）：名字是帳號的名字，職稱、直撥電話自己填
+struct MySignature: Equatable {
+    var name: String
+    var title: String
+    var phone: String
+
+    init(_ json: JSONValue) {
+        name = json["name"]?.string ?? ""
+        title = json["title"]?.string ?? ""
+        phone = json["phone"]?.string ?? ""
+    }
+}
+
 struct Proposal: Identifiable {
     let id = UUID()
     let tool: String

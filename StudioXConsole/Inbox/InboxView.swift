@@ -171,6 +171,22 @@ struct InboxList: View {
     /// 搜尋（右上角的放大鏡打開；打字停一下才去搜）
     @State private var search = ""
     @State private var searching = false
+    /// 寫一封新信（右上角的筆）
+    @State private var composing = false
+
+    /// 有網站可以從 App 寄新信（網站後台有 send_email）
+    private var canCompose: Bool { model.sites.contains { $0.tools.contains("send_email") } }
+
+    private var composeButton: some View {
+        Button { composing = true } label: {
+            HeroIcon("pencil-square", size: 19)
+                .frame(width: 28, height: 28)
+                .contentShape(.rect)
+        }
+        .foregroundStyle(Theme.ink)
+        .accessibilityLabel("寫信")
+        .keyboardShortcut("n", modifiers: .command)
+    }
 
     var body: some View {
         let b = model.briefing
@@ -180,8 +196,13 @@ struct InboxList: View {
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 18) {
                     PageHeader("收件匣", subtitle: summary(needsYou, live: b.live.filter { $0.status == "ai" }.count)) {
-                        // iPad 的分欄沒有導覽列：放大鏡放在大標旁邊
-                        if picked != nil { SearchToggle(shown: $searching, text: $search) }
+                        // iPad 的分欄沒有導覽列：筆、放大鏡放在大標旁邊
+                        if picked != nil {
+                            HStack(spacing: 14) {
+                                if canCompose { composeButton }
+                                SearchToggle(shown: $searching, text: $search)
+                            }
+                        }
                     }
                     if searching {
                         SearchField(text: $search, prompt: "搜尋客人、Email、對話內容", autofocus: true)
@@ -210,9 +231,13 @@ struct InboxList: View {
         .pageTitle("收件匣")
         .toolbar {
             if picked == nil {
+                if canCompose {
+                    ToolbarItem(placement: .topBarTrailing) { composeButton }
+                }
                 ToolbarItem(placement: .topBarTrailing) { SearchToggle(shown: $searching, text: $search) }
             }
         }
+        .sheet(isPresented: $composing) { ComposeEmailView() }
         // 第一次打開才載
         .task {
             guard !history.loaded, !history.loading else { return }
@@ -338,18 +363,31 @@ private struct InboxRow: View {
 
 // MARK: - 專案詢問
 
-/// 一筆專案詢問（網站聯絡表單送來的）：誰、哪家公司、想做什麼、預算、完整的訊息；回信用 Email
+/// 一筆專案詢問（網站聯絡表單送來的）：誰、哪家公司、想做什麼、預算、完整的訊息。
+/// 下面的回覆框直接寄信給他（網站的 reply_inquiry，信末附上你的簽名）：寄出後詢問變成一條客服信，他回信會接回那條對話，
+/// 同一個網站的客服人員都看得到、都能回。✦ 請 Xena 照詢問內容擬第一封回信。網站還沒更新時照舊用 Email App 回。
 struct InquiryView: View {
     let site: String
     let inquiryID: String
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var data: JSONValue?
     @State private var error: String?
     @State private var copied = false
     @State private var proposal: Proposal?
     @State private var working = false
+    /// 下面回覆框的字、Xena 正在擬、寄出的確認
+    @State private var draft = ""
+    @State private var drafting = false
+    @State private var sending = false
+    @State private var replyProposal: Proposal?
+
+    /// 這個網站能從 App 回覆詢問（網站後台有 reply_inquiry）
+    private var canReply: Bool { model.site(site)?.tools.contains("reply_inquiry") == true }
+    /// 回覆過：變成的那條客服信（之後的往來都在那裡）
+    private var threadID: String? { data?["threadId"]?.string.flatMap { $0.isEmpty ? nil : $0 } }
 
     var body: some View {
         ScrollView {
@@ -367,7 +405,23 @@ struct InquiryView: View {
             .padding(.top, 16)
             .padding(.bottom, 48)
         }
+        .scrollDismissesKeyboard(.interactively)
         .brandPage()
+        // 回覆框：直接寄信給他（信末附上你的簽名）；✦ 請 Xena 照詢問擬第一封回信（輸入框有字就當重點）
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let data, canReply, let email = data["email"]?.string {
+                ChatComposer(
+                    text: $draft,
+                    placeholder: drafting ? "Xena 正在寫…" : threadID == nil ? "回覆 \(data["name"]?.string ?? "對方")…" : "再寫一封…",
+                    hint: "寄到 \(email)・信末附上你的簽名",
+                    sending: sending,
+                    draftWithXena: xenaDraft,
+                    sendBlocked: drafting,
+                    send: sendReply
+                )
+            }
+        }
+        .toolbar(sizeClass == .regular ? .automatic : .hidden, for: .tabBar)
         .pageTitle(data?["name"]?.string ?? "專案詢問")
         .task { await load() }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { _ in
@@ -375,6 +429,61 @@ struct InquiryView: View {
             Task {
                 await load()
                 await model.refreshAll()
+            }
+        }
+        .confirmSheet($replyProposal, siteName: { model.site($0)?.name ?? $0 }) { result in
+            replied(result)
+        }
+    }
+
+    /// Xena 照詢問內容擬第一封回信（輸入框有字就當重點）；放進輸入框，不會自己寄
+    private func xenaDraft() {
+        guard !drafting else { return }
+        let notes = draft
+        drafting = true
+        Task {
+            defer { drafting = false }
+            do {
+                let text = try await model.api.replyDraft(site: site, id: inquiryID, polish: false, text: notes, kind: "inquiry")
+                withAnimation(Motion.ease) { draft = draft == notes ? text : draft + "\n\n" + text }
+            } catch {
+                model.show(error.localizedDescription, tone: .danger)
+            }
+        }
+    }
+
+    /// 寄出回覆（網站的 reply_inquiry）：先跳確認，收件人與全文攤開
+    private func sendReply() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sending else { return }
+        sending = true
+        Task {
+            defer { sending = false }
+            do {
+                switch try await model.api.proposeInquiryReply(site: site, inquiryID: inquiryID, body: text) {
+                case .needsConfirmation(let p): replyProposal = p
+                case .done(let result): replied(result)
+                }
+            } catch {
+                model.show(error.localizedDescription, tone: .danger)
+            }
+        }
+    }
+
+    /// 寄出了：打開變成的那條客服信（他回信會接回那裡）
+    private func replied(_ result: JSONValue) {
+        let sent = result["sent"]?.array.first
+        if let error = sent?["emailError"]?.string, !error.isEmpty {
+            model.show("回覆存進客服信了，但信沒寄出：\(error)", tone: .danger)
+        } else {
+            model.show("已寄出回覆")
+        }
+        draft = ""
+        Task {
+            await load()
+            await model.refreshAll()
+            if let thread = sent?["threadId"]?.string ?? threadID {
+                model.open(.thread(site: site, id: thread))
             }
         }
     }
@@ -484,10 +593,17 @@ struct InquiryView: View {
                     .foregroundStyle(Theme.muted)
             }
         }
-        HStack(spacing: 10) {
-            if let email, let mail = mailURL(email) {
+        FlowLayout(spacing: 10) {
+            if let threadID {
+                Button { model.open(.thread(site: site, id: threadID)) } label: { Text("看往來的信") }
+                    .buttonStyle(.brand(.primary, size: .md, arrow: true))
+            } else if !canReply, let email, let mail = mailURL(email) {
                 Button { openURL(mail) } label: { Text("回信") }
                     .buttonStyle(.brand(.primary, size: .md, arrow: true))
+            }
+            if canReply, let email, let mail = mailURL(email) {
+                Button { openURL(mail) } label: { Text("用自己的 Email 回") }
+                    .buttonStyle(.brand(.ghost, size: .md))
             }
             if let admin = d["adminUrl"]?.string.flatMap(URL.init(string:)) {
                 Button { openURL(admin) } label: { Text("到後台 ↗") }
@@ -580,7 +696,7 @@ struct SupportThreadView: View {
                 ChatComposer(
                     text: $draft,
                     placeholder: drafting ? "Xena 正在寫…" : "回覆客人…",
-                    hint: detail.map { "寄到 \($0.contactEmail)" },
+                    hint: detail.map { "寄到 \($0.contactEmail)・信末附上你的簽名" },
                     sending: working,
                     draftWithXena: { xenaWrite(polish: false) },
                     sendBlocked: drafting,

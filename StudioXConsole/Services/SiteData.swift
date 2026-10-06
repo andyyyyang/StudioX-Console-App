@@ -220,6 +220,25 @@ extension ConsoleAPI {
         return try await propose("reply_support", site: site, ["replies": [.object(reply)]])
     }
 
+    /// 回覆專案詢問（reply_inquiry）：寄信給詢問的人，詢問變成一條客服信（回傳的 threadId），對方回信接回那條對話
+    func proposeInquiryReply(site: String, inquiryID: String, body: String) async throws -> WriteOutcome {
+        let reply: [String: JSONValue] = ["id": .string(inquiryID), "body": .string(body)]
+        return try await propose("reply_inquiry", site: site, ["replies": [.object(reply)]])
+    }
+
+    /// 寫一封新信（send_email）：寄出後開成一條客服信（回傳的 threadId），對方回信接回那條對話，同一個網站的客服都看得到
+    func proposeSendEmail(site: String, to: String, name: String?, subject: String, body: String) async throws -> WriteOutcome {
+        var args: [String: JSONValue] = ["to": .string(to), "subject": .string(subject), "body": .string(body)]
+        if let name, !name.isEmpty { args["name"] = .string(name) }
+        return try await propose("send_email", site: site, args)
+    }
+
+    /// 寄信時信末的簽名（這個網站寄出時的樣子：名字｜職稱、品牌、電話・Email・網址）
+    func emailSignature(site: String) async throws -> [String] {
+        let r = try await tool("email_signature", site: site)
+        return (r["lines"]?.array ?? []).compactMap(\.string)
+    }
+
     /// Xena 對話的專人動作（reply_xena）：reply（text 必填；官網的出現在客人的 Xena 裡、LINE 的傳到客人的 LINE）、
     /// takeover、release（交還 Xena）、close、reopen
     func proposeXena(site: String, id: String, action: String, text: String? = nil) async throws -> WriteOutcome {

@@ -468,16 +468,34 @@ final class ConsoleAPI {
     // MARK: 客服對話的「Xena 擬回覆／潤飾」（/api/app/reply-draft）
 
     /// console 的 Xena 讀整段對話寫一段回覆（draft：notes 是專人交代的重點；polish：text 是要潤飾的那段）。只回草稿，不會送出。
-    /// kind：conversation＝Xena 對話（官網、LINE）、thread＝Email 客服信
-    func replyDraft(site: String, id: String, polish: Bool, text: String, kind: String = "conversation") async throws -> String {
+    /// kind：conversation＝Xena 對話（官網、LINE）、thread＝Email 客服信、inquiry＝專案詢問的第一封回信、
+    /// compose＝寫一封新信（id 空白，to 是收件人的稱呼與主旨）
+    func replyDraft(site: String, id: String, polish: Bool, text: String, kind: String = "conversation", to: (name: String, subject: String)? = nil) async throws -> String {
         try requireCloudAI()
-        let payload: JSONValue = ["site": .string(site), "id": .string(id), "mode": .string(polish ? "polish" : "draft"), "text": .string(text), "kind": .string(kind)]
+        var fields: [String: JSONValue] = ["site": .string(site), "id": .string(id), "mode": .string(polish ? "polish" : "draft"), "text": .string(text), "kind": .string(kind)]
+        if let to { fields["to"] = .object(["name": .string(to.name), "subject": .string(to.subject)]) }
+        let payload = JSONValue.object(fields)
         let (data, http) = try await send { try appRequest("api/app/reply-draft", method: "POST", body: payload) }
         if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
         guard let draft = try appReply(data, http, fallback: "Xena 寫不出來")["text"]?.string, !draft.isEmpty else {
             throw APIError.tool("Xena 這次沒有寫出東西，再試一次")
         }
         return draft
+    }
+
+    // MARK: 寄信的簽名（/api/app/signature）
+
+    /// 自己的簽名：名字（帳號的）、職稱、直撥電話。存在 StudioX 帳號，每個網站寄信都帶這一份
+    func mySignature() async throws -> MySignature {
+        let (data, http) = try await send { try appRequest("api/app/signature") }
+        if http.statusCode == 404, (try? json(data))?["message"] == nil { throw APIError.tool("console 還沒更新到有這個功能") }
+        return MySignature(try appReply(data, http, fallback: "讀不到簽名"))
+    }
+
+    func saveSignature(title: String, phone: String) async throws -> MySignature {
+        let payload: JSONValue = ["title": .string(title), "phone": .string(phone)]
+        let (data, http) = try await send { try appRequest("api/app/signature", method: "PATCH", body: payload) }
+        return MySignature(try appReply(data, http, fallback: "簽名沒有存起來"))
     }
 
     /// 回覆建議（Xena 的那一半）：這位客人的分析＋三種下一句。客人同一句話之後再叫拿的是快取，不再算額度

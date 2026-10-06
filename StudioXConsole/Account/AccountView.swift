@@ -23,6 +23,7 @@ struct AccountView: View {
         case review
         var id: String { rawValue }
     }
+    @State private var showingSignature = false
 
     private var version: String {
         let v = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
@@ -194,6 +195,13 @@ struct AccountView: View {
                             }
                         }
 
+                        VStack(alignment: .leading, spacing: 20) {
+                            SectionHead("*Email*", aside: "寄給客人的信最後附上的簽名", role: .h3)
+                            RuledList {
+                                row("寄信的簽名") { showingSignature = true }
+                            }
+                        }
+
                         SecuritySection()
 
                         VStack(alignment: .leading, spacing: 20) {
@@ -291,6 +299,7 @@ struct AccountView: View {
                     consent = nil
                 }
             }
+            .sheet(isPresented: $showingSignature) { SignatureEditor() }
             .confirmationDialog("要登出嗎？", isPresented: $confirmingSignOut, titleVisibility: .visible) {
                 Button("登出", role: .destructive) { Task { await model.signOut() } }
                 Button("取消", role: .cancel) {}
