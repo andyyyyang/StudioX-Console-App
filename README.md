@@ -75,6 +75,9 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
 | `[appstore]` | 上傳這一版的上架資料：文字（`ci/appstore/metadata.json`）、分類、年齡分級、價格（免費）、上架地區（全部，中國大陸要 ICP 備案先不上）、宣傳圖、最新的 build、審核說明。不送審 |
 | `[appstore-submit]` | 同上，然後送審 |
 
+- 審核通過就自動發布到 App Store，不用再到 App Store Connect 按「發佈」（新版本的發布方式是「通過後自動發布」；
+  在這之前送審、設成手動發布的版本，下一次推新版時 TestFlight 流程的 `ci/appstore.py release` 會把它發布）
+
 - 宣傳圖：`python3 ci/appstore/compose.py --fonts <Noto Sans CJK TC 的資料夾>` 把 `docs/appstore/raw/` 合成到 `docs/appstore/iphone69/`、`ipad13/`
   （文字、版型、放大的地方在檔案開頭的 SLIDES）。示範資料是虛構的店家（晨麥手作、木白設計），不放真實客戶
 - 審核用示範模式：歡迎頁「先看看示範（不用登入）」；刪除帳號在設定最下面（App Store 5.1.1(v)，console 的 `DELETE /api/app/account`）

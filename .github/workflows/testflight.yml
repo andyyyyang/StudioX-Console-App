@@ -247,6 +247,7 @@ jobs:
           fetch-depth: 20
       - run: pip install --quiet pyjwt cryptography
       - name: 等 Apple 處理、寫測試內容、交給內部測試
+        id: finish
         run: |
           {
             echo "${{ needs.build.outputs.version }}（${{ needs.build.outputs.build }}）・${GITHUB_REF_NAME}"
@@ -268,3 +269,8 @@ jobs:
             --version "${{ needs.build.outputs.version }}" \
             --build "${{ needs.build.outputs.build }}" \
             --wait 40
+      # App Store：審核通過、在等發布的版本直接發布；審核中的改成通過就自動發布（ci/appstore.py release）
+      - name: App Store 審核通過就發布
+        if: always() && steps.finish.outcome == 'success'
+        continue-on-error: true
+        run: python3 ci/appstore.py release

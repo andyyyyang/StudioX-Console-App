@@ -3,9 +3,10 @@ App Store 上架（.github/workflows/appstore.yml）：用 App Store Connect API
 
   python3 ci/appstore.py prepare --version 1.1            上架資料、截圖、選 build、審核說明（不送審）
   python3 ci/appstore.py prepare --version 1.1 --submit   同上，然後送審
+  python3 ci/appstore.py release                          審核通過、在等發布的版本直接發布；審核中的改成「通過就自動發布」
 
 做的事：
-  1. 這一版（App Store 版本）：沒有就建一個，版本號照 Xcode 的 MARKETING_VERSION；審核通過後由你手動發布
+  1. 這一版（App Store 版本）：沒有就建一個，版本號照 Xcode 的 MARKETING_VERSION；審核通過就自動發布（不用再按「發佈」）
   2. 文字：副標題、描述、宣傳文字、關鍵字、支援網址、行銷網址、隱私權政策網址、版權、分類（ci/appstore/metadata.json）
   3. 年齡分級：都選「無」（商用工具，沒有成人內容）
   4. 截圖：docs/appstore/iphone69/（6.9 吋 iPhone）、docs/appstore/ipad13/（13 吋 iPad）的 .jpg／.png，照檔名順序、整組換掉
@@ -55,8 +56,39 @@ def app_id():
     return apps[0]["id"]
 
 
+def versions(app):
+    return data(call("GET", f"/apps/{app}/appStoreVersions", query={"filter[platform]": "IOS", "limit": 20}))
+
+
+def release_ready(app):
+    """審核通過、在等發布的版本：直接發布。審核中的：改成通過就自動發布（Apple 不讓改的話，通過之後下一次跑到這裡就發布）。
+    回傳有沒有版本正在審核或剛發布"""
+    busy = False
+    for v in versions(app):
+        st, name = v["attributes"].get("appStoreState"), v["attributes"].get("versionString")
+        if st == "PENDING_DEVELOPER_RELEASE":
+            try:
+                call("POST", "/appStoreVersionReleaseRequests", {"data": {"type": "appStoreVersionReleaseRequests", "relationships": {
+                    "appStoreVersion": {"data": {"type": "appStoreVersions", "id": v["id"]}}}}})
+                summary(f"### 🚀 版本 {name} 審核通過了，已經發布到 App Store（幾小時內所有人都看得到）")
+            except ApiError as e:
+                summary(f"### ⚠️ 版本 {name} 審核通過，但沒有發布成功：{apple_error(e)}")
+            busy = True
+        elif st in ("WAITING_FOR_REVIEW", "IN_REVIEW"):
+            if v["attributes"].get("releaseType") != "AFTER_APPROVAL":
+                try:
+                    call("PATCH", f"/appStoreVersions/{v['id']}", {"data": {"type": "appStoreVersions", "id": v["id"], "attributes": {"releaseType": "AFTER_APPROVAL"}}})
+                    summary(f"- 版本 {name} 審核中：改成通過就自動發布")
+                except ApiError:
+                    summary(f"- 版本 {name} 審核中（Apple 不讓審核中改發布方式：通過之後，下一次推新版就自動發布）")
+            else:
+                summary(f"- 版本 {name} 審核中，通過就自動發布")
+            busy = True
+    return busy
+
+
 def version_for(app, version, m):
-    found = data(call("GET", f"/apps/{app}/appStoreVersions", query={"filter[platform]": "IOS", "limit": 20}))
+    found = versions(app)
     editable = [v for v in found if v["attributes"].get("appStoreState") in EDITABLE]
     if editable:
         v = editable[0]
@@ -64,9 +96,8 @@ def version_for(app, version, m):
             call("PATCH", f"/appStoreVersions/{v['id']}", {"data": {"type": "appStoreVersions", "id": v["id"], "attributes": {"versionString": version}}})
         summary(f"- 版本 {version}：用現有的（{v['attributes'].get('appStoreState')}）")
     else:
-        live = [v for v in found if v["attributes"].get("appStoreState") in ("WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE")]
-        if live:
-            summary(f"### ⏸ 版本 {live[0]['attributes'].get('versionString')} 正在審核或等你發布（{live[0]['attributes'].get('appStoreState')}），先不動")
+        if release_ready(app):
+            summary("### ⏸ 有版本正在審核或剛發布，這次先不動上架資料")
             sys.exit(0)
         v = call("POST", "/appStoreVersions", {"data": {
             "type": "appStoreVersions",
@@ -75,7 +106,7 @@ def version_for(app, version, m):
         }})["data"]
         summary(f"- 版本 {version}：新建")
     call("PATCH", f"/appStoreVersions/{v['id']}", {"data": {"type": "appStoreVersions", "id": v["id"], "attributes": {
-        "copyright": m["copyright"], "releaseType": "MANUAL",
+        "copyright": m["copyright"], "releaseType": "AFTER_APPROVAL",
     }}})
     return v["id"]
 
@@ -394,6 +425,11 @@ def prepare(args):
         submit(app, version_id)
 
 
+def release(_args):
+    if not release_ready(app_id()):
+        print("沒有在等發布或審核中的版本")
+
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -401,9 +437,10 @@ def main():
     pp.add_argument("--version", required=True)
     pp.add_argument("--submit", action="store_true")
     pp.add_argument("--skip-screenshots", action="store_true")
+    sub.add_parser("release")
     args = p.parse_args()
     try:
-        prepare(args)
+        {"prepare": prepare, "release": release}[args.cmd](args)
     except ApiError as e:
         summary(f"### ❌ App Store Connect 回了錯誤\n{apple_error(e)}")
         raise
