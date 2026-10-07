@@ -1,12 +1,12 @@
 import SwiftUI
 
-// 行銷與通知：簡訊活動（看人數、發送）、LINE 優惠推播（寫一則、看人數、傳、看紀錄）、待發通知（取消、立即送出）、
-// 整合（寄測試信、送測試簡訊）、重算會員等級。和網站後台做得到的一樣；寫入一律走網站的兩步驟確認，
-// 要打「發送」的照樣要打。
+// 行銷與通知：簡訊活動（看結果、發草稿）、LINE 優惠推播的紀錄（還沒有「發送優惠」的網站）、待發通知（取消、立即送出）、
+// 整合（寄測試信、送測試簡訊）、重算會員等級。發送優惠（簡訊和 LINE 一起發）在 PromotionViews.swift。
+// 和網站後台做得到的一樣；寫入一律走網站的兩步驟確認，要打「發送」的照樣要打。
 
-/// 寫入的第一步：網站要確認就交給確認表單，不用確認的直接完成
+/// 寫入的第一步：網站要確認就交給確認表單，不用確認的直接完成（行銷、發送優惠共用）
 @MainActor
-private func propose(_ model: AppModel, _ tool: String, site: String, _ args: [String: JSONValue], into proposal: Binding<Proposal?>, done: () async -> Void) async {
+func proposeWrite(_ model: AppModel, _ tool: String, site: String, _ args: [String: JSONValue], into proposal: Binding<Proposal?>, done: () async -> Void) async {
     do {
         switch try await model.api.propose(tool, site: site, args) {
         case .needsConfirmation(let p): proposal.wrappedValue = p
@@ -19,7 +19,7 @@ private func propose(_ model: AppModel, _ tool: String, site: String, _ args: [S
     }
 }
 
-private func campaignStatus(_ status: String?) -> (String, Tone) {
+func campaignStatus(_ status: String?) -> (String, Tone) {
     switch status {
     case "sending": ("傳送中", .info)
     case "sent": ("已發送", .active)
@@ -150,7 +150,7 @@ struct CampaignView: View {
                     Task {
                         deleting = false
                         working = true
-                        await propose(model, "send_campaign", site: site, ["id": .string(campaignID)], into: $proposal) { await load() }
+                        await proposeWrite(model, "send_campaign", site: site, ["id": .string(campaignID)], into: $proposal) { await load() }
                         working = false
                     }
                 }
@@ -158,7 +158,7 @@ struct CampaignView: View {
                 .disabled(preview?["isQuietHour"]?.bool == true)
                 Button("刪除草稿") {
                     deleting = true
-                    Task { await propose(model, "delete", site: site, ["entity": "campaign", "id": .string(campaignID)], into: $proposal) { dismiss() } }
+                    Task { await proposeWrite(model, "delete", site: site, ["entity": "campaign", "id": .string(campaignID)], into: $proposal) { dismiss() } }
                 }
                 .buttonStyle(.brand(.quiet, size: .md))
             }
@@ -336,326 +336,6 @@ enum LineAudience: Hashable {
     }
 }
 
-/// 寫一則 LINE 優惠推播：卡片的樣子（照網站的 LINE 卡片樣式）、對象、先看人數，下一步網站確認（要打「發送」）
-struct LineCampaignComposer: View {
-    let site: String
-    var onSent: () -> Void
-
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var values: [String: JSONValue] = ["buttonLabel": "去看看", "buttonUrl": "/zh/shop"]
-    @State private var audience: LineAudience = .all
-    @State private var days = 90
-    @State private var productID: String?
-    @State private var products: [RecordSummary] = []
-    @State private var coupons: [RecordSummary] = []
-    @State private var theme: JSONValue?
-    @State private var recipients: Int?
-    @State private var counting = false
-    @State private var proposal: Proposal?
-    @State private var busy = false
-
-    private var title: String { values["title"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
-    private var text: String { values["body"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
-    private var ready: Bool { !title.isEmpty && !text.isEmpty && (audience != .bought || productID != nil) }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    LineCardPreview(values: values, theme: theme)
-                    TextBlock(label: "標題", limit: 80, required: true, value: bind("title"), placeholder: "例如：中秋禮盒 3 盒 9 折")
-                    TextBlock(label: "說明", limit: 500, required: true, multiline: true, value: bind("body"), placeholder: "優惠內容、期限、怎麼用")
-                    imagePicker
-                    couponPicker
-                    TextBlock(label: "按鈕文字", limit: 20, value: bind("buttonLabel"))
-                    TextBlock(label: "按鈕連結", help: "站內路徑（/zh/shop）或 https:// 網址", value: bind("buttonUrl"), kind: .url)
-                    audiencePicker
-                }
-                .padding(24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background { Theme.sheet.ignoresSafeArea() }
-            .safeAreaInset(edge: .bottom, spacing: 0) { footer }
-            .navigationTitle("LINE 推播")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-            }
-            .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
-                model.show("開始傳了：\(result["recipients"]?.int ?? recipients ?? 0) 位")
-                onSent()
-                dismiss()
-            }
-            .task { await loadOptions() }
-            // 換了對象：人數重算
-            .onChange(of: audienceArgs) { recipients = nil }
-        }
-    }
-
-    private func bind(_ key: String) -> Binding<JSONValue> {
-        Binding(get: { values[key] ?? .null }, set: { values[key] = $0 })
-    }
-
-    // MARK: 大圖、優惠碼、對象
-
-    /// 大圖：從商品的照片選一張（或不放）
-    @ViewBuilder
-    private var imagePicker: some View {
-        let withImages = products.filter { $0.image != nil }
-        if !withImages.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("大圖（選填）")
-                    .textRole(.small)
-                    .foregroundStyle(Theme.muted)
-                ScrollView(.horizontal) {
-                    HStack(spacing: 10) {
-                        imageChoice(nil)
-                        ForEach(withImages.prefix(24), id: \.id) { p in imageChoice(p.image) }
-                    }
-                }
-                .scrollIndicators(.hidden)
-                .scrollClipDisabled()
-            }
-        }
-    }
-
-    private func imageChoice(_ url: URL?) -> some View {
-        let on = values["imageUrl"]?.string == url?.absoluteString
-        return Button {
-            values["imageUrl"] = url.map { .string($0.absoluteString) } ?? .null
-        } label: {
-            Group {
-                if let url {
-                    RemoteImage(url: url, aspect: 1, radius: 0)
-                } else {
-                    Text("不放").textRole(.xs).foregroundStyle(Theme.muted)
-                }
-            }
-            .frame(width: 72, height: 72)
-            .background(Theme.surface)
-            .clipShape(.rect(cornerRadius: Metric.radiusSm))
-            .overlay { RoundedRectangle(cornerRadius: Metric.radiusSm).strokeBorder(on ? Theme.accent : Theme.line, lineWidth: on ? 2 : 1) }
-        }
-        .buttonStyle(.press)
-        .accessibilityLabel(url == nil ? "不放大圖" : "用這張商品照片")
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-
-    /// 優惠碼：從能附的折價券選（網站只收通用、啟用中、沒過期、還沒用完的券，打別的會被擋）
-    private var couponPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("優惠碼（選填）")
-                .textRole(.small)
-                .foregroundStyle(Theme.muted)
-            let codes = promoCodes
-            if codes.isEmpty {
-                Text("沒有可以附的通用折價券（要啟用中、沒過期、沒有指定會員）。")
-                    .textRole(.xs)
-                    .foregroundStyle(Theme.muted)
-            } else {
-                FlowLayout(spacing: 6) {
-                    FilterChip(title: "不附", selected: (values["couponCode"]?.string ?? "").isEmpty) {
-                        values["couponCode"] = nil
-                    }
-                    ForEach(codes.prefix(12), id: \.self) { code in
-                        FilterChip(title: code, selected: values["couponCode"]?.string == code) {
-                            values["couponCode"] = .string(code)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// 能附在推播上的券：通用（沒指定會員）、沒過期、還沒用完
-    private var promoCodes: [String] {
-        coupons.compactMap { c -> String? in
-            let r = c.raw
-            guard let code = r["code"]?.string, !code.isEmpty else { return nil }
-            if let email = r["assignedUserEmail"]?.string, !email.isEmpty { return nil }
-            if let expires = r["expiresAt"]?.date, expires < .now { return nil }
-            if let limit = r["usageLimit"]?.int, let used = r["usageCount"]?.int, used >= limit { return nil }
-            return code
-        }
-    }
-
-    private var audiencePicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("傳給誰")
-                .textRole(.small)
-                .foregroundStyle(Theme.muted)
-            FilterBar(items: [LineAudience.all, .members, .inactive, .bought], selection: $audience, title: \.title)
-            switch audience {
-            case .inactive:
-                Stepper(value: $days, in: 7...730, step: days < 60 ? 7 : 30) {
-                    Text("\(days) 天沒買的會員").textRole(.small).foregroundStyle(Theme.ink)
-                }
-            case .bought:
-                Menu {
-                    ForEach(products.prefix(60), id: \.id) { p in
-                        Button(p.title) { productID = p.id }
-                    }
-                } label: {
-                    HStack {
-                        Text(products.first { $0.id == productID }?.title ?? "選一個商品")
-                            .textRole(.small)
-                            .foregroundStyle(productID == nil ? Theme.muted : Theme.ink)
-                        Spacer()
-                        HeroIcon("chevron-down", size: 12).foregroundStyle(Theme.muted)
-                    }
-                    .padding(.vertical, 10)
-                    .overlay(alignment: .bottom) { Rule() }
-                }
-            default:
-                EmptyView()
-            }
-            Text("還是好友、沒有取消訂閱的才收得到。")
-                .textRole(.xs)
-                .foregroundStyle(Theme.muted)
-        }
-    }
-
-    private var audienceArgs: JSONValue {
-        switch audience {
-        case .all: ["kind": "all"]
-        case .members: ["kind": "members"]
-        case .inactive: ["kind": "inactive", "days": .number(Double(days))]
-        case .bought: ["kind": "bought", "productId": productID.map(JSONValue.string) ?? .null]
-        }
-    }
-
-    private var footer: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Button {
-                    Task { await count() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if counting { ProgressView().controlSize(.small) }
-                        Text(recipients.map { "\($0) 位收得到" } ?? "看看幾位收得到")
-                    }
-                }
-                .buttonStyle(.brand(.ghost, size: .md))
-                .disabled(counting || (audience == .bought && productID == nil))
-                Button {
-                    Task { await send() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if busy { ProgressView().controlSize(.small).tint(Theme.onAccent) }
-                        Text("下一步")
-                    }
-                }
-                .buttonStyle(.brand(.accent, size: .md, fullWidth: true, arrow: true))
-                .disabled(busy || !ready)
-            }
-            Text("下一步會出網站的確認，要打「發送」才會傳；傳出去就收不回來。")
-                .textRole(.xs)
-                .foregroundStyle(Theme.muted)
-        }
-        .padding(20)
-        .background(Theme.sheet)
-    }
-
-    // MARK: 讀、送
-
-    /// 商品（大圖、「買過某個商品」）、啟用中的折價券、網站的 LINE 卡片樣式
-    private func loadOptions() async {
-        products = (try? await model.api.list(site: site, entity: "product", filters: ["publishedOnly": true, "limit": 100]))?.rows ?? []
-        coupons = (try? await model.api.list(site: site, entity: "coupon", filters: ["activeOnly": true, "limit": 50]))?.rows ?? []
-        theme = try? await model.api.get(site: site, entity: "line_theme", id: nil)
-    }
-
-    private func args(dryRun: Bool) -> [String: JSONValue] {
-        var a: [String: JSONValue] = ["audience": audienceArgs]
-        if dryRun {
-            a["dryRun"] = true
-            return a
-        }
-        for key in ["title", "body", "imageUrl", "couponCode", "buttonLabel", "buttonUrl"] {
-            if let v = values[key]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty { a[key] = .string(v) }
-        }
-        return a
-    }
-
-    private func count() async {
-        counting = true
-        defer { counting = false }
-        do {
-            let r = try await model.api.tool("send_line_campaign", site: site, args(dryRun: true))
-            recipients = r["recipients"]?.int ?? 0
-        } catch {
-            model.show(error.localizedDescription, tone: .danger)
-        }
-    }
-
-    private func send() async {
-        busy = true
-        defer { busy = false }
-        await propose(model, "send_line_campaign", site: site, args(dryRun: false), into: $proposal) {
-            onSent()
-            dismiss()
-        }
-    }
-}
-
-/// LINE 卡片的樣子（照網站的 LINE 卡片樣式：主色按鈕、強調色的優惠碼）
-private struct LineCardPreview: View {
-    let values: [String: JSONValue]
-    let theme: JSONValue?
-
-    var body: some View {
-        let primary = theme?["primary"]?.string.flatMap(Color.init(hexString:)) ?? Theme.accent
-        let accent = theme?["accent"]?.string.flatMap(Color.init(hexString:)) ?? Theme.accent
-        let ink = theme?["text"]?.string.flatMap(Color.init(hexString:)) ?? Color(white: 0.1)
-        VStack(alignment: .leading, spacing: 0) {
-            if let url = values["imageUrl"]?.string.flatMap(URL.init(string:)) {
-                // LINE 卡片的大圖是 20:13
-                RemoteImage(url: url, aspect: 20 / 13, radius: 0)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                if let name = theme?["name"]?.string, !name.isEmpty {
-                    Text(name)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.6))
-                }
-                Text(values["title"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? "標題")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(ink)
-                Text(values["body"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? "說明會出現在這裡")
-                    .font(.system(size: 13))
-                    .foregroundStyle(ink.opacity(0.8))
-                    .lineLimit(5)
-                if let code = values["couponCode"]?.string, !code.isEmpty {
-                    Text("優惠碼 \(code)")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundStyle(accent)
-                        .padding(.top, 2)
-                }
-                if let label = values["buttonLabel"]?.string, !label.isEmpty, values["buttonUrl"]?.string?.isEmpty == false {
-                    Text(label)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(primary, in: .rect(cornerRadius: 8))
-                        .padding(.top, 6)
-                }
-            }
-            .padding(16)
-        }
-        .background(Color.white)
-        .clipShape(.rect(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.black.opacity(0.08)) }
-        .frame(maxWidth: 300)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .background(Color(red: 0.55, green: 0.67, blue: 0.79).opacity(0.35), in: .rect(cornerRadius: Metric.radius))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("LINE 卡片預覽")
-    }
-}
-
 // MARK: - 待發通知（訂單狀態、等級變動、發券的通知會先倒數幾分鐘；可以取消並復原，或立即送出）
 
 struct PendingNotificationsView: View {
@@ -792,7 +472,7 @@ struct PendingNotificationsView: View {
 
     private func act(_ id: String, _ action: String) {
         self.action = action
-        Task { await propose(model, "manage_notification", site: site, ["id": .string(id), "action": .string(action)], into: $proposal) { await load() } }
+        Task { await proposeWrite(model, "manage_notification", site: site, ["id": .string(id), "action": .string(action)], into: $proposal) { await load() } }
     }
 
     private static func status(_ s: String?) -> (String, Tone) {
@@ -854,7 +534,7 @@ struct IntegrationsView: View {
                 sentKind = kind.id
                 var args: [String: JSONValue] = ["kind": .string(kind.id), "to": .string(to)]
                 if !message.isEmpty { args["message"] = .string(message) }
-                Task { await propose(model, "test_integration", site: site, args, into: $proposal) {} }
+                Task { await proposeWrite(model, "test_integration", site: site, args, into: $proposal) {} }
             }
         }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { _ in
@@ -986,7 +666,7 @@ struct RecomputeTiersButton: View {
                         working = true
                         var args: [String: JSONValue] = [:]
                         if let userID { args["userId"] = .string(userID) }
-                        await propose(model, "recompute_tiers", site: site, args, into: $proposal) {}
+                        await proposeWrite(model, "recompute_tiers", site: site, args, into: $proposal) {}
                         working = false
                     }
                 }

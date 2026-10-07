@@ -108,6 +108,7 @@ jobs:
             "inbox|-demo -demoTab inbox"
             "order-progress|-demo -demoRoute shipped"
             "linepush|-demo -demoRoute linepush"
+            "promotion|-demo -demoRoute linepush -demoScroll compose|10"
             "campaign|-demo -demoRoute campaign"
             "pending|-demo -demoRoute pending"
             "report|-demo -demoRoute report|10"
@@ -116,6 +117,7 @@ jobs:
             "console-site|-demo -demoRoute console-site"
             "console-services|-demo -demoRoute console-services"
             "console-billing|-demo -demoRoute console-billing"
+            "console-team|-demo -demoRoute console-team"
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )

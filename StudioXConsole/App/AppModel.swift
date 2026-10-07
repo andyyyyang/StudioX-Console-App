@@ -301,6 +301,7 @@ final class AppModel {
         case "console-site": open(.console(.site("s1")))
         case "console-services": open(.console(.siteServices("s1")))
         case "console-billing": open(.console(.billing))
+        case "console-team": open(.console(.team))
         case "product": open(.record(site: shop, entity: "product", id: "p1"))
         case "xena": showXena = true
         default: break

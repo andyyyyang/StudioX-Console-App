@@ -384,6 +384,7 @@ nonisolated enum DemoServer {
             case "send_line_campaign":
                 let kind = args["audience"]?["kind"]?.string
                 return #"{"recipients":\#(kind == "members" ? 214 : kind == "inactive" ? 57 : kind == "bought" ? 33 : 642)}"#
+            case "send_promotion": return promotionPreview(args)
             default: break
             }
         }
@@ -457,7 +458,7 @@ nonisolated enum DemoServer {
 
     // MARK: 我與網站
 
-    private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","reply_xena","traffic_report","search_report","issue_coupons","send_campaign","send_line_campaign","manage_notification","recompute_tiers","test_integration"]"#
+    private static let shopTools = #"["list","get","search","update","create","delete","set_images","update_order","bulk_update_orders","refund_order","confirm_bank_transfer","ops_report","reply_support","reply_xena","traffic_report","search_report","issue_coupons","send_campaign","send_line_campaign","send_promotion","manage_notification","recompute_tiers","test_integration"]"#
     private static let studioTools = #"["list","get","search","update","create","delete","set_images","traffic_report","search_report","reply_support","reply_xena"]"#
     private static let basicTools = #"["list","get","search","update","traffic_report"]"#
 
@@ -800,17 +801,80 @@ nonisolated enum DemoServer {
     private static var campaigns: String { """
     {"campaigns":[
      {"id":"sc1","name":"中秋禮盒預購","body":"【晨麥手作】中秋禮盒開放預購，3 盒以上 9 折，9/30 前下單免運。","status":"draft","createdAt":"\(ago(hours: 5))","totalRecipients":0,"successCount":0,"failedCount":0},
+     {"id":"sc3","name":"中秋禮盒 3 盒 9 折","body":"【晨麥手作】中秋禮盒 3 盒 9 折，優惠碼 MOON10","status":"sent","audience":{"kind":"members","lineFirst":true},"couponCode":"MOON10","createdAt":"\(ago(hours: 30))","sentAt":"\(ago(hours: 30))","totalRecipients":66,"successCount":65,"failedCount":1},
      {"id":"sc2","name":"週年感謝","body":"【晨麥手作】謝謝你陪我們一年！本週全館蛋捲買二送一。","status":"sent","createdAt":"\(ago(hours: 400))","sentAt":"\(ago(hours: 398))","totalRecipients":172,"successCount":169,"failedCount":3}
     ]}
     """ }
 
+    /// 一則簡訊活動和它的發送結果（失敗的原因；不列電話）
     private static func campaign(id: String) -> String {
-        let sent = id == "sc2"
-        return """
-    {"campaign":{"id":"\(id)","name":"\(sent ? "週年感謝" : "中秋禮盒預購")","body":"\(sent ? "【晨麥手作】謝謝你陪我們一年！本週全館蛋捲買二送一。" : "【晨麥手作】中秋禮盒開放預購，3 盒以上 9 折，9/30 前下單免運。")",
-      "status":"\(sent ? "sent" : "draft")","createdAt":"\(ago(hours: sent ? 400 : 5))",\(sent ? #""sentAt":"\#(ago(hours: 398))","totalRecipients":172,"successCount":169,"failedCount":3"# : #""totalRecipients":0,"successCount":0,"failedCount":0"#)},
-     "sends":\(sent ? #"[{"status":"failed","error":"空號"},{"status":"failed","error":"空號"},{"status":"failed","error":"拒收廣告簡訊"}]"# : "[]")}
-    """ }
+        let rows = parse(campaigns)["campaigns"]?.array ?? []
+        let c = rows.first { $0["id"]?.string == id } ?? rows.first ?? .null
+        let failed: [String] = switch id {
+        case "sc2": ["空號", "空號", "拒收廣告簡訊"]
+        case "sc3": ["空號"]
+        default: []
+        }
+        let body: JSONValue = ["campaign": c, "sends": .array(failed.map { (error: String) -> JSONValue in ["status": "failed", "error": .string(error)] })]
+        guard let data = try? JSONEncoder().encode(body) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// 「發送優惠」的試算（照網站 lib/promotions.ts 的算法：對象只算一次，照管道分；LINE 優先的話收得到 LINE 的不再發簡訊）
+    private static func promotionPreview(_ args: JSONValue) -> String {
+        let audience = args["audience"] ?? ["kind": "members"]
+        let kind = audience["kind"]?.string ?? "members"
+        let channel = args["channel"]?.string ?? "line_first"
+        let lineOn = channel != "sms"
+        let smsOn = channel != "line"
+        // 這個對象裡：收得到 LINE 的、同意收簡訊的、兩個都收得到的
+        let (lineAll, smsAll, both): (Int, Int, Int) = switch kind {
+        case "inactive": (57, 48, 28)
+        case "bought": (33, 29, 18)
+        case "all": (642, 0, 0)
+        default: (214, 186, 120)
+        }
+        let line = lineOn ? lineAll : 0
+        let sms = smsOn ? (channel == "line_first" ? smsAll - both : smsAll) : 0
+        let people = line + sms - (channel == "both" ? both : 0)
+
+        let title = (args["title"]?.string ?? "").trimmingCharacters(in: .whitespaces)
+        let code = args["couponCode"]?.string
+        let text = args["smsText"]?.string ?? (title.isEmpty ? "" : "【晨麥手作】\(title)\(code.map { "，優惠碼 \($0)" } ?? "")")
+        let full = text.isEmpty ? "" : "\(text) 不想收到請到官網會員中心關閉「接收行銷簡訊」"
+        let segments = full.isEmpty ? 0 : full.count <= 70 ? 1 : Int((Double(full.count) / 67).rounded(.up))
+
+        var problems: [JSONValue] = []
+        if title.isEmpty { problems.append("還沒寫標題") }
+        if lineOn, (args["body"]?.string ?? "").isEmpty { problems.append("還沒寫內容（LINE 卡片的說明）") }
+        if kind == "bought", audience["productId"]?.string == nil { problems.append("請選擇對象") }
+        if kind == "all", channel != "line" { problems.append("「所有 LINE 好友」只能用 LINE 發（沒綁會員的好友沒有手機號碼）：管道請選「只發 LINE」") }
+        let audienceLabel = switch kind {
+        case "inactive": "\(audience["days"]?.int ?? 90) 天沒買的會員"
+        case "bought": "買過「手工蛋捲禮盒」的會員"
+        case "all": "所有 LINE 好友"
+        default: "所有會員"
+        }
+        let channelLabel = ["line_first": "LINE 優先（沒綁 LINE 的發簡訊）", "line": "只發 LINE", "sms": "只發簡訊", "both": "LINE 和簡訊都發"][channel] ?? channel
+        let n = { (i: Int) in JSONValue.number(Double(i)) }
+        let body: JSONValue = [
+            "channel": .string(channel), "channelLabel": .string(channelLabel),
+            "audience": audience, "audienceLabel": .string(audienceLabel),
+            "couponCode": code.map(JSONValue.string) ?? .null,
+            "people": n(people),
+            "line": ["on": .bool(lineOn), "configured": true, "recipients": n(line)],
+            "sms": [
+                "on": .bool(smsOn), "recipients": n(sms), "text": .string(text), "fullText": .string(full), "chars": n(full.count),
+                "segments": n(segments), "billed": n(sms * segments), "usedToday": 12, "cap": 500, "remainingToday": 488,
+                "quietHour": false, "blocked": [],
+            ],
+            "movedToLine": n(channel == "line_first" ? both : 0),
+            "problems": .array(problems),
+            "canSend": .bool(problems.isEmpty),
+        ]
+        guard let data = try? JSONEncoder().encode(body) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
 
     private static var lineCampaigns: String { """
     {"campaigns":[

@@ -3,17 +3,23 @@ import SwiftUI
 /// 一種資料的清單（商品、折價券、橫幅、文章、作品…）：照網站的 list，
 /// 商品是格狀的卡片、折價券是票券、橫幅是預覽、有封面的內容是大卡片，其他是細線隔開的列。
 /// 點進去是編輯畫面；可以新增的右上角有「＋」。
-/// 一種資料的清單：有自己樣子的（LINE 推播、待發通知、整合）用自己的頁面，其他照欄位定義的通用清單
+/// 一種資料的清單：有自己樣子的（發送優惠、LINE 推播、待發通知、整合）用自己的頁面，其他照欄位定義的通用清單
 struct EntityListView: View {
     let site: String
     let entity: String
 
+    @Environment(AppModel.self) private var model
+
     var body: some View {
-        switch entity {
-        case "line_campaign": LineCampaignsView(site: site)
-        case "pending_notification": PendingNotificationsView(site: site)
-        case "integration": IntegrationsView(site: site)
-        default: CollectionView(site: site, entity: entity)
+        if EntityStyle.promotionEntities.contains(entity), model.site(site)?.tools.contains("send_promotion") == true {
+            PromotionsView(site: site)
+        } else {
+            switch entity {
+            case "line_campaign": LineCampaignsView(site: site)
+            case "pending_notification": PendingNotificationsView(site: site)
+            case "integration": IntegrationsView(site: site)
+            default: CollectionView(site: site, entity: entity)
+            }
         }
     }
 }

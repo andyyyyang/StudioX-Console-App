@@ -475,8 +475,17 @@ enum EntityStyle {
 
     static let groupOrder = ["內容", "商店", "行銷", "顧客", "自動化", "網站設定"]
 
+    /// 有「發送優惠」（send_promotion：簡訊和 LINE 一起發）的網站，簡訊活動和 LINE 推播合成一項（EntityListView 打開 PromotionsView）
+    static let promotionEntities: Set<String> = ["line_campaign", "campaign"]
+    static let promotionLabel = "發送優惠"
+
     static func groups(for schema: SiteSchema) -> [Group] {
-        let shown = schema.entities.filter { !hidden.contains($0.key) && ($0.canList || $0.singleton || $0.canGet) }
+        var shown = schema.entities.filter { !hidden.contains($0.key) && ($0.canList || $0.singleton || $0.canGet) }
+        if schema.tools.contains("send_promotion"), let i = shown.firstIndex(where: { promotionEntities.contains($0.key) }) {
+            shown[i].label = promotionLabel
+            let kept = shown[i].key
+            shown.removeAll { promotionEntities.contains($0.key) && $0.key != kept }
+        }
         let byGroup = Dictionary(grouping: shown, by: { group($0.key) })
         return groupOrder.compactMap { title in byGroup[title].map { Group(title: title, entities: $0) } }
     }
@@ -526,6 +535,7 @@ enum EntityStyle {
     /// 清單上的一句說明
     static func detail(_ entity: EntitySchema) -> String? {
         if let d = entity.collection?.description { return d }
+        if promotionEntities.contains(entity.key), entity.label == promotionLabel { return "LINE、簡訊一起發・發送紀錄" }
         var can: [String] = []
         if entity.canCreate { can.append("新增") }
         if entity.canUpdate { can.append("修改") }
