@@ -83,7 +83,7 @@ struct TeamView: View {
 }
 
 /// 隨機密碼（大小寫、數字，避開容易看錯的字）
-private func randomPassword(_ n: Int = 16) -> String {
+nonisolated private func randomPassword(_ n: Int = 16) -> String {
     let chars = Array("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789")
     var rng = SystemRandomNumberGenerator()
     return String((0..<n).map { _ in chars[Int(rng.next(upperBound: UInt32(chars.count)))] })

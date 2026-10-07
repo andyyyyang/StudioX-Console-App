@@ -270,11 +270,11 @@ struct PeriodPicker: View {
     @Binding var period: String
     var count = 12
 
-    static var current: String { months(1)[0] }
+    nonisolated static var current: String { months(1)[0] }
 
-    static func months(_ n: Int) -> [String] {
-        var c = Calendar.taipei
-        c.timeZone = TimeZone(identifier: "Asia/Taipei")!
+    nonisolated static func months(_ n: Int) -> [String] {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Taipei") ?? .current
         let now = Date.now
         return (0..<n).compactMap { i in
             guard let d = c.date(byAdding: .month, value: -i, to: now) else { return nil }
@@ -284,7 +284,7 @@ struct PeriodPicker: View {
         }
     }
 
-    static func label(_ p: String) -> String {
+    nonisolated static func label(_ p: String) -> String {
         let parts = p.split(separator: "-")
         guard parts.count == 2, let y = Int(parts[0]), let m = Int(parts[1]) else { return p }
         return p == current ? "這個月（\(m) 月）" : "\(y) 年 \(m) 月"
