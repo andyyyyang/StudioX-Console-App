@@ -83,6 +83,10 @@ final class AppLock {
     @ObservationIgnored private var promptPending = false
     private(set) var method: Method = .unavailable
     @ObservationIgnored private var leftAt: Date?
+    /// 上一次驗證成功（重要動作前的 Face ID）：App 沒離開過、2 分鐘內再確認一件事，不用再跳一次
+    @ObservationIgnored private var verifiedAt: Date?
+    /// 驗證過之後多久內不再跳
+    static let grace: TimeInterval = 120
 
     init() {
         let defaults = UserDefaults.standard
@@ -117,6 +121,8 @@ final class AppLock {
     /// 離開 App（進背景）。跳 Face ID 時只會 inactive、不會進背景；跳到一半滑回主畫面也算離開
     func didLeave() {
         if leftAt == nil { leftAt = .now }
+        // 離開過 App：剛才的驗證不算數，回來再做重要的事要重新驗證
+        verifiedAt = nil
     }
 
     /// 回到 App：離開超過設定的時間就鎖
@@ -149,6 +155,7 @@ final class AppLock {
         locked = false
         promptPending = false
         leftAt = nil
+        verifiedAt = nil
     }
 
     // MARK: 驗證
@@ -161,10 +168,24 @@ final class AppLock {
         }
     }
 
-    /// 退款、刪除這類動作確認前：設定關掉或裝置沒密碼就直接通過
+    /// 退款、刪除這類動作確認前（剛打完確認的字）：設定關掉或裝置沒密碼就直接通過；
+    /// 2 分鐘內驗證過、這中間沒離開 App，也直接通過（不會一件事連跳兩次）
     func verify(_ reason: String) async -> Bool {
         guard confirmDangerous, available else { return true }
-        return await authenticate(reason: reason)
+        if let at = verifiedAt, Date.now.timeIntervalSince(at) < Self.grace { return true }
+        let ok = await authenticate(reason: reason)
+        if ok { verifiedAt = .now }
+        return ok
+    }
+
+    /// 收不回來的動作（平台管理的刪除金鑰、重新產生密鑰、作廢帳單、移除成員…）就用這一下當確認：
+    /// 一定跳（不看 2 分鐘的寬限），系統提示上的 reason 寫的就是要做的事。
+    /// 回 nil：這台跳不了（「重要動作前再驗證」關掉、裝置沒設密碼），畫面要改問一次確認
+    func confirm(_ reason: String) async -> Bool? {
+        guard confirmDangerous, available else { return nil }
+        let ok = await authenticate(reason: reason)
+        if ok { verifiedAt = .now }
+        return ok
     }
 
     /// 打開「鎖住 App」之前先驗證一次（確定這個人解得開）

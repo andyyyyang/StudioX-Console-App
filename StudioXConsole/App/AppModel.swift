@@ -119,6 +119,8 @@ final class AppModel {
     }
     /// iPad：每個網站自己的一疊頁面
     var sitePaths: [String: [Route]] = [:]
+    /// iPad 側欄「平台管理」左邊選的那一頁（深連結、通知打開的也選在這裡）
+    var consoleSection: ConsolePage = .customers
     /// iPad 側欄「平台管理」裡的下一層
     var consolePath: [Route] = []
     var showXena = false {
@@ -159,9 +161,12 @@ final class AppModel {
     private(set) var successTick = 0
     private(set) var warningTick = 0
     private(set) var errorTick = 0
-    /// 訂單頁現在看的網站與狀態（首頁的「等出貨」點進去會設好）
-    var ordersSite: String?
+    /// 訂單頁現在看的網站與狀態（首頁的「等出貨」點進去會設好）。網站記在這台裝置：下次打開還是看這個網站
+    var ordersSite: String? = UserDefaults.standard.string(forKey: AppModel.ordersSiteKey) {
+        didSet { UserDefaults.standard.set(ordersSite, forKey: Self.ordersSiteKey) }
+    }
     var ordersStatus = "paid"
+    nonisolated static let ordersSiteKey = "orders.site"
     /// 首頁 Xena 已經說過的那段話（同一段話回到首頁不再重說一次）
     var spokenReport: String?
     /// 現在在看的網站、訂單：按「問問Xena」時第一個建議就是問這個（.xenaFocus）
@@ -228,6 +233,14 @@ final class AppModel {
     var canManageConsole: Bool { consoleCaps.contains("console.read") || consoleCaps.contains("platform.read") || consoleCaps.contains("users.level") }
     func can(_ cap: String) -> Bool { consoleCaps.contains(cap) }
     var supportSites: [SiteSummary] { sites.filter(\.hasSupport) }
+    /// 收件匣裡有東西的網站（客服信，或 Xena 對話、詢問）
+    var inboxSites: [SiteSummary] { sites.filter { $0.hasSupport || $0.tools.contains("list") } }
+
+    /// 訂單頁看的網站：上次選的（還是有商店的網站的話），不然是第一個有商店的
+    var currentOrdersSite: SiteSummary? {
+        let picked = ordersSite
+        return orderSites.first { $0.id == picked } ?? orderSites.first
+    }
 
     func site(_ id: String) -> SiteSummary? {
         sites.first { $0.id == id }
@@ -249,10 +262,10 @@ final class AppModel {
 
     // MARK: 登入
 
-    /// App 打開時：已經登入過就直接拿資料
+    /// App 打開時：已經登入過就直接拿資料（不用等載入動畫演完：那是剛登入時的歡迎）
     func start() async {
         guard phase == .loading else { return }
-        await loadMe(minimumDuration: .milliseconds(1900))
+        await loadMe()
         if DemoServer.screenshots { openDemoScreen() }
     }
 
@@ -327,7 +340,8 @@ final class AppModel {
     /// 刪除帳號：先用 Face ID 驗證（設定裡有開「重要動作再驗證」時），console 刪掉之後這台裝置照登出清乾淨。
     /// 回傳 false＝驗證沒過、什麼都沒做；失敗丟錯（例如平台管理者不能在 App 刪）
     func deleteAccount() async throws -> Bool {
-        guard await lock.verify("刪除 StudioX 帳號") else { return false }
+        // 一定跳 Face ID（不吃 2 分鐘的寬限）；設定關掉、裝置沒密碼時照舊直接過（前面已經有確認選單）
+        guard await lock.confirm("刪除 StudioX 帳號") != false else { return false }
         try await api.deleteAccount()
         // 帳號、裝置、登入在 console 都刪掉了，這裡只要清掉本機的（先登出，推播就只清本機、不再叫 API）
         await api.signOut()
@@ -353,7 +367,11 @@ final class AppModel {
         accountPath = []
         searchPath = []
         sitePaths = [:]
+        consoleSection = .customers
         consolePath = []
+        // 記住的網站是這個帳號的：換人登入從頭來
+        ordersSite = nil
+        UserDefaults.standard.removeObject(forKey: ComposeEmailView.siteKey)
         showXena = false
         showAccount = false
         spokenReport = nil
@@ -473,11 +491,24 @@ final class AppModel {
             }
         case .console(let page):
             if regular {
+                // 側欄選到那一頁（網站、網站服務是「客戶與網站」「網站服務」底下的一層）
                 tab = .console
-                consolePath = page == .home ? [] : [route]
+                if let section = Self.sidebarSection(for: page) {
+                    consoleSection = section
+                    consolePath = section == page ? [] : [route]
+                } else {
+                    consolePath = []
+                }
             } else {
+                // 手機：網站 → 平台管理 →（客戶與網站、網站服務）→ 這一頁，返回的路和 iPad 側欄一樣
                 tab = .sites
-                sitesPath = page == .home ? [route] : [.console(.home), route]
+                if page == .home {
+                    sitesPath = [route]
+                } else if let section = Self.sidebarSection(for: page), section != page {
+                    sitesPath = [.console(.home), .console(section), route]
+                } else {
+                    sitesPath = [.console(.home), route]
+                }
             }
         default:
             if regular {
@@ -488,6 +519,36 @@ final class AppModel {
                 sitesPath = [.site(route.site), route]
             }
         }
+    }
+
+    /// 平台管理的一頁在 iPad 側欄是哪一項（nil：總覽，側欄本身就是）
+    static func sidebarSection(for page: ConsolePage) -> ConsolePage? {
+        switch page {
+        case .home: return nil
+        case .site: return .customers
+        case .siteServices: return .services
+        default: return page
+        }
+    }
+
+    /// 收件匣的「要你處理」：回到清單第一層、選好篩選（iPad 右邊開著的不動）
+    func openNeedsYou() {
+        showXena = false
+        showAccount = false
+        inboxPath = []
+        inboxHistory.showNeedsYou(sites: sites)
+        tab = .inbox
+    }
+
+    /// 訂單清單：那個網站、那個狀態（nil＝不變），回到清單第一層
+    func openOrders(site: String, status: String? = nil) {
+        showXena = false
+        showAccount = false
+        ordersSite = site
+        if let status { ordersStatus = status }
+        ordersPath = []
+        ordersPicked = nil
+        tab = orderSites.isEmpty ? .xena : .orders
     }
 
     // MARK: 通知打開的頁面
@@ -556,17 +617,9 @@ final class AppModel {
                 open(route)
             }
         case .orders(let site):
-            showXena = false
-            showAccount = false
-            ordersSite = site
-            ordersPath = []
-            ordersPicked = nil
-            tab = orderSites.isEmpty ? .xena : .orders
+            openOrders(site: site)
         case .inbox:
-            showXena = false
-            showAccount = false
-            inboxPath = []
-            tab = .inbox
+            openNeedsYou()
         case .home:
             showXena = false
             showAccount = false
@@ -591,7 +644,6 @@ final class AppModel {
         }
     }
 
-    /// 打開 Xena 接著問一句
     /// 卡片的 sheet 開著時要打開別的畫面：先收起來，等它收好再打開（兩個 sheet 不能同時開）
     private func afterClosingDeck(_ present: @escaping @MainActor (AppModel) -> Void) {
         deckSheet = nil
@@ -601,7 +653,8 @@ final class AppModel {
         }
     }
 
-    /// 首頁「要處理」的一件事：直接去處理（從卡片的 sheet 按的，先收起來）
+    /// 首頁「要處理」的一件事：直接去處理（從卡片的 sheet 按的，先收起來）。
+    /// 收件匣的事打開「要你處理」；只有一件的直接打開那一段對話、那張訂單
     func handle(_ action: AttentionItem.Action) {
         if deckSheet != nil {
             afterClosingDeck { $0.handle(action) }
@@ -609,11 +662,17 @@ final class AppModel {
         }
         switch action {
         case .inbox:
-            tab = .inbox
+            openNeedsYou()
         case .orders(let site, let status):
-            ordersSite = site
-            ordersStatus = status
-            tab = .orders
+            openOrders(site: site, status: status)
+        case .open(let route):
+            if case .order(let site, _) = route {
+                // 返回時是那個網站的「等出貨」
+                openOrders(site: site, status: "paid")
+            } else {
+                openNeedsYou()
+            }
+            open(route)
         case .askXena(let prompt):
             askXena(prompt)
         }
@@ -621,18 +680,27 @@ final class AppModel {
 
     /// 等你決定的一件事：交給 Xena（帶著交代，她先查、給方案）、不用了、之後再說
     func decide(_ decision: Decision, _ action: Decision.Action) {
-        briefing.decide(decision, action)
         switch action {
         case .accept:
             if deckSheet != nil {
-                afterClosingDeck { $0.askXena(decision.prompt) }
+                afterClosingDeck { $0.handOff(decision) }
             } else {
-                askXena(decision.prompt)
+                handOff(decision)
             }
         case .later:
+            briefing.decide(decision, action)
             show("好，一週後再提醒你", tone: .neutral)
         case .dismiss:
+            briefing.decide(decision, action)
             show("好，這件不做", tone: .neutral)
+        }
+    }
+
+    /// 交給 Xena：真的送出去了（或排在她正在回答的那句後面）才從清單拿掉、告訴 console；
+    /// 還沒同意用雲端 AI、按了「先不要」，這件就留在清單上
+    private func handOff(_ decision: Decision) {
+        askXena(decision.prompt) { [weak self] in
+            self?.briefing.decide(decision, .accept)
         }
     }
 
@@ -676,9 +744,10 @@ final class AppModel {
         }
     }
 
-    func askXena(_ prompt: String) {
+    /// 打開 Xena 接著問一句（她還在回答就排在後面，答完再問）。onStart：這一句真的送出時
+    func askXena(_ prompt: String, onStart: (() -> Void)? = nil) {
         showXena = true
-        xena.send(prompt)
+        xena.send(prompt, onStart: onStart)
     }
 
     func show(_ text: String, tone: Tone = .active) {
@@ -697,8 +766,14 @@ final class AppModel {
         if value {
             // 手機的「網站」分頁 → 側欄的那個網站
             if tab == .sites, case .console? = sitesPath.first {
-                // 手機的「網站 → 平台管理」→ 側欄的「平台管理」
-                consolePath = Array(sitesPath.dropFirst())
+                // 手機的「網站 → 平台管理 → 某一頁」→ 側欄的「平台管理」選那一頁
+                let rest = Array(sitesPath.dropFirst())
+                if case .console(let page)? = rest.first, let section = Self.sidebarSection(for: page) {
+                    consoleSection = section
+                    consolePath = section == page ? Array(rest.dropFirst()) : rest
+                } else {
+                    consolePath = rest
+                }
                 tab = .console
             } else if tab == .sites {
                 if case .site(let id)? = sitesPath.first {
@@ -713,7 +788,7 @@ final class AppModel {
             sitesPath = [.site(id)] + (sitePaths[id] ?? [])
             tab = .sites
         } else if tab == .console {
-            sitesPath = [.console(.home)] + consolePath
+            sitesPath = [.console(.home), .console(consoleSection)] + consolePath
             tab = .sites
         } else if tab == .account {
             // 手機的分頁列沒有「我」：改成從首頁打開

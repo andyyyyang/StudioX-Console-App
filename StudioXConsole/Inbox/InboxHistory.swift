@@ -51,6 +51,8 @@ final class InboxHistory {
     /// 清單現在載的是哪一種管道
     private(set) var channel: Channel = .all
     private(set) var query = ""
+    /// 只看一個網站（網站代號；nil＝所有網站）
+    private(set) var site: String?
     private(set) var items: [InboxItem] = []
     /// 第一頁還在載
     private(set) var loading = false
@@ -91,6 +93,7 @@ final class InboxHistory {
         loading = false
         loadingMore = false
         query = ""
+        site = nil
         channel = .all
         selected = .all
     }
@@ -102,19 +105,39 @@ final class InboxHistory {
         await restart(sites: sites, channel: c)
     }
 
-    /// 從頭載（換管道、換搜尋、下拉重新整理）
+    /// 換網站（nil＝所有網站）：清單照那個網站重新載；「要你處理」只是換顯示
+    func pickSite(_ id: String?, sites: [SiteSummary]) async {
+        guard id != site else { return }
+        site = id
+        await restart(sites: sites)
+    }
+
+    /// 首頁、通知要看「要你處理」：選好這個篩選、拿掉網站的篩選（看得到每個網站的）；清單要重新載的在背景載
+    func showNeedsYou(sites: [SiteSummary]) {
+        selected = .needsYou
+        guard site != nil else { return }
+        site = nil
+        guard loaded || loading else { return }
+        Task { await restart(sites: sites) }
+    }
+
+    /// 從頭載（換管道、換搜尋、換網站、下拉重新整理）
     func restart(sites: [SiteSummary], channel: Channel? = nil, query: String? = nil) async {
         if let channel, channel != .needsYou { self.channel = channel }
         if let query { self.query = query.trimmingCharacters(in: .whitespacesAndNewlines) }
         // 搜尋是搜全部：在「要你處理」打字就回到清單
         if !self.query.isEmpty, selected == .needsYou { selected = self.channel }
+        // 只看的那個網站不在清單裡了（被移出、停用）：回到所有網站
+        if let id = site, !sites.contains(where: { $0.id == id }) { site = nil }
         generation += 1
         let round = generation
         names = Dictionary(sites.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         let want = self.channel.kinds
         let searching = !self.query.isEmpty
         let wants = { (k: Kind) in want?.contains(k) ?? true }
-        feeds = sites.flatMap { site -> [Feed] in
+        let only = site
+        let pool = sites.filter { only == nil || $0.id == only }
+        feeds = pool.flatMap { site -> [Feed] in
             var f: [Feed] = []
             let canList = site.tools.contains("list")
             if canList, wants(.xena) { f.append(Feed(site: site.id, kind: .xena)) }
@@ -301,14 +324,18 @@ struct InboxFeedList<Row: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            FilterBar(
-                items: channels,
-                selection: Binding(get: { history.selected }, set: { c in
-                    Task { await history.select(c, sites: model.sites) }
-                }),
-                title: \.title,
-                count: { $0 == .needsYou ? needsYou.count : nil }
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                // 好幾個網站都有客服：可以只看一個網站（「全部網站」＝都看）
+                if model.inboxSites.count > 1 { siteBar }
+                FilterBar(
+                    items: channels,
+                    selection: Binding(get: { history.selected }, set: { c in
+                        Task { await history.select(c, sites: model.sites) }
+                    }),
+                    title: \.title,
+                    count: { $0 == .needsYou ? needsYou.count : nil }
+                )
+            }
             if !history.failed.isEmpty {
                 ErrorNote(message: "\(history.failed.joined(separator: "、")) 這次沒讀到") {
                     Task { await history.restart(sites: model.sites) }
@@ -343,6 +370,21 @@ struct InboxFeedList<Row: View>: View {
                 footer
             }
         }
+    }
+
+    /// 網站的篩選：全部網站、每個有客服的網站（空字串＝全部）
+    private var siteBar: some View {
+        let ids: [String] = [""] + model.inboxSites.map(\.id)
+        let selection = Binding<String>(
+            get: { history.site ?? "" },
+            set: { id in Task { await history.pickSite(id.isEmpty ? nil : id, sites: model.sites) } }
+        )
+        return FilterBar(items: ids, selection: selection, title: { siteTitle($0) })
+    }
+
+    private func siteTitle(_ id: String) -> String {
+        if id.isEmpty { return "全部網站" }
+        return model.site(id)?.name ?? id
     }
 
     /// 篩選：全部、要你處理，加上讀得到的管道（沒有客服信的網站不放 Email，沒有詢問的不放表單）

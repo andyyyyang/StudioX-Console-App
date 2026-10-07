@@ -135,31 +135,34 @@ final class Briefing {
         collected[id] = r
     }
 
-    /// 交給 Xena 了／不用了／之後再說：先從清單拿掉，再告訴 console（失敗也不放回來，下次重新整理會照 console 的）
+    /// 交給 Xena 了（真的送出了才叫，見 AppModel.decide）／不用了／之後再說：先從清單拿掉，再告訴 console（失敗也不放回來，下次重新整理會照 console 的）
     func decide(_ decision: Decision, _ action: Decision.Action) {
         withAnimation(Motion.ease) { decisions.removeAll { $0.id == decision.id } }
         Task { [api] in try? await api.decide(decision.id, action: action) }
     }
 
-    /// 要你處理的事（越急的越前面）：出貨、回覆客人、異常…本來就得做的。可做可不做的優化在 decisions
+    /// 要你處理的事（越急的越前面）：出貨、回覆客人、異常…本來就得做的。可做可不做的優化在 decisions。
+    /// 點了直接去處理：好幾件的打開收件匣的「要你處理」、訂單的「等出貨」；只有一件的直接打開那一段、那一張
     func attention(sites: [SiteSummary]) -> [AttentionItem] {
         var out: [AttentionItem] = []
         let name = { (id: String) in sites.first { $0.id == id }?.name ?? id }
         for (site, threads) in Dictionary(grouping: awaiting, by: \.site).sorted(by: { $0.key < $1.key }) {
             let oldest = threads.compactMap(\.waitingHours).max()
+            let action: AttentionItem.Action = threads.count == 1 ? .open(Route.thread(site: site, id: threads[0].id)) : .inbox
             out.append(AttentionItem(
                 id: "support-\(site)", site: site, icon: "chat-bubble-left-right", tone: .warning,
                 title: "\(threads.count) 位客人在等回覆",
                 detail: "\(name(site))・" + (oldest.map { "最久等了 \(Self.hours($0))" } ?? "還沒回覆"),
-                action: .inbox
+                action: action
             ))
         }
         for (site, orders) in toShip.sorted(by: { $0.key < $1.key }) where !orders.isEmpty {
+            let action: AttentionItem.Action = orders.count == 1 ? .open(Route.order(site: site, id: orders[0].id)) : .orders(site: site, status: "paid")
             out.append(AttentionItem(
                 id: "ship-\(site)", site: site, icon: "truck", tone: .gold,
                 title: "\(orders.count) 筆訂單已付款、等出貨",
                 detail: "\(name(site))・最早的是 \(orders.last?.paidAt?.shortText ?? orders.last?.createdAt?.shortText ?? "")",
-                action: .orders(site: site, status: "paid")
+                action: action
             ))
         }
         for (site, report) in ops.sorted(by: { $0.key < $1.key }) {
@@ -167,20 +170,22 @@ final class Briefing {
                 out.append(AttentionItem(id: "alert-\(site)-\(i)", site: site, icon: "exclamation-triangle", tone: .danger, title: alert, detail: name(site), action: .askXena("\(name(site))的異常：「\(alert)」，怎麼處理？")))
             }
         }
-        if !handoffs.isEmpty {
+        if let first = handoffs.first {
+            let action: AttentionItem.Action = handoffs.count == 1 ? .open(Route.xenaConversation(site: first.site, id: first.id)) : .inbox
             out.append(AttentionItem(
-                id: "handoffs", site: handoffs[0].site, icon: "chat-bubble-oval-left-ellipsis", tone: .warning,
+                id: "handoffs", site: first.site, icon: "chat-bubble-oval-left-ellipsis", tone: .warning,
                 title: "Xena 轉給專人的對話 \(handoffs.count) 段",
                 detail: handoffs.prefix(2).map { $0.contactName ?? $0.firstQuestion ?? "訪客" }.joined(separator: "、"),
-                action: .inbox
+                action: action
             ))
         }
-        if !inquiries.isEmpty {
+        if let first = inquiries.first {
+            let action: AttentionItem.Action = inquiries.count == 1 ? .open(Route.inquiry(site: first.site, id: first.id)) : .inbox
             out.append(AttentionItem(
-                id: "inquiries", site: inquiries[0].site, icon: "envelope", tone: .info,
+                id: "inquiries", site: first.site, icon: "envelope", tone: .info,
                 title: "\(inquiries.count) 筆新的專案詢問",
                 detail: inquiries.prefix(2).map { [$0.name, $0.company].compactMap { $0 }.joined(separator: "・") }.joined(separator: "、"),
-                action: .inbox
+                action: action
             ))
         }
         return out
@@ -194,8 +199,12 @@ final class Briefing {
 /// 首頁上的一件事
 struct AttentionItem: Identifiable {
     enum Action {
+        /// 收件匣的「要你處理」
         case inbox
+        /// 訂單清單（那個網站、那個狀態）
         case orders(site: String, status: String)
+        /// 只有一件：直接打開那一段對話、那一張訂單
+        case open(Route)
         case askXena(String)
     }
 

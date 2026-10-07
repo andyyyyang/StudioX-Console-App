@@ -67,9 +67,7 @@ struct OpsReportView: View {
         VStack(alignment: .leading, spacing: 24) {
             SectionHead("訂單與收款・\(ops.rangeLabel.isEmpty ? (days == 1 ? "昨天" : "最近 \(days) 天") : ops.rangeLabel)", role: .h3) {
                 MoreLink("看訂單") {
-                    model.ordersSite = siteID
-                    model.ordersStatus = "all"
-                    model.tab = .orders
+                    model.openOrders(site: siteID, status: "all")
                 }
             }
             StatGrid {

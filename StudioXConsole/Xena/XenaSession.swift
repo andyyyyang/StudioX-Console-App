@@ -52,6 +52,16 @@ final class XenaSession {
     private(set) var deciding: Set<String> = []
     private(set) var loaded = false
 
+    /// 她還在回答時又交代的一句（首頁的「交給 Xena」、別的頁面的「問 Xena」）：這一句答完照順序送出，不會被吃掉
+    struct Queued {
+        let text: String
+        let answering: String?
+        /// 真的送出時叫（首頁「交給 Xena」這時才把那件事從清單拿掉）
+        let onStart: (() -> Void)?
+    }
+
+    private(set) var queue: [Queued] = []
+
     /// Xena 動手改了東西（確認卡片執行成功）：App 重新拿資料
     @ObservationIgnored var onDidWrite: (() -> Void)?
     /// 危險動作確認前的驗證（AppModel 接到 Face ID）；回 false 就不送出
@@ -134,6 +144,7 @@ final class XenaSession {
 
     /// 登出
     func reset() {
+        queue = []
         newThread()
         threads = []
         problem = nil
@@ -162,13 +173,23 @@ final class XenaSession {
 
     // MARK: 說話
 
-    func send(_ text: String, answering: String? = nil) {
+    /// 說一句話。她還在回答：排在後面，這一句答完再送（不會被吃掉）。
+    /// 還沒同意用雲端 AI：先問，同意了才送；不同意就什麼都不做（onStart 也不會叫）。onStart：這一句真的送出時
+    func send(_ text: String, answering: String? = nil, onStart: (() -> Void)? = nil) {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, !isBusy else { return }
+        guard !message.isEmpty else { return }
         guard AppSettings.shared.cloudAIAllowed else {
-            askConsent?({ [weak self] in self?.send(text, answering: answering) })
+            askConsent?({ [weak self] in self?.send(text, answering: answering, onStart: onStart) })
             return
         }
+        guard !isBusy else {
+            // 同一句已經排著了（例如又按了一次）：不重複問
+            if queue.contains(where: { $0.text == message }) { return }
+            queue.append(Queued(text: message, answering: answering, onStart: onStart))
+            bump()
+            return
+        }
+        onStart?()
         if let answering, let i = items.firstIndex(where: { $0.id == answering }), case .ask(var ask) = items[i] {
             ask.answer = message
             items[i] = .ask(ask)
@@ -237,6 +258,18 @@ final class XenaSession {
         phase = hasPendingConfirm ? .waitingForYou : .idle
         if wasWorking { pulse += 1 }
         bump()
+        sendQueued()
+    }
+
+    /// 排著的下一句：等這一輪（按了停止、換對話串）處理完再送
+    private func sendQueued() {
+        guard !isBusy, !queue.isEmpty else { return }
+        Task { [weak self] in
+            await Task.yield()
+            guard let self, !self.isBusy, !self.queue.isEmpty else { return }
+            let next = self.queue.removeFirst()
+            self.send(next.text, answering: next.answering, onStart: next.onStart)
+        }
     }
 
     // MARK: 確認卡片

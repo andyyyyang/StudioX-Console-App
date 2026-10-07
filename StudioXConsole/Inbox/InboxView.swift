@@ -81,6 +81,8 @@ struct InboxItem: Identifiable {
     var extra: (text: String, tone: Tone)?
     /// Xena 這幾分鐘還在回答
     var live = false
+    /// 網站給的狀態（ai／waiting／human／closed、open／answered／closed、new／replied／archived）：長按的快速動作看這個
+    var state: String?
 
     /// Xena 的對話；needsYou：放在「要你處理」（狀態說為什麼要你）
     init(_ c: XenaConversationSummary, needsYou: Bool = false) {
@@ -99,6 +101,7 @@ struct InboxItem: Identifiable {
             status = (text: c.attentionLabel, tone: Tone.gold)
         }
         live = c.status == "ai" && (c.at.map { Date.now.timeIntervalSince($0) < 180 } ?? false)
+        state = c.status
     }
 
     /// 客服信（客人在等回覆）
@@ -113,6 +116,7 @@ struct InboxItem: Identifiable {
         source = .email
         topic = t.categoryLabel.isEmpty ? nil : t.categoryLabel
         extra = t.orderNumber.map { (text: "#\($0)", tone: Tone.gold) }
+        state = t.status
     }
 
     /// 專案詢問（聯絡表單）
@@ -127,6 +131,7 @@ struct InboxItem: Identifiable {
         source = .form
         topic = "專案詢問"
         extra = q.budget.map { (text: $0, tone: Tone.neutral) }
+        state = q.status
     }
 
     /// 信箱裡還沒分的信
@@ -161,6 +166,95 @@ struct InboxSections {
     }
 }
 
+/// 收件匣一列長按的快速動作（和那一頁上的按鈕同一個動作、同一條確認的路）
+enum InboxQuickAction: Hashable {
+    /// Xena 對話：專人接手（Xena 先停止回答）
+    case takeover
+    /// Xena 對話、客服信：結案
+    case close
+    /// 專案詢問：封存
+    case archive
+
+    var label: String {
+        switch self {
+        case .takeover: "接手"
+        case .close: "結案"
+        case .archive: "封存"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .takeover: "hand.raised"
+        case .close: "checkmark.circle"
+        case .archive: "archivebox"
+        }
+    }
+
+    /// 做完說的話
+    var done: String {
+        switch self {
+        case .takeover: "你接手了，Xena 先停止回答"
+        case .close: "結案了"
+        case .archive: "封存了"
+        }
+    }
+
+    /// 跟網站要確認內容（寫入的第一步）；這一列沒有這個動作回 nil
+    func propose(_ item: InboxItem, api: ConsoleAPI) async throws -> ConsoleAPI.WriteOutcome? {
+        switch item.route {
+        case .xenaConversation(let site, let id):
+            return try await api.proposeXena(site: site, id: id, action: self == .takeover ? "takeover" : "close")
+        case .thread(let site, let id):
+            return try await api.proposeThreadStatus(site: site, id: id, status: "closed")
+        case .inquiry(let site, let id):
+            return try await api.proposeUpdate(site: site, entity: "inquiry", id: id, fields: ["status": .string("archived")])
+        default:
+            return nil
+        }
+    }
+}
+
+extension InboxItem {
+    /// 這一列長按可以做的（照網站給的狀態、這個網站能不能在 App 裡處理）
+    func quickActions(_ site: SiteSummary?) -> [InboxQuickAction] {
+        guard let site else { return [] }
+        switch route {
+        case .xenaConversation:
+            guard site.hasXenaDesk else { return [] }
+            var out: [InboxQuickAction] = []
+            if state == "ai" || state == "waiting" { out.append(.takeover) }
+            if state != nil && state != "closed" { out.append(.close) }
+            return out
+        case .thread:
+            return site.hasSupport && state != "closed" ? [.close] : []
+        case .inquiry:
+            return state != nil && state != "archived" ? [.archive] : []
+        default:
+            return []
+        }
+    }
+}
+
+/// 長按一列跳出的快速動作（沒有可以做的就不加選單）
+private struct InboxQuickMenu: ViewModifier {
+    let actions: [InboxQuickAction]
+    let run: (InboxQuickAction) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if actions.isEmpty {
+            content
+        } else {
+            content.contextMenu {
+                ForEach(actions, id: \.self) { action in
+                    Button(action.label, systemImage: action.symbol) { run(action) }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 清單
 
 struct InboxList: View {
@@ -173,6 +267,9 @@ struct InboxList: View {
     @State private var searching = false
     /// 寫一封新信（右上角的筆）
     @State private var composing = false
+    /// 長按一列的快速動作：網站要確認（危險、要打字）時跳的確認卡、做的是哪一個
+    @State private var proposal: Proposal?
+    @State private var quickAction: InboxQuickAction?
 
     /// 有網站可以從 App 寄新信（網站後台有 send_email）
     private var canCompose: Bool { model.sites.contains { $0.tools.contains("send_email") } }
@@ -190,8 +287,10 @@ struct InboxList: View {
 
     var body: some View {
         let b = model.briefing
-        let needsYou = InboxSections(b).needsYou
         let history = model.inboxHistory
+        // 只看一個網站時，「要你處理」也只放那個網站的
+        let only = history.site
+        let needsYou = InboxSections(b).needsYou.filter { only == nil || $0.site == only }
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 18) {
@@ -213,6 +312,9 @@ struct InboxList: View {
                     open(item.route) {
                         InboxRow(item: item, waiting: waiting, site: model.sites.count > 1 ? model.site(item.site) : nil)
                     }
+                    .modifier(InboxQuickMenu(actions: item.quickActions(model.site(item.site))) { action in
+                        run(action, on: item)
+                    })
                 }
             }
             .pageWidth()
@@ -238,6 +340,9 @@ struct InboxList: View {
             }
         }
         .sheet(isPresented: $composing) { ComposeEmailView() }
+        .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { _ in
+            if let quickAction { finished(quickAction) }
+        }
         // 第一次打開才載
         .task {
             guard !history.loaded, !history.loading else { return }
@@ -278,6 +383,33 @@ struct InboxList: View {
         var parts = [needsYou.isEmpty ? "沒有要你處理的事" : "\(needsYou.count) 件要你處理"]
         if live > 0 { parts.append("Xena 回答中 \(live) 段") }
         return parts.joined(separator: "・")
+    }
+
+    /// 長按一列的快速動作（結案、封存、接手）：和那一頁的按鈕走同一條路——改得回來的按了就做，
+    /// 網站標危險、要打字、要店主核准的照樣跳確認
+    private func run(_ action: InboxQuickAction, on item: InboxItem) {
+        Task {
+            do {
+                guard let proposed = try await action.propose(item, api: model.api) else { return }
+                switch try await model.api.confirmOnTap(proposed) {
+                case .needsConfirmation(let p):
+                    quickAction = action
+                    proposal = p
+                case .done:
+                    finished(action)
+                }
+            } catch {
+                model.show(error.localizedDescription, tone: .danger)
+            }
+        }
+    }
+
+    private func finished(_ action: InboxQuickAction) {
+        model.show(action.done)
+        Task {
+            await model.refreshAll()
+            await model.inboxHistory.refreshHead()
+        }
     }
 
     /// 點一列：手機推下一頁，iPad 在右邊打開
@@ -452,7 +584,7 @@ struct InquiryView: View {
         }
     }
 
-    /// 寄出回覆（網站的 reply_inquiry）：先跳確認，收件人與全文攤開
+    /// 寄出回覆（網站的 reply_inquiry）：按「送出」就是確認了（收件人、簽名寫在輸入框下面）；網站標危險、要打字的照樣跳確認
     private func sendReply() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
@@ -460,7 +592,8 @@ struct InquiryView: View {
         Task {
             defer { sending = false }
             do {
-                switch try await model.api.proposeInquiryReply(site: site, inquiryID: inquiryID, body: text) {
+                let proposed = try await model.api.proposeInquiryReply(site: site, inquiryID: inquiryID, body: text)
+                switch try await model.api.confirmOnTap(proposed) {
                 case .needsConfirmation(let p): replyProposal = p
                 case .done(let result): replied(result)
                 }
@@ -488,7 +621,8 @@ struct InquiryView: View {
         }
     }
 
-    /// 回了信就標「已回覆」；不做的「封存」；封存、回過的可以改回新詢問（網站的 update inquiry，照樣先確認）
+    /// 回了信就標「已回覆」；不做的「封存」；封存、回過的可以改回新詢問（網站的 update inquiry）。
+    /// 都改得回來：按了就做（網站標危險、要打字的照樣跳確認）
     @ViewBuilder
     private func statusActions(_ status: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -515,11 +649,13 @@ struct InquiryView: View {
         working = true
         defer { working = false }
         do {
-            switch try await model.api.proposeUpdate(site: site, entity: "inquiry", id: inquiryID, fields: ["status": .string(status)]) {
+            let proposed = try await model.api.proposeUpdate(site: site, entity: "inquiry", id: inquiryID, fields: ["status": .string(status)])
+            switch try await model.api.confirmOnTap(proposed) {
             case .needsConfirmation(let p): proposal = p
             case .done:
-                model.show("已更新")
+                model.show(Self.statusDone(status))
                 await load()
+                Task { await model.refreshAll() }
             }
         } catch {
             model.show(error.localizedDescription, tone: .danger)
@@ -627,10 +763,19 @@ struct InquiryView: View {
         default: "新詢問"
         }
     }
+
+    /// 改好狀態之後的那句話
+    static func statusDone(_ status: String) -> String {
+        switch status {
+        case "replied": "標成已回覆了"
+        case "archived": "封存了"
+        default: "改回新詢問了"
+        }
+    }
 }
 
 /// 一封客服信：來回的訊息（和 Xena 對話同一套泡泡：客人在左、我們在右，跨天放日期）、這位客人的訂單；
-/// 回信（寄給客人）按送出就寄，結案先出網站的確認
+/// 回信（寄給客人）按送出就寄，結案、重新打開按了就做（網站標危險、要打字的照樣先確認）
 struct SupportThreadView: View {
     let site: String
     let threadID: String
@@ -734,9 +879,9 @@ struct SupportThreadView: View {
                         Button("請 Xena 潤飾我寫的", systemImage: "wand.and.stars") { xenaWrite(polish: true) }
                     }
                     if detail?.summary.status != "closed" {
-                        Button("結案", systemImage: "checkmark.circle") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "closed") } } }
+                        Button("結案", systemImage: "checkmark.circle") { setStatus("closed") }
                     } else {
-                        Button("重新打開", systemImage: "arrow.uturn.backward.circle") { Task { await propose { try await model.api.proposeThreadStatus(site: site, id: threadID, status: "open") } } }
+                        Button("重新打開", systemImage: "arrow.uturn.backward.circle") { setStatus("open") }
                     }
                     if let url = detail?.adminURL {
                         Button("在後台打開", systemImage: "arrow.up.right.square") { openURL(url) }
@@ -802,7 +947,16 @@ struct SupportThreadView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !working else { return }
-        Task { await propose(reply: true) { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
+        Task { await propose(tap: true) { try await model.api.proposeReply(site: site, threadID: threadID, body: text, close: closeAfter) } }
+    }
+
+    /// 結案、重新打開：改得回來，按了就做
+    private func setStatus(_ status: String) {
+        Task {
+            await propose(tap: true, done: status == "closed" ? "結案了" : "重新打開了") {
+                try await model.api.proposeThreadStatus(site: site, id: threadID, status: status)
+            }
+        }
     }
 
     /// 重寄沒寄出去的那一則：先跳確認（收件人、全文），內容照舊
@@ -847,29 +1001,21 @@ struct SupportThreadView: View {
         }
     }
 
-    private func propose(reply: Bool = false, _ make: () async throws -> ConsoleAPI.WriteOutcome) async {
+    /// tap：按鈕本身就是確認（送出回覆、結案、重新打開），夠輕的直接做（ConsoleAPI.confirmOnTap）；
+    /// 其他的（重寄）和網站標危險、要打字的，照樣跳確認。done：做完說的話（沒給就照回覆的結果說）
+    private func propose(tap: Bool = false, done: String? = nil, _ make: () async throws -> ConsoleAPI.WriteOutcome) async {
         working = true
         defer { working = false }
         do {
-            let outcome = try await make()
+            var outcome = try await make()
+            if tap { outcome = try await model.api.confirmOnTap(outcome) }
             switch outcome {
             case .needsConfirmation(let p):
-                // 送出回覆：按「送出」就是確認了，不再跳一次確認（要打字、危險的動作照樣確認）
-                if reply, p.typed == nil, !p.danger {
-                    switch try await model.api.confirm(p, typed: nil) {
-                    case .done(let result):
-                        announce(result)
-                        await load()
-                        Task { await model.refreshAll() }
-                    case .needsOwner(let next):
-                        proposal = next
-                    }
-                } else {
-                    proposal = p
-                }
-            case .done:
-                model.show("已更新")
+                proposal = p
+            case .done(let result):
+                if let done { model.show(done) } else { announce(result) }
                 await load()
+                Task { await model.refreshAll() }
             }
         } catch {
             model.show(error.localizedDescription, tone: .danger)

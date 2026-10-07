@@ -146,6 +146,17 @@ extension ConsoleAPI {
 
     // MARK: 寫（回提案，確認後才執行）
 
+    /// 按鈕本身就是確認的寫入（回覆、接手、交給 Xena、結案、重新開啟、封存…這類改得回來的）：
+    /// 網站回「要確認」但夠輕的（Proposal.confirmedByTap：沒標危險、不用打字、不用店主核准），直接帶確認碼送出，不再跳確認卡；
+    /// 其他的照樣回 .needsConfirmation，畫面跳 ConfirmSheet（退款、刪除、作廢一律走那裡，照樣驗 Face ID）
+    func confirmOnTap(_ outcome: WriteOutcome) async throws -> WriteOutcome {
+        guard case .needsConfirmation(let p) = outcome, p.confirmedByTap else { return outcome }
+        switch try await confirm(p, typed: nil) {
+        case .done(let result): return .done(result)
+        case .needsOwner(let next): return .needsConfirmation(next)
+        }
+    }
+
     /// 修改一筆：只送改過的欄位（網站會列出「舊 → 新」讓你確認）
     func proposeUpdate(site: String, entity: String, id: String?, fields: [String: JSONValue]) async throws -> WriteOutcome {
         var args: [String: JSONValue] = ["entity": .string(entity), "fields": .object(fields)]

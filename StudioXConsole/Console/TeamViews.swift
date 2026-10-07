@@ -131,14 +131,13 @@ private struct TeamMemberSheet: View {
     @State private var level = ""
     @State private var name = ""
     @State private var newPassword: String?
+    /// 移除收不回來：確認選單＋Face ID（2 分鐘內驗證過就不再跳）
     @State private var confirmRemove = false
 
     var body: some View {
+        // 改職能、名字、密碼都改得回來：按「儲存」就是確認
         AdminSheet(title: member.name ?? member.email, subtitle: member.email, action: "儲存") {
-            if level != member.level {
-                guard await model.lock.verify("改 \(member.email) 的職能") else { return false }
-            }
-            return await model.adminRun("存好了") {
+            await model.adminRun("存好了") {
                 var body: [String: JSONValue] = [:]
                 if level != member.level { body["level"] = .string(level) }
                 if name != (member.name ?? "") { body["name"] = .string(name) }
@@ -165,10 +164,12 @@ private struct TeamMemberSheet: View {
                 Button("移除這位後台人員", role: .destructive) { confirmRemove = true }
                     .buttonStyle(.brand(.quiet, size: .sm))
                     .confirmationDialog("移除 \(member.email)？", isPresented: $confirmRemove, titleVisibility: .visible) {
-                        Button("移除", role: .destructive) { Task { await remove() } }
+                        Button("移除", role: .destructive) {
+                            Task { await model.verified("移除後台人員 \(member.email)") { await remove() } }
+                        }
                     } message: {
-                        Text("他就不能再進 console（他管理的客戶網站另外在「客戶與網站」移出）。")
-                    }
+                    Text("他就不能再進 console（他管理的客戶網站另外在「客戶與網站」移出）。")
+                }
             }
         }
         .presentationDetents([.large])
@@ -178,8 +179,8 @@ private struct TeamMemberSheet: View {
         }
     }
 
+    /// 移除（確認過了：確認選單＋Face ID）
     private func remove() async {
-        guard await model.lock.verify("移除後台人員 \(member.email)") else { return }
         let ok = await model.adminRun("移除了 \(member.email)") {
             _ = try await model.api.admin("team/\(member.id)", method: "DELETE")
         }
@@ -296,6 +297,7 @@ struct XenaAdminView: View {
     @State private var source = ""
     @State private var error: String?
     @State private var loadingMore = false
+    /// 撤銷收不回來：確認選單＋Face ID（2 分鐘內驗證過就不再跳）
     @State private var revoking: AiConnector?
     @State private var opened: AiRecord?
 
@@ -323,7 +325,9 @@ struct XenaAdminView: View {
         .onChange(of: status) { Task { await loadRecords(reset: true) } }
         .onChange(of: source) { Task { await loadRecords(reset: true) } }
         .confirmationDialog("撤銷「\(revoking?.name ?? "")」？", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), titleVisibility: .visible, presenting: revoking) { c in
-            Button("撤銷", role: .destructive) { Task { await revoke(c) } }
+            Button("撤銷", role: .destructive) {
+                Task { await model.verified("撤銷「\(c.name)」") { await revoke(c) } }
+            }
         } message: { _ in
             Text("它所有的登入立刻失效；要再用得重新連接、重新登入。")
         }
@@ -486,17 +490,15 @@ struct XenaAdminView: View {
         }
     }
 
+    /// 開、關 Xena AI（改得回來：再打開就好，不用驗證）
     private func setEnabled(_ on: Bool) async {
-        if !on {
-            guard await model.lock.verify("關掉 Xena AI") else { return }
-        }
         await model.adminRun(on ? "Xena AI 開了" : "Xena AI 關了") {
             settings = XenaSettings(try await model.api.admin("api/copilot/settings", method: "PATCH", body: ["enabled": .bool(on)]))
         }
     }
 
+    /// 撤銷（確認過了：確認選單＋Face ID）
     private func revoke(_ c: AiConnector) async {
-        guard await model.lock.verify("撤銷「\(c.name)」") else { return }
         await model.adminRun("撤銷了「\(c.name)」") {
             _ = try await model.api.admin("mcp-connectors", method: "POST", body: ["action": "revoke", "clientId": .string(c.clientID)])
         }

@@ -3,6 +3,7 @@ import SwiftUI
 /// 網站的寫入一律兩步驟（和 AI 連接器、網頁版 Xena 同一個規則）：
 /// 第一次送出只拿到網站寫的標題與內容（這張卡），使用者看過按「確認執行」才用同一組參數加確認碼真的送出。
 /// 退款、刪除這類要打字確認；退款、折價券超過門檻還要店主的驗證碼（網站會寄給店主）。
+/// 回覆、接手、結案、封存這類改得回來的，按鈕本身就是確認（Proposal.confirmedByTap），不會跳這張卡。
 struct ConfirmSheet: View {
     @State var proposal: Proposal
     var siteName: String
@@ -18,47 +19,13 @@ struct ConfirmSheet: View {
     @State private var failed = 0
     @FocusState private var focused: Bool
 
-    private var needsOwner: Bool { proposal.ownerRequestID != nil }
-
-    private var canConfirm: Bool {
-        if needsOwner { return ownerCode.trimmingCharacters(in: .whitespaces).count >= 4 }
-        guard let word = proposal.typed else { return true }
-        return typed.trimmingCharacters(in: .whitespaces) == word
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Eyebrow(needsOwner ? "需要店主核准" : proposal.danger ? "要動手了，先跟你確認" : "確認一下", dot: proposal.danger ? Theme.dangerFG : Theme.accent)
-                    Headline(proposal.ownerTitle ?? proposal.title, role: .h2)
-                    DetailLines(text: proposal.ownerDetail ?? proposal.detail)
-
-                    if needsOwner {
-                        FieldBlock(label: "店主的驗證碼", hint: "網站已經把 6 位數的核准碼寄給店主", focused: focused) {
-                            TextField("6 位數", text: $ownerCode)
-                                .keyboardType(.numberPad)
-                                .textContentType(.oneTimeCode)
-                                .focused($focused)
-                                .fieldText()
-                        }
-                    } else if let word = proposal.typed {
-                        FieldBlock(label: "輸入「\(word)」確認", focused: focused) {
-                            TextField(word, text: $typed)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .focused($focused)
-                                .fieldText()
-                        }
-                    }
-
-                    if let error {
-                        ErrorNote(message: error)
-                    }
-                }
-                .padding(24)
-                .frame(maxWidth: Metric.readable, alignment: .leading)
-                .frame(maxWidth: .infinity)
+                ProposalForm(proposal: proposal, typed: $typed, ownerCode: $ownerCode, focused: $focused, error: error)
+                    .padding(24)
+                    .frame(maxWidth: Metric.readable, alignment: .leading)
+                    .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
             .background { Theme.sheet.ignoresSafeArea() }
@@ -72,11 +39,11 @@ struct ConfirmSheet: View {
                     } label: {
                         HStack(spacing: 8) {
                             if busy { ProgressView().controlSize(.small).tint(Theme.onAccent) }
-                            Text(needsOwner ? "送出驗證碼" : "確認執行")
+                            Text(proposal.needsOwner ? "送出驗證碼" : "確認執行")
                         }
                     }
                     .buttonStyle(.brand(proposal.danger ? .danger : .accent, size: .lg, fullWidth: true))
-                    .disabled(!canConfirm || busy)
+                    .disabled(!proposal.canConfirm(typed: typed, ownerCode: ownerCode) || busy)
                     .keyboardShortcut(.return, modifiers: .command)
                 }
                 .padding(.horizontal, 20)
@@ -92,19 +59,16 @@ struct ConfirmSheet: View {
         .interactiveDismissDisabled(busy)
         .haptic(.success, trigger: succeeded)
         .haptic(.error, trigger: failed)
-        .onAppear { if proposal.typed != nil || needsOwner { focused = true } }
+        .onAppear { if proposal.typed != nil || proposal.needsOwner { focused = true } }
     }
 
     private func run() async {
-        // 退款、刪除這類：確認前再驗證一次（Face ID；在「我 → 安全」可以關掉）。店主驗證碼那一步不用再驗
-        if !needsOwner && (proposal.danger || proposal.typed != nil) {
-            guard await model.lock.verify("確認：\(proposal.title)") else { return }
-        }
         busy = true
         error = nil
         defer { busy = false }
         do {
-            let outcome = try await model.api.confirm(proposal, typed: typed, ownerCode: ownerCode)
+            // 退款、刪除這類：確認前再驗證一次（Face ID；2 分鐘內驗證過就不再跳）。nil＝驗證沒過
+            guard let outcome = try await model.confirm(proposal, typed: typed, ownerCode: ownerCode) else { return }
             switch outcome {
             case .done(let result):
                 succeeded = true
@@ -118,6 +82,74 @@ struct ConfirmSheet: View {
             failed += 1
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// 確認卡的內容：網站寫的標題與內容、要打的字或店主的驗證碼、出錯的原因（ConfirmSheet 和出貨卡共用）
+struct ProposalForm: View {
+    let proposal: Proposal
+    @Binding var typed: String
+    @Binding var ownerCode: String
+    var focused: FocusState<Bool>.Binding
+    var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Eyebrow(proposal.needsOwner ? "需要店主核准" : proposal.danger ? "要動手了，先跟你確認" : "確認一下", dot: proposal.danger ? Theme.dangerFG : Theme.accent)
+            Headline(proposal.ownerTitle ?? proposal.title, role: .h2)
+            DetailLines(text: proposal.ownerDetail ?? proposal.detail)
+
+            if proposal.needsOwner {
+                FieldBlock(label: "店主的驗證碼", hint: "網站已經把 6 位數的核准碼寄給店主", focused: focused.wrappedValue) {
+                    TextField("6 位數", text: $ownerCode)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .focused(focused)
+                        .fieldText()
+                }
+            } else if let word = proposal.typed {
+                FieldBlock(label: "輸入「\(word)」確認", focused: focused.wrappedValue) {
+                    TextField(word, text: $typed)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused(focused)
+                        .fieldText()
+                }
+            }
+
+            if let error {
+                ErrorNote(message: error)
+            }
+        }
+    }
+}
+
+extension Proposal {
+    /// 退款超過門檻：要店主的驗證碼（確認之後才會出現）
+    var needsOwner: Bool { ownerRequestID != nil }
+
+    /// 按「確認執行」之前要再驗證一次（Face ID）：網站標危險的、要打字的；店主驗證碼那一步不用再驗
+    var needsVerify: Bool { !needsOwner && (danger || typed != nil) }
+
+    /// 按鈕本身就算確認了，不用再跳確認卡：網站沒標危險、不用打字、不用店主驗證碼。
+    /// 只給改得回來的動作用（回覆、接手、交給 Xena、結案、重新開啟、封存），見 ConsoleAPI.confirmOnTap
+    var confirmedByTap: Bool { !danger && typed == nil && !needsOwner }
+
+    /// 「確認執行」按得下去了沒（打的字對、驗證碼填了）
+    func canConfirm(typed text: String, ownerCode: String) -> Bool {
+        if needsOwner { return ownerCode.trimmingCharacters(in: .whitespaces).count >= 4 }
+        guard let word = typed else { return true }
+        return text.trimmingCharacters(in: .whitespaces) == word
+    }
+}
+
+extension AppModel {
+    /// 確認卡的「確認執行」：退款、刪除這類先驗證一次（Face ID）再送出。回 nil＝驗證沒過，什麼都沒做
+    func confirm(_ p: Proposal, typed: String, ownerCode: String) async throws -> ConsoleAPI.ConfirmOutcome? {
+        if p.needsVerify {
+            guard await lock.verify("確認：\(p.title)") else { return nil }
+        }
+        return try await api.confirm(p, typed: typed, ownerCode: ownerCode)
     }
 }
 

@@ -72,15 +72,16 @@ struct OrderDetailView: View {
         .xenaFocus("order-\(site)-\(orderID)", prompt: "幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
         .toolbar { AskXenaToolbar(model: model) }
         .task { await load() }
+        // 出貨、改物流單號：一張卡片做完（單號 → 網站的確認內容 → 確認執行）
         .sheet(isPresented: $shipping) {
-            ShipSheet { tracking in
-                Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "shipped", trackingNumber: tracking) } }
-            }
+            ShipSheet(propose: { tracking in
+                try await model.api.proposeOrderUpdate(site: site, id: orderID, status: "shipped", trackingNumber: tracking)
+            }, onDone: { finished($0) })
         }
         .sheet(isPresented: $editingTracking) {
-            ShipSheet(editing: detail?.trackingNumber ?? "") { tracking in
-                Task { await propose { try await model.api.proposeOrderUpdate(site: site, id: orderID, trackingNumber: tracking ?? "") } }
-            }
+            ShipSheet(editing: detail?.trackingNumber ?? "", propose: { tracking in
+                try await model.api.proposeOrderUpdate(site: site, id: orderID, trackingNumber: tracking ?? "")
+            }, onDone: { finished($0) })
         }
         .sheet(isPresented: $refunding) {
             RefundSheet(totalCents: (detail?.totalCents ?? 0) - (detail?.refundCents ?? 0)) { amount, note in
@@ -88,11 +89,16 @@ struct OrderDetailView: View {
             }
         }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
-            model.show(result["refundLabel"]?.string.map { "已退款 \($0)" } ?? "已更新訂單")
-            Task {
-                await load()
-                await model.refreshAll()
-            }
+            finished(result)
+        }
+    }
+
+    /// 改好了（出貨、完成、退款、確認收款）：說一聲、重新讀這張和首頁
+    private func finished(_ result: JSONValue) {
+        model.show(result["refundLabel"]?.string.map { "已退款 \($0)" } ?? "已更新訂單")
+        Task {
+            await load()
+            await model.refreshAll()
         }
     }
 
@@ -452,46 +458,193 @@ struct OrderDetailView: View {
     }
 }
 
-/// 標記出貨：可以順便填物流單號
-private struct ShipSheet: View {
+/// 出貨（或改物流單號）：同一張卡片做完——填物流單號、按「下一步」，網站的確認內容就出現在下面，按「確認執行」才改。
+/// 網站標危險、要打字、要店主核准的照樣要（和 ConfirmSheet 同一套 ProposalForm、同一個確認）。訂單頁、訂單清單長按共用
+struct ShipSheet: View {
     /// 已經出貨、改單號：現在的單號（nil＝標記出貨）
     var editing: String?
-    var onSubmit: (String?) -> Void
+    /// 跟網站要確認內容（帶物流單號；nil＝沒填）
+    let propose: (String?) async throws -> ConsoleAPI.WriteOutcome
+    /// 改好了（網站回的結果）
+    let onDone: (JSONValue) -> Void
+
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var tracking = ""
+    /// 網站的確認內容（按了「下一步」才有；改單號就拿掉重來）
+    @State private var proposal: Proposal?
+    @State private var typed = ""
+    @State private var ownerCode = ""
+    @State private var busy = false
+    @State private var error: String?
+    @State private var failed = 0
     @FocusState private var focused: Bool
+    @FocusState private var confirmFocused: Bool
+
+    private var trimmed: String { tracking.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                Headline(editing == nil ? "標記已出貨" : "物流單號", role: .h2)
-                FieldBlock(label: "物流單號（選填）", hint: "黑貓的單號填了之後，網站每 15 分鐘自動更新貨態", focused: focused) {
-                    TextField("例如黑貓的託運單號", text: $tracking)
-                        .keyboardType(.asciiCapable)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .focused($focused)
-                        .fieldText()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if let proposal {
+                        trackingSummary
+                        ProposalForm(proposal: proposal, typed: $typed, ownerCode: $ownerCode, focused: $confirmFocused, error: error)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else {
+                        trackingForm
+                    }
                 }
-                Text("下一步會出網站的確認，按了才會改。")
-                    .textRole(.xs)
-                    .foregroundStyle(Theme.muted)
-                Spacer()
-                Button("下一步") {
-                    let t = tracking.trimmingCharacters(in: .whitespaces)
-                    dismiss()
-                    onSubmit(t.isEmpty ? nil : t)
-                }
-                .buttonStyle(.brand(.accent, size: .lg, fullWidth: true, arrow: true))
+                .padding(24)
+                .frame(maxWidth: Metric.readable, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(24)
+            .scrollDismissesKeyboard(.interactively)
             .background { Theme.sheet.ignoresSafeArea() }
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .disabled(busy)
+                }
+            }
         }
-        .presentationDetents([.height(380)])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(busy)
+        .haptic(.error, trigger: failed)
+        .animation(Motion.ease, value: proposal == nil)
         .onAppear {
             if let editing, tracking.isEmpty { tracking = editing }
             focused = true
+        }
+    }
+
+    /// 第一步：物流單號
+    private var trackingForm: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Headline(editing == nil ? "標記已出貨" : "物流單號", role: .h2)
+            FieldBlock(label: "物流單號（選填）", hint: "黑貓的單號填了之後，網站每 15 分鐘自動更新貨態", focused: focused) {
+                TextField("例如黑貓的託運單號", text: $tracking)
+                    .keyboardType(.asciiCapable)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.next)
+                    .onSubmit { Task { await ask() } }
+                    .focused($focused)
+                    .fieldText()
+            }
+            Text("按「下一步」，網站的確認內容會出現在這裡，按「確認執行」才會改。")
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+            if let error {
+                ErrorNote(message: error)
+            }
+        }
+    }
+
+    /// 第二步的上面：填的單號，可以回去改
+    private var trackingSummary: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("物流單號")
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
+                Text(trimmed.isEmpty ? "沒有填" : trimmed)
+                    .font(.system(size: 15, weight: .medium, design: .monospaced))
+                    .foregroundStyle(trimmed.isEmpty ? Theme.muted : Theme.ink)
+            }
+            Spacer(minLength: 8)
+            Button("改") {
+                // 單號改了，網站的確認內容要重拿
+                proposal = nil
+                typed = ""
+                ownerCode = ""
+                error = nil
+                focused = true
+            }
+            .buttonStyle(.brand(.ghost, size: .sm))
+            .disabled(busy)
+        }
+        .padding(14)
+        .overlay { RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Theme.line, lineWidth: 1) }
+    }
+
+    private var bottomBar: some View {
+        Group {
+            if let proposal {
+                Button {
+                    Task { await run(proposal) }
+                } label: {
+                    HStack(spacing: 8) {
+                        if busy { ProgressView().controlSize(.small).tint(Theme.onAccent) }
+                        Text(proposal.needsOwner ? "送出驗證碼" : "確認執行")
+                    }
+                }
+                .buttonStyle(.brand(proposal.danger ? .danger : .accent, size: .lg, fullWidth: true))
+                .disabled(!proposal.canConfirm(typed: typed, ownerCode: ownerCode) || busy)
+                .keyboardShortcut(.return, modifiers: .command)
+            } else {
+                Button {
+                    Task { await ask() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if busy { ProgressView().controlSize(.small).tint(Theme.onAccent) }
+                        Text("下一步")
+                    }
+                }
+                .buttonStyle(.brand(.accent, size: .lg, fullWidth: true, arrow: true))
+                .disabled(busy)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(Theme.sheet)
+        .overlay(alignment: .top) { Rule() }
+    }
+
+    /// 跟網站要確認內容（寫入的第一步，不會改任何東西）
+    private func ask() async {
+        guard !busy, proposal == nil else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            switch try await propose(trimmed.isEmpty ? nil : trimmed) {
+            case .needsConfirmation(let p):
+                focused = false
+                proposal = p
+                if p.typed != nil || p.needsOwner { confirmFocused = true }
+            case .done(let result):
+                // 網站沒要確認（已經改好了）
+                onDone(result)
+                dismiss()
+            }
+        } catch {
+            failed += 1
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// 確認執行（危險、要打字的先驗 Face ID，和 ConfirmSheet 一樣）
+    private func run(_ p: Proposal) async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            guard let outcome = try await model.confirm(p, typed: typed, ownerCode: ownerCode) else { return }
+            switch outcome {
+            case .done(let result):
+                onDone(result)
+                dismiss()
+            case .needsOwner(let next):
+                withAnimation(Motion.ease) { proposal = next }
+                confirmFocused = true
+            }
+        } catch {
+            failed += 1
+            self.error = error.localizedDescription
         }
     }
 }

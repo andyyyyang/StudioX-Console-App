@@ -298,6 +298,8 @@ private struct StatementSheet: View {
     @State private var adjustment = ""
     @State private var note = ""
     @State private var working = false
+    /// 作廢、標成已付款：確認選單（存的是要做的動作）＋Face ID（2 分鐘內驗證過就不再跳）
+    @State private var asking: String?
 
     private var canManage: Bool { model.can("platform.manage") }
 
@@ -345,6 +347,13 @@ private struct StatementSheet: View {
             .background { Theme.sheet.ignoresSafeArea() }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("好") { dismiss() } } }
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog(Self.question(asking), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }), titleVisibility: .visible, presenting: asking) { action in
+                Button(action == "void" ? "作廢" : "標成已付款", role: action == "void" ? ButtonRole.destructive : nil) {
+                    Task { await confirmed(action) }
+                }
+            } message: { action in
+                Text(action == "void" ? "作廢之後這張帳單就不算了，客戶不用付。" : "確定客戶已經付了這張帳單？")
+            }
         }
         .onAppear {
             adjustment = statement.adjustmentMicros == 0 ? "" : String(Int((Double(statement.adjustmentMicros) / 1_000_000).rounded()))
@@ -362,12 +371,12 @@ private struct StatementSheet: View {
                 Button("存草稿") { Task { await act("save", "存好了") } }
                     .buttonStyle(.brand(.ghost, size: .md, fullWidth: true))
             case "issued":
-                Button("標成已付款") { Task { await act("paid", "標成已付款") } }
+                Button("標成已付款") { asking = "paid" }
                     .buttonStyle(.brand(.accent, size: .lg, fullWidth: true))
                 HStack(spacing: 10) {
                     Button("改回草稿") { Task { await act("reopen", "改回草稿了") } }
                         .buttonStyle(.brand(.ghost, size: .md, fullWidth: true))
-                    Button("作廢") { Task { await act("void", "作廢了") } }
+                    Button("作廢") { asking = "void" }
                         .buttonStyle(.brand(.quiet, size: .md, fullWidth: true))
                 }
             default:
@@ -389,10 +398,17 @@ private struct StatementSheet: View {
         .padding(.vertical, 9)
     }
 
+    /// 作廢、標成已付款（錢的事）：確認選單按了之後再驗證一次（Face ID）才做
+    private func confirmed(_ action: String) async {
+        let what = action == "void" ? "作廢「\(statement.org)」的帳單" : "把「\(statement.org)」的帳單標成已付款"
+        await model.verified(what) { await act(action, action == "void" ? "作廢了" : "標成已付款") }
+    }
+
+    private static func question(_ action: String?) -> String {
+        action == "void" ? "作廢這張帳單？" : "標成已付款？"
+    }
+
     private func act(_ action: String, _ done: String) async {
-        if action == "void" || action == "paid" {
-            guard await model.lock.verify(action == "void" ? "作廢帳單" : "標成已付款") else { return }
-        }
         working = true
         defer { working = false }
         let ok = await model.adminRun(done) {

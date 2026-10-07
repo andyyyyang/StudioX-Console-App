@@ -33,6 +33,8 @@ struct CollectionView: View {
     @State private var error: String?
     /// 上一次用來讀清單的搜尋字（一樣就不用再讀）
     @State private var loadedQuery = ""
+    /// 空的清單按「新增」：打開新增的畫面（和右上角的「＋」同一個）
+    @State private var creating = false
 
     var body: some View {
         ScrollView {
@@ -64,6 +66,13 @@ struct CollectionView: View {
                     .keyboardShortcut("n", modifiers: .command)
                 }
             }
+        }
+        .navigationDestination(isPresented: $creating) {
+            RecordEditor(site: site, entity: entity, mode: .create)
+        }
+        .onChange(of: creating) { _, isOpen in
+            // 新增完回來：清單重新讀
+            if !isOpen { Task { await load() } }
         }
         .task(id: filter) { await load() }
         .task(id: query) {
@@ -168,7 +177,11 @@ struct CollectionView: View {
         } else if let error {
             ErrorNote(message: error) { Task { await load() } }
         } else if shown.isEmpty {
-            EmptyState(title: query.isEmpty ? "還沒有\(schema?.label ?? "資料")" : "找不到「\(query)」", message: schema?.canCreate == true && query.isEmpty ? "右上角的「＋」可以新增。" : nil)
+            if schema?.canCreate == true && query.isEmpty {
+                EmptyState(title: "還沒有\(schema?.label ?? "資料")", actionTitle: "新增\(schema?.label ?? "")", action: { creating = true })
+            } else {
+                EmptyState(title: query.isEmpty ? "還沒有\(schema?.label ?? "資料")" : "找不到「\(query)」")
+            }
         } else {
             switch entity {
             case "product", "bundle":

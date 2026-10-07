@@ -961,10 +961,14 @@ extension View {
 
 // MARK: - 空狀態、錯誤、載入中
 
+/// 空的：一個記號、一句話、說明；可以放一顆按鈕直接去做（「新增一張」），不用叫人去找別的地方
 struct EmptyState: View {
     var glyph = "✳"
     let title: String
     var message: String?
+    /// 按鈕的字（和 action 一起給才會出現）
+    var actionTitle: String?
+    var action: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -978,6 +982,11 @@ struct EmptyState: View {
                 Text(message)
                     .textRole(.small)
                     .foregroundStyle(Theme.muted)
+            }
+            if let actionTitle, let action {
+                Button(action: action) { Text(actionTitle) }
+                    .buttonStyle(.brand(.primary, size: .sm, arrow: true))
+                    .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

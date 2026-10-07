@@ -93,7 +93,8 @@ struct KeysView: View {
     }
 }
 
-/// 一把金鑰：測試、編輯、停用、刪除
+/// 一把金鑰：測試、編輯、停用、刪除。
+/// 刪除收不回來：確認選單＋Face ID（2 分鐘內驗證過就不再跳）；停用改得回來：還有網站在用時問一次，沒在用就直接停
 private struct KeyDetailSheet: View {
     let vault: KeyVault
     let key: PlatformKey
@@ -104,6 +105,8 @@ private struct KeyDetailSheet: View {
     @State private var test: (ok: Bool, message: String)?
     @State private var editing = false
     @State private var confirmDelete = false
+    /// 停用還有網站在用的金鑰：問一次
+    @State private var confirmDisable = false
 
     var body: some View {
         NavigationStack {
@@ -138,8 +141,14 @@ private struct KeyDetailSheet: View {
                     HStack(spacing: 10) {
                         Button("編輯") { editing = true }
                             .buttonStyle(.brand(.ghost, size: .md))
-                        Button(key.disabled ? "啟用" : "停用") { Task { await toggleDisabled() } }
-                            .buttonStyle(.brand(.ghost, size: .md))
+                        Button(key.disabled ? "啟用" : "停用") {
+                            if !key.disabled && key.uses > 0 {
+                                confirmDisable = true
+                            } else {
+                                Task { await toggleDisabled() }
+                            }
+                        }
+                        .buttonStyle(.brand(.ghost, size: .md))
                         Spacer()
                         Button("刪除", role: .destructive) { confirmDelete = true }
                             .buttonStyle(.brand(.quiet, size: .md))
@@ -163,9 +172,16 @@ private struct KeyDetailSheet: View {
                 }
             }
             .confirmationDialog("刪除「\(key.label)」？", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("刪除", role: .destructive) { Task { await delete() } }
+                Button("刪除", role: .destructive) {
+                    Task { await model.verified("刪除金鑰「\(key.label)」") { await delete() } }
+                }
             } message: {
                 Text("刪掉就救不回來，要用的時候得重新貼一次金鑰。")
+            }
+            .confirmationDialog("停用「\(key.label)」？", isPresented: $confirmDisable, titleVisibility: .visible) {
+                Button("停用", role: .destructive) { Task { await toggleDisabled() } }
+            } message: {
+                Text("還有 \(key.uses) 處在用這把金鑰：停用後那些服務會停下來，直到你再啟用。")
             }
         }
     }
@@ -181,10 +197,8 @@ private struct KeyDetailSheet: View {
         }
     }
 
+    /// 停用、啟用（改得回來，不用 Face ID）
     private func toggleDisabled() async {
-        if !key.disabled, key.uses > 0 {
-            guard await model.lock.verify("停用還在使用的金鑰") else { return }
-        }
         // PATCH 要帶完整的非密鑰欄位（沒帶的會被當成清掉）：先讀出來再送回去
         let ok = await model.adminRun(key.disabled ? "啟用了" : "停用了") {
             let current = try await model.api.admin("platform/keys/\(key.id)")
@@ -199,8 +213,8 @@ private struct KeyDetailSheet: View {
         }
     }
 
+    /// 刪掉（確認過了：確認選單＋Face ID）
     private func delete() async {
-        guard await model.lock.verify("刪除金鑰「\(key.label)」") else { return }
         let ok = await model.adminRun("刪掉了") {
             _ = try await model.api.admin("platform/keys/\(key.id)", method: "DELETE")
         }
@@ -211,7 +225,8 @@ private struct KeyDetailSheet: View {
     }
 }
 
-/// 新增或編輯一把金鑰：照供應商的欄位畫表單。編輯時密鑰欄位留空＝不變
+/// 新增或編輯一把金鑰：照供應商的欄位畫表單。編輯時密鑰欄位留空＝不變。
+/// 按「新增」「儲存」就是確認；只有換掉已經存著的密鑰（舊的救不回來）才再驗證一次 Face ID
 private struct KeyEditSheet: View {
     let vault: KeyVault
     /// nil＝新增
@@ -227,6 +242,13 @@ private struct KeyEditSheet: View {
 
     private var fields: [PlatformField] { vault.provider(provider)?.fields ?? [] }
 
+    /// 編輯時填了新的密鑰、而且原本就存著一把（舊的會被蓋掉）
+    private var replacesSecret: Bool {
+        fields.contains { f in
+            f.secret && filled[f.key] == true && !(values[f.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     private var valid: Bool {
         guard !provider.isEmpty else { return false }
         return fields.allSatisfy { f in
@@ -238,7 +260,9 @@ private struct KeyEditSheet: View {
         AdminSheet(title: editing == nil ? "新增金鑰" : "編輯金鑰",
                    subtitle: "送出之後金鑰就加密存在 console，這裡和網頁上都只看得到片段。",
                    action: editing == nil ? "新增" : "儲存", disabled: !valid || (editing != nil && !loaded)) {
-            guard await model.lock.verify(editing == nil ? "新增金鑰" : "修改金鑰") else { return false }
+            if let editing, replacesSecret {
+                guard await model.lock.verify("換掉「\(editing.label)」的金鑰") else { return false }
+            }
             return await model.adminRun(editing == nil ? "新增了金鑰" : "金鑰存好了") {
                 var v: [String: JSONValue] = [:]
                 for f in fields {

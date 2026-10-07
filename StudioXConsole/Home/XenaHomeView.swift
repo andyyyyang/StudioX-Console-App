@@ -368,7 +368,7 @@ private struct NotificationPrompt: View {
         VStack(alignment: .leading, spacing: 16) {
             Eyebrow("通知")
             Headline("有事我第一時間告訴你", role: .h3)
-            Text("客人在等回覆、對話轉給專人、有事等你決定時，我第一時間跟你說。哪些事要通知、什麼時候安靜，都可以在「我 → 通知」調整。")
+            Text("客人在等回覆、對話轉給專人、有事等你決定時，我第一時間跟你說。哪些事要通知、什麼時候安靜，都可以在「設定 → 通知」調整。")
                 .textRole(.small)
                 .foregroundStyle(Theme.ink2)
             HStack(spacing: 10) {

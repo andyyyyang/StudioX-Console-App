@@ -214,7 +214,8 @@ final class AppSettings {
         }
         appearance = value("appearance", Appearance.system)
         textSize = value("textSize", TextSize.standard)
-        greeting = value("xena.greeting", Greeting.launch)
+        // 預設每天說一次（第一次打開時一個字一個字說，之後直接顯示）
+        greeting = value("xena.greeting", Greeting.daily)
         pace = value("xena.pace", Pace.normal)
         orbMotion = defaults.object(forKey: "settings.xena.orbMotion") as? Bool ?? true
         haptics = defaults.object(forKey: "settings.haptics") as? Bool ?? true
@@ -266,7 +267,7 @@ final class AppSettings {
     func reset() {
         appearance = .system
         textSize = .standard
-        greeting = .launch
+        greeting = .daily
         pace = .normal
         orbMotion = true
         haptics = true
@@ -282,7 +283,7 @@ final class AppSettings {
     }
 
     var isDefault: Bool {
-        appearance == .system && textSize == .standard && greeting == .launch && pace == .normal
+        appearance == .system && textSize == .standard && greeting == .daily && pace == .normal
             && orbMotion && haptics && startTab == .today && hiddenSections.isEmpty
             && speakReplies && voiceID.isEmpty && voiceSource == .iphone && cloudVoice == .warm && aiGreeting && aiCommands
             && replySuggest == .auto

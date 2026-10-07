@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// 網站（手機的分頁）：每個網站一列，7 天訪客＋走勢；點進去是那個網站（概況＋所有可以管理的內容）。
-/// iPad 上網站直接列在側欄（MainView 的 TabSection），每個網站是一個 SiteWorkspace。
+/// 網站（手機的分頁）：後台人員最上面是「平台管理」；每個網站一列，7 天訪客＋走勢；點進去是那個網站（概況＋所有可以管理的內容）。
+/// iPad 上網站直接列在側欄（MainView 的 TabSection），每個網站是一個 SiteWorkspace。AI 連接器的網址在「設定」。
 struct SitesView: View {
     @Environment(AppModel.self) private var model
 
@@ -12,19 +12,7 @@ struct SitesView: View {
                 VStack(alignment: .leading, spacing: 40) {
                     PageHeader("網站", subtitle: summary)
                         .reveal()
-                    if model.sites.isEmpty {
-                        EmptyState(title: "目前沒有可以管理的網站", message: "收到邀請連結的話，直接打開連結就能加入網站。")
-                    } else {
-                        RuledList {
-                            ForEach(Array(model.sites.enumerated()), id: \.element.id) { index, site in
-                                NavigationLink(value: Route.site(site.id)) {
-                                    SiteRow(site: site)
-                                }
-                                .buttonStyle(.row)
-                                .reveal(index + 1)
-                            }
-                        }
-                    }
+                    // 後台人員：平台管理放第一個（iPad 在側欄的「StudioX」）
                     if model.canManageConsole {
                         VStack(alignment: .leading, spacing: 10) {
                             Eyebrow("StudioX Console")
@@ -36,7 +24,22 @@ struct SitesView: View {
                             }
                         }
                     }
-                    ConnectorCard()
+                    if model.sites.isEmpty {
+                        EmptyState(title: "目前沒有可以管理的網站", message: "收到邀請連結的話，直接打開連結就能加入網站。")
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if model.canManageConsole { Eyebrow("你的網站") }
+                            RuledList {
+                                ForEach(Array(model.sites.enumerated()), id: \.element.id) { index, site in
+                                    NavigationLink(value: Route.site(site.id)) {
+                                        SiteRow(site: site)
+                                    }
+                                    .buttonStyle(.row)
+                                    .reveal(index + 1)
+                                }
+                            }
+                        }
+                    }
                 }
                 .pageWidth()
                 .padding(.top, 24)
@@ -55,7 +58,7 @@ struct SitesView: View {
     }
 }
 
-/// 連接 Claude／ChatGPT（console 一個網址管所有網站；studiox-cms 的「AI → 連接外部 AI」）
+/// 連接 Claude／ChatGPT（console 一個網址管所有網站；studiox-cms 的「AI → 連接外部 AI」）。放在「設定 → Console」
 struct ConnectorCard: View {
     @State private var copied = false
 
@@ -175,6 +178,8 @@ struct SiteWorkspace: View {
             TrafficView(siteID: site.id)
         case .search:
             SearchConsoleView(siteID: site.id)
+        case .report:
+            OpsReportView(siteID: site.id)
         case .entity(let key):
             EntityRoot(site: site.id, entity: key)
         }
@@ -183,11 +188,11 @@ struct SiteWorkspace: View {
 
 /// iPad 側欄的一項
 enum SiteSection: Hashable {
-    case overview, traffic, search
+    case overview, report, traffic, search
     case entity(String)
 }
 
-/// iPad 的側欄：概況、流量、Google 搜尋，以及照網站欄位定義分好組的內容
+/// iPad 的側欄：概況、營運報表、流量、Google 搜尋（和手機網站頁的「管理」同一組），以及照網站欄位定義分好組的內容
 private struct SiteSectionSidebar: View {
     let site: SiteSummary
     @Binding var selection: SiteSection?
@@ -199,6 +204,10 @@ private struct SiteSectionSidebar: View {
             Section {
                 Label { Text("概況") } icon: { HeroIcon("squares-2x2", size: 18) }
                     .tag(SiteSection.overview)
+                if site.tools.contains("ops_report") {
+                    Label { Text("營運報表") } icon: { HeroIcon("presentation-chart-line", size: 18) }
+                        .tag(SiteSection.report)
+                }
                 if site.hasTraffic {
                     Label { Text("流量") } icon: { HeroIcon("chart-bar", size: 18) }
                         .tag(SiteSection.traffic)

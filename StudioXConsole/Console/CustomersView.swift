@@ -220,6 +220,7 @@ struct ConsoleSiteView: View {
     @State private var editing = false
     @State private var secret: SiteSecret?
     @State private var invite: InviteResult?
+    /// 重新產生密鑰、移出成員都收不回來：確認選單＋Face ID（2 分鐘內驗證過就不再跳）
     @State private var confirmRotate = false
     @State private var removing: ConsoleSiteDetail.Member?
     @State private var syncing = false
@@ -263,12 +264,16 @@ struct ConsoleSiteView: View {
         }
         .sheet(item: $secret) { SiteSecretSheet(secret: $0) }
         .confirmationDialog("重新產生登入密鑰？", isPresented: $confirmRotate, titleVisibility: .visible) {
-            Button("重新產生", role: .destructive) { Task { await rotate() } }
+            Button("重新產生", role: .destructive) {
+                Task { await model.verified("重新產生網站的登入密鑰") { await rotate() } }
+            }
         } message: {
             Text("舊的密鑰會立刻失效：網站要換上新的環境變數之前，大家都沒辦法用 StudioX 登入那個網站。")
         }
         .confirmationDialog("把這個人移出網站？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible, presenting: removing) { m in
-            Button("移出 \(m.name ?? m.email)", role: .destructive) { Task { await remove(m) } }
+            Button("移出 \(m.name ?? m.email)", role: .destructive) {
+                Task { await model.verified("把 \(m.name ?? m.email) 移出網站") { await remove(m) } }
+            }
         } message: { _ in
             Text("他就不能再管理這個網站（他的 StudioX 帳號還在）。")
         }
@@ -445,8 +450,8 @@ struct ConsoleSiteView: View {
         await refresh()
     }
 
+    /// 移出（確認過了：確認選單＋Face ID）
     private func remove(_ m: ConsoleSiteDetail.Member) async {
-        guard await model.lock.verify("把 \(m.name ?? m.email) 移出網站") else { return }
         await model.adminRun("已經把 \(m.name ?? m.email) 移出") {
             _ = try await model.api.admin("console/sites/\(siteID)/members", method: "DELETE", body: ["userId": .string(m.userID)])
         }
@@ -469,8 +474,8 @@ struct ConsoleSiteView: View {
         await refresh()
     }
 
+    /// 重新產生（確認過了：確認選單＋Face ID）
     private func rotate() async {
-        guard await model.lock.verify("重新產生網站的登入密鑰") else { return }
         var created: SiteSecret?
         await model.adminRun(nil) {
             let r = try await model.api.admin("console/sites/\(siteID)", method: "POST", body: ["action": "rotate"])
@@ -621,11 +626,9 @@ private struct EditSiteSheet: View {
     @State private var supportDesk = false
 
     var body: some View {
+        // 停用改得回來（再打開「使用中」）：按「儲存」就是確認，不用再驗證
         AdminSheet(title: "編輯網站", action: "儲存", disabled: name.trimmingCharacters(in: .whitespaces).isEmpty) {
-            if !active && detail.active {
-                guard await model.lock.verify("停用「\(detail.name)」") else { return false }
-            }
-            return await model.adminRun("存好了") {
+            await model.adminRun("存好了") {
                 var body: [String: JSONValue] = [:]
                 if name != detail.name { body["name"] = .string(name.trimmingCharacters(in: .whitespaces)) }
                 let site = siteURL.trimmingCharacters(in: .whitespaces)

@@ -126,15 +126,24 @@ struct ConsolePageView: View {
     }
 }
 
-/// iPad 側欄的「平台管理」：左邊選一頁、右邊是那一頁（往下點的在右邊疊上去）
+/// iPad 側欄的「平台管理」：左邊選一頁、右邊是那一頁（往下點的在右邊疊上去）。
+/// 選哪一頁記在 AppModel.consoleSection：通知、深連結（open(.console(…))）打開的也選在左邊對應的那一項
 struct ConsoleWorkspace: View {
     @Environment(AppModel.self) private var model
-    @State private var selection: ConsolePage? = .customers
     @State private var visibility: NavigationSplitViewVisibility = .all
+
+    /// 左邊點了別的一頁：右邊從那一頁開始（不帶著上一頁點進去的）
+    private var selection: Binding<ConsolePage?> {
+        Binding(get: { model.consoleSection }, set: { page in
+            guard let page, page != model.consoleSection else { return }
+            model.consoleSection = page
+            model.consolePath = []
+        })
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility) {
-            List(selection: $selection) {
+            List(selection: selection) {
                 ForEach(Array(ConsoleSection.groups.enumerated()), id: \.offset) { _, group in
                     let items = group.items.filter { $0.visible(model) }
                     if !items.isEmpty {
@@ -155,18 +164,19 @@ struct ConsoleWorkspace: View {
             .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 320)
         } detail: {
             NavigationStack(path: Bindable(model).consolePath) {
-                ConsolePageView(page: selection ?? .customers)
+                ConsolePageView(page: model.consoleSection)
                     .navigationDestination(for: Route.self) { RouteView(route: $0) }
             }
-            .id(selection)
+            .id(model.consoleSection)
             .brandSplitView()
         }
         .navigationSplitViewStyle(.balanced)
         .onAppear {
             // 沒有「客戶與網站」權限的人：選第一個看得到的
             let visible = ConsoleSection.all.filter { $0.visible(model) }
-            if let s = selection, !visible.contains(where: { $0.page == s }) {
-                selection = visible.first?.page
+            let current = model.consoleSection
+            if !visible.contains(where: { $0.page == current }), let first = visible.first {
+                model.consoleSection = first.page
             }
         }
     }
@@ -175,6 +185,14 @@ struct ConsoleWorkspace: View {
 // MARK: - 共用
 
 extension AppModel {
+    /// 收不回來的動作（刪除金鑰、重新產生密鑰、作廢帳單、移除成員、撤銷連接器）：
+    /// 畫面先出確認選單寫清楚後果（Face ID 掃臉時不會顯示要做什麼，不能只靠它），
+    /// 按了確認再驗證一次（Face ID；2 分鐘內驗證過、沒離開 App 就不再跳）才做
+    func verified(_ reason: String, then work: () async -> Void) async {
+        guard await lock.verify(reason) else { return }
+        await work()
+    }
+
     /// 平台管理的寫入：成功顯示 done、失敗顯示原因。回傳有沒有成功
     @discardableResult
     func adminRun(_ done: String?, _ work: () async throws -> Void) async -> Bool {

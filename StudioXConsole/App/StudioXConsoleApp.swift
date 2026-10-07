@@ -20,9 +20,9 @@ struct StudioXConsoleApp: App {
                 .appSettingsAppearance()
         }
         .commands {
-            // iPad 的鍵盤與選單列：⌘1–⌘5 切換、⌘K 找 Xena、⌘R 重新整理
+            // iPad 的鍵盤與選單列：⌘1–⌘4 切換分頁（名字和分頁一樣）、⌘K 找 Xena、⌘R 重新整理
             CommandMenu("前往") {
-                Button("Xena") { model.tab = .xena }
+                Button("今天") { model.tab = .xena }
                     .keyboardShortcut("1")
                 Button("網站") { model.goToSites() }
                     .keyboardShortcut("2")

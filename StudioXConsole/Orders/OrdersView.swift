@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// 訂單（網站後台的「訂單管理」）：有商店的網站。預設看「已付款、等出貨」，可以一次選好幾張標記出貨。
-/// 改狀態、退款一律先出確認（網站的兩步驟確認），按了才執行。
+/// 訂單（網站後台的「訂單管理」）：有商店的網站（記得上次看的是哪一個）。預設看「已付款、等出貨」，可以一次選好幾張標記出貨，
+/// 也可以長按一張直接出貨。改狀態、退款一律先出確認（網站的兩步驟確認），按了才執行。
 /// iPad：左邊清單、右邊訂單內容。
 struct OrdersView: View {
     @Environment(AppModel.self) private var model
@@ -16,8 +16,8 @@ struct OrdersView: View {
             } detail: {
                 NavigationStack(path: Bindable(model).ordersPath) {
                     Group {
-                        if let picked = model.ordersPicked, let site = model.ordersSite ?? model.orderSites.first?.id {
-                            OrderDetailView(site: site, orderID: picked)
+                        if let picked = model.ordersPicked, let site = model.currentOrdersSite {
+                            OrderDetailView(site: site.id, orderID: picked)
                                 .id(picked)
                         } else {
                             VStack(alignment: .leading, spacing: 14) {
@@ -63,6 +63,8 @@ struct OrdersList: View {
     /// 下一頁（更早的訂單）的 before；nil＝沒有更早的了
     @State private var next: String?
     @State private var loadingMore = false
+    /// 長按一張「出貨」：打開出貨卡
+    @State private var shippingOrder: OrderSummary?
 
     enum Filter: String, CaseIterable, Identifiable {
         case toShip = "paid"
@@ -86,9 +88,8 @@ struct OrdersList: View {
         }
     }
 
-    private var site: SiteSummary? {
-        model.site(model.ordersSite ?? "") ?? model.orderSites.first
-    }
+    /// 上次看的網站（不在了就是第一個有商店的）
+    private var site: SiteSummary? { model.currentOrdersSite }
 
     private var filter: Filter { Filter(rawValue: model.ordersStatus) ?? .toShip }
 
@@ -173,6 +174,18 @@ struct OrdersList: View {
                 await load()
                 await model.refreshAll()
             }
+        }
+        // 長按「出貨」：同一張出貨卡（單號、網站的確認、確認執行）
+        .sheet(item: $shippingOrder) { order in
+            ShipSheet(propose: { tracking in
+                try await model.api.proposeOrderUpdate(site: order.site, id: order.id, status: "shipped", trackingNumber: tracking)
+            }, onDone: { _ in
+                model.show("#\(order.number) 標成已出貨了")
+                Task {
+                    await load()
+                    await model.refreshAll()
+                }
+            })
         }
         .task(id: "\(site?.id ?? "")|\(filter.rawValue)|\(query)") { await load() }
         // 搜尋：打字停 0.35 秒才去搜
@@ -261,11 +274,13 @@ struct OrdersList: View {
                     .background(picked.wrappedValue == order.id ? Theme.accentSoft : .clear)
             }
             .buttonStyle(.row)
+            .modifier(ShipMenu(order: order) { shippingOrder = order })
         } else {
             NavigationLink(value: Route.order(site: order.site, id: order.id)) {
                 OrderRow(order: order)
             }
             .buttonStyle(.row)
+            .modifier(ShipMenu(order: order) { shippingOrder = order })
         }
     }
 
@@ -337,6 +352,23 @@ struct OrdersList: View {
             }
         } catch {
             model.show(error.localizedDescription, tone: .danger)
+        }
+    }
+}
+
+/// 等出貨的訂單長按：「出貨」（打開出貨卡）；其他狀態不加選單
+private struct ShipMenu: ViewModifier {
+    let order: OrderSummary
+    let ship: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if order.status == .paid {
+            content.contextMenu {
+                Button("出貨", systemImage: "shippingbox", action: ship)
+            }
+        } else {
+            content
         }
     }
 }

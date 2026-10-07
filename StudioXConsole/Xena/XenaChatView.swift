@@ -43,6 +43,10 @@ struct XenaChatView: View {
                         if session.phase == .thinking {
                             ThinkingRow()
                         }
+                        // 她還在回答時又交代的：這一句答完接著問
+                        ForEach(Array(session.queue.enumerated()), id: \.offset) { _, queued in
+                            QueuedRow(text: queued.text)
+                        }
                         Color.clear.frame(height: 1).id(bottomID)
                     }
                     .padding(.horizontal, 16)
@@ -715,6 +719,24 @@ private struct ThinkingRow: View {
         }
         .font(.system(size: 12.5))
         .foregroundStyle(Theme.muted)
+    }
+}
+
+/// 排著的一句：她答完這句就接著問
+private struct QueuedRow: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "clock")
+            Text("答完接著問：\(text)")
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.system(size: 12.5))
+        .foregroundStyle(Theme.muted)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityElement(children: .combine)
     }
 }
 

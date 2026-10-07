@@ -337,8 +337,20 @@ struct XenaConversationView: View {
         } label: { HeroIcon("ellipsis-horizontal") }
     }
 
+    /// 接手、交給 Xena、結案、重新開啟：改得回來，按了就做（網站標危險、要打字的照樣跳確認）
     private func act(_ action: String) {
-        Task { await propose { try await model.api.proposeXena(site: site, id: conversationID, action: action) } }
+        Task { await propose(done: Self.doneText(action)) { try await model.api.proposeXena(site: site, id: conversationID, action: action) } }
+    }
+
+    /// 做完說的話
+    private static func doneText(_ action: String) -> String {
+        switch action {
+        case "takeover": "你接手了，Xena 先停止回答"
+        case "release": "交給 Xena 繼續回答了"
+        case "close": "結案了"
+        case "reopen": "重新開啟了"
+        default: "已更新"
+        }
     }
 
     private func askXenaForDraft() {
@@ -756,35 +768,23 @@ struct XenaConversationView: View {
         }
     }
 
-    /// 回傳 true：回覆已經送出（不用再確認）
+    /// 送出回覆、接手、交給 Xena、結案、重新開啟：按下按鈕就是確認了，夠輕的直接做（ConsoleAPI.confirmOnTap）；
+    /// 網站標危險、要打字、要店主核准的照樣跳確認。回傳 true：已經做了（不用再確認）
     @discardableResult
-    private func propose(reply: Bool = false, _ make: () async throws -> ConsoleAPI.WriteOutcome) async -> Bool {
+    private func propose(reply: Bool = false, done: String? = nil, _ make: () async throws -> ConsoleAPI.WriteOutcome) async -> Bool {
         working = true
         defer { working = false }
         do {
-            switch try await make() {
+            let proposed = try await make()
+            switch try await model.api.confirmOnTap(proposed) {
             case .needsConfirmation(let p):
-                // 送出回覆：按「送出」就是確認了，不再跳一次確認（接手、結案這些動作照樣確認）
-                if reply, p.typed == nil, !p.danger {
-                    switch try await model.api.confirm(p, typed: nil) {
-                    case .done(let result):
-                        announceReply(result)
-                        await load()
-                        Task { await model.refreshAll() }
-                        return true
-                    case .needsOwner(let next):
-                        replying = true
-                        proposal = next
-                        return false
-                    }
-                }
                 replying = reply
                 proposal = p
                 return false
-            case .done:
-                if reply { draft = "" }
-                model.show("已更新")
+            case .done(let result):
+                if reply { announceReply(result) } else { model.show(done ?? "已更新") }
                 await load()
+                Task { await model.refreshAll() }
                 return true
             }
         } catch {

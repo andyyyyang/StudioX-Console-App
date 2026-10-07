@@ -64,9 +64,9 @@ struct AccountView: View {
                             }
                         }
 
-                        // Xena：首頁開場要不要說話、說多快、水珠會不會動
+                        // Xena：首頁開場要不要說話、說多快、水珠會不會動（她動手前一律先問你：寫在旁邊，不是一個設定）
                         VStack(alignment: .leading, spacing: 20) {
-                            SectionHead("Xena", role: .h3)
+                            SectionHead("Xena", aside: "她動手改東西之前一律先問你；退款、刪除還要打字確認。", role: .h3)
                             RuledList {
                                 ChoiceRow(label: "首頁開場說今天的狀況", help: settings.greeting.help,
                                           options: AppSettings.Greeting.allCases, selection: $settings.greeting) { $0.label }
@@ -75,9 +75,6 @@ struct AccountView: View {
                                     .opacity(settings.greeting == .quiet ? 0.45 : 1)
                                 ToggleRow(label: "水珠會動", help: "關掉比較省電。", isOn: $settings.orbMotion)
                                     .padding(.vertical, 10)
-                                row("問問Xena") { model.showXena = true }
-                                row("動手改東西之前", value: "一律先問你", action: nil)
-                                row("退款、刪除", value: "要打字確認", action: nil)
                             }
                         }
 
@@ -222,11 +219,11 @@ struct AccountView: View {
                             }
                         }
 
+                        // 網頁版 console（網站、成員、外部 AI 的授權都在同一頁）、AI 連接器的網址（只放這裡）
                         VStack(alignment: .leading, spacing: 20) {
                             SectionHead("Console", role: .h3)
                             RuledList {
-                                row("網站與成員") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
-                                row("連接外部 AI 的授權") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
+                                row("網站、成員與 AI 授權", value: "網頁版") { openURL(ConsoleConfig.baseURL.appending(path: "sites")) }
                                 row("版本", value: version, action: nil)
                             }
                             ConnectorCard()

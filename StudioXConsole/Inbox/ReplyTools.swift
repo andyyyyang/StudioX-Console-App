@@ -449,7 +449,8 @@ struct CameraPicker: UIViewControllerRepresentable {
 
 // MARK: - 折價券
 
-/// 附上一張現有的折價券：做成行銷卡片（標題、說明、優惠碼、按鈕），附上之後還可以改
+/// 附上一張現有的折價券：做成行銷卡片（標題、說明、優惠碼、按鈕），附上之後還可以改。
+/// 沒有合適的可以就地新增一張（和「網站 → 折價券」同一個編輯畫面），新增完回到這裡選
 struct CouponPickerSheet: View {
     let site: String
     let pick: (StaffCard) -> Void
@@ -458,6 +459,9 @@ struct CouponPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var rows: [RecordSummary]?
     @State private var error: String?
+    /// 這個人在這個網站能新增折價券
+    @State private var canCreate = false
+    @State private var creating = false
 
     var body: some View {
         NavigationStack {
@@ -468,7 +472,11 @@ struct CouponPickerSheet: View {
                         .foregroundStyle(Theme.ink2)
                     if let rows {
                         if rows.isEmpty {
-                            EmptyState(title: "沒有啟用中的折價券", message: "可以在「網站 → 折價券」新增一張。")
+                            if canCreate {
+                                EmptyState(title: "沒有啟用中的折價券", message: "新增一張，回到這裡就能附上。", actionTitle: "新增折價券", action: { creating = true })
+                            } else {
+                                EmptyState(title: "沒有啟用中的折價券", message: "請網站負責人新增一張。")
+                            }
                         } else {
                             RuledList {
                                 ForEach(rows) { row in
@@ -494,9 +502,25 @@ struct CouponPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                if canCreate {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { creating = true } label: { HeroIcon("plus", size: 20) }
+                            .accessibilityLabel("新增折價券")
+                    }
+                }
+            }
+            .navigationDestination(isPresented: $creating) {
+                RecordEditor(site: site, entity: "coupon", mode: .create)
+            }
+            .onChange(of: creating) { _, isOpen in
+                // 新增完回來：清單重新讀（新的那張就在裡面）
+                if !isOpen { Task { await load() } }
             }
         }
-        .task { await load() }
+        .task {
+            await load()
+            canCreate = await model.schema(for: site)?.entity("coupon")?.canCreate == true
+        }
     }
 
     private func load() async {

@@ -3,10 +3,13 @@ import SwiftUI
 /// 寫一封新信（收件匣右上角的筆）：從哪個網站寄、收件人、主旨、內文；
 /// 「Xena 照重點寫」把內文當重點寫成一封信，「潤飾」把寫好的改得更自然。信末自動附上你的簽名（下面看得到）。
 /// 按寄出先跳確認（收件人、主旨、全文、簽名都攤開）；寄出後開成一條客服信，對方回信會接回那條對話，
-/// 同一個網站的客服人員都看得到、都能回。只列網站後台有寄信功能（send_email）的網站。
+/// 同一個網站的客服人員都看得到、都能回。只列網站後台有寄信功能（send_email）的網站；記得上次從哪個網站寄。
 struct ComposeEmailView: View {
     var initialSite: String?
 
+    /// 上次寄信用的網站（這台裝置；登出時清掉）
+    nonisolated static let siteKey = "compose.site"
+    @AppStorage(ComposeEmailView.siteKey) private var lastSite = ""
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var site = ""
@@ -71,7 +74,10 @@ struct ComposeEmailView: View {
             }
             .task {
                 if site.isEmpty {
-                    site = initialSite.flatMap { id in sites.contains { $0.id == id } ? id : nil } ?? sites.first?.id ?? ""
+                    // 指定的網站 → 上次用的網站 → 第一個（記得的網站不能寄了就跳過）
+                    let usable = Set(sites.map(\.id))
+                    let wanted = [initialSite, lastSite].compactMap { $0 }.first { usable.contains($0) }
+                    site = wanted ?? sites.first?.id ?? ""
                 }
                 await loadSignature()
                 if toAddress.isEmpty { focus = .to }
@@ -211,6 +217,7 @@ struct ComposeEmailView: View {
         }
         let thread = result["threadId"]?.string
         let from = site
+        lastSite = from
         dismiss()
         Task {
             await model.refreshAll()
