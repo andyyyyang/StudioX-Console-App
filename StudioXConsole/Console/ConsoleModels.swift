@@ -728,6 +728,25 @@ struct TeamMember: Identifiable, Hashable {
     }
 }
 
+/// 還沒接受的後台人員邀請（綁定 Email、7 天內有效、只能用一次）
+struct StaffInvite: Identifiable, Hashable {
+    let id: String
+    var email: String
+    var level: String
+    var expiresAt: Date?
+    var createdAt: Date?
+    var invitedBy: String?
+
+    init(_ j: JSONValue) {
+        id = j["id"]?.string ?? ""
+        email = j["email"]?.string ?? ""
+        level = j["level"]?.string ?? "staff"
+        expiresAt = j["expiresAt"]?.date
+        createdAt = j["createdAt"]?.date
+        invitedBy = j["invitedBy"]?.string
+    }
+}
+
 struct AuditEntry: Identifiable, Hashable {
     let id: String
     var action: String

@@ -2,12 +2,15 @@ import SwiftUI
 
 // MARK: - 後台人員
 
-/// console 自己的後台人員（/admin/team，只有負責人）：誰能進 console、是什麼職能
+/// console 自己的後台人員（/admin/team，只有負責人）：誰能進 console、是什麼職能。
+/// 新的人用邀請連結加入（綁定 Email、7 天內有效、只能用一次），不用再交接密碼
 struct TeamView: View {
     @Environment(AppModel.self) private var model
-    @State private var load = AdminLoad<(managedBy: String?, members: [TeamMember])>()
+    @State private var load = AdminLoad<(managedBy: String?, members: [TeamMember], invites: [StaffInvite])>()
     @State private var adding = false
     @State private var editing: TeamMember?
+    @State private var invite: InviteResult?
+    @State private var working: String?
 
     var body: some View {
         ScrollView {
@@ -16,7 +19,7 @@ struct TeamView: View {
                     if load.value?.managedBy == nil && load.value != nil {
                         Button { adding = true } label: { AddIconLabel() }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("新增後台人員")
+                            .accessibilityLabel("邀請後台人員")
                     }
                 }
                 if let error = load.error {
@@ -34,6 +37,9 @@ struct TeamView: View {
                                 .buttonStyle(.row)
                         }
                     }
+                    if !v.invites.isEmpty {
+                        invitesSection(v.invites, canManage: v.managedBy == nil)
+                    }
                 } else if load.loading {
                     SkeletonRows(rows: 4)
                 }
@@ -47,8 +53,12 @@ struct TeamView: View {
         .pageTitle("後台人員")
         .task { if load.value == nil { await refresh() } }
         .sheet(isPresented: $adding) {
-            AddTeamMemberSheet { await refresh() }
+            InviteStaffSheet(onInvited: { result in
+                invite = result
+                Task { await refresh() }
+            })
         }
+        .sheet(item: $invite) { InviteResultSheet(result: $0) }
         .sheet(item: $editing) { m in
             TeamMemberSheet(member: m, isSelf: m.id == model.me?.id) { await refresh() }
         }
@@ -74,10 +84,60 @@ struct TeamView: View {
         .contentShape(.rect)
     }
 
+    /// 還沒接受的邀請：重寄、撤銷（撤銷了可以再邀請，不用驗證）
+    private func invitesSection(_ invites: [StaffInvite], canManage: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHead("還沒接受的邀請", role: .h3)
+            RuledList {
+                ForEach(invites) { inv in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(inv.email).textRole(.body).foregroundStyle(Theme.ink)
+                            Text([ConsoleLevel.label(inv.level), inv.expiresAt.map { "\($0.shortText) 到期" }].compactMap { $0 }.joined(separator: "・"))
+                                .textRole(.xs)
+                                .foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 8)
+                        if canManage {
+                            Button("重寄") { Task { await resend(inv) } }
+                                .buttonStyle(.brand(.ghost, size: .sm))
+                            Button("撤銷") { Task { await revoke(inv) } }
+                                .buttonStyle(.brand(.quiet, size: .sm))
+                        }
+                    }
+                    .padding(.vertical, 11)
+                    .disabled(working == inv.id)
+                }
+            }
+        }
+    }
+
+    private func resend(_ inv: StaffInvite) async {
+        working = inv.id
+        defer { working = nil }
+        var result: InviteResult?
+        await model.adminRun(nil) {
+            let r = try await model.api.admin("team/invites/resend", method: "POST", body: ["inviteId": .string(inv.id)])
+            result = InviteResult(url: r["url"]?.string ?? "", email: inv.email, sent: r["sent"]?.bool ?? false,
+                                  sendError: r["sendError"]?.string, expiresAt: r["expiresAt"]?.date)
+        }
+        if let result { invite = result }
+        await refresh()
+    }
+
+    private func revoke(_ inv: StaffInvite) async {
+        working = inv.id
+        defer { working = nil }
+        await model.adminRun("撤銷了給 \(inv.email) 的邀請") {
+            _ = try await model.api.admin("team/invites", method: "DELETE", body: ["inviteId": .string(inv.id)])
+        }
+        await refresh()
+    }
+
     private func refresh() async {
         await load.run {
             let r = try await model.api.admin("team")
-            return (r["managedBy"]?.string, (r["members"]?.array ?? []).map(TeamMember.init))
+            return (r["managedBy"]?.string, (r["members"]?.array ?? []).map(TeamMember.init), (r["invites"]?.array ?? []).map(StaffInvite.init))
         }
     }
 }
@@ -89,36 +149,32 @@ nonisolated private func randomPassword(_ n: Int = 16) -> String {
     return String((0..<n).map { _ in chars[Int(rng.next(upperBound: UInt32(chars.count)))] })
 }
 
-private struct AddTeamMemberSheet: View {
-    var onDone: () async -> Void
+/// 邀請後台人員：Email＋職能，寄邀請信（也可以自己把連結傳給他）。
+/// 對方打開連結、用這個 Email 的帳號（Apple 或 Email）登入就加入，不用交接密碼
+private struct InviteStaffSheet: View {
+    var onInvited: (InviteResult) -> Void
     @Environment(AppModel.self) private var model
     @State private var email = ""
-    @State private var name = ""
     @State private var level = "manager"
-    @State private var password = randomPassword()
+    @State private var send = true
 
     var body: some View {
-        AdminSheet(title: "新增後台人員", subtitle: "對方可以用這個 Email 和密碼登入 console，也可以之後綁 Apple 登入。密碼請用安全的方式交給他。", action: "新增", disabled: !email.contains("@") || password.count < 10) {
-            await model.adminRun("新增了 \(email)") {
-                var body: [String: JSONValue] = ["email": .string(email.trimmingCharacters(in: .whitespaces)), "level": .string(level), "password": .string(password)]
-                if !name.trimmingCharacters(in: .whitespaces).isEmpty { body["name"] = .string(name.trimmingCharacters(in: .whitespaces)) }
-                _ = try await model.api.admin("team", method: "POST", body: .object(body))
-                await onDone()
+        AdminSheet(title: "邀請後台人員", subtitle: "對方打開邀請連結、用這個 Email 的帳號登入就加入 console。連結 7 天內有效、只能用一次。", action: send ? "寄出邀請" : "產生連結", disabled: !email.contains("@")) {
+            let to = email.trimmingCharacters(in: .whitespaces)
+            var result: InviteResult?
+            let ok = await model.adminRun(nil) {
+                let r = try await model.api.admin("team/invites", method: "POST", body: ["email": .string(to), "level": .string(level), "send": .bool(send)])
+                result = InviteResult(url: r["url"]?.string ?? "", email: to, sent: r["sent"]?.bool ?? false,
+                                      sendError: r["sendError"]?.string, expiresAt: r["expiresAt"]?.date)
             }
+            if ok, let result { onInvited(result) }
+            return ok
         } content: {
             AdminTextField(label: "Email", text: $email, placeholder: "name@studiox.tw", required: true, keyboard: .emailAddress)
-            AdminTextField(label: "名字（選填）", text: $name)
             AdminPicker(label: "職能", selection: $level, options: ConsoleLevel.all.map { ($0, ConsoleLevel.label($0)) }, hint: ConsoleLevel.hint(level))
-            VStack(alignment: .leading, spacing: 8) {
-                AdminTextField(label: "密碼（至少 10 個字）", text: $password, keyboard: .asciiCapable)
-                HStack(spacing: 10) {
-                    Button("換一組") { password = randomPassword() }
-                        .buttonStyle(.brand(.ghost, size: .sm))
-                    CopyButton(text: password, title: "複製密碼")
-                }
-            }
+            AdminToggle(label: "直接寄邀請信給他", isOn: $send, hint: "不寄的話，產生後自己把連結傳給他")
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -690,7 +690,8 @@ private struct InviteSheet: View {
     }
 }
 
-private struct InviteResultSheet: View {
+/// 邀請連結：寄出了沒、連結（複製、傳給他）、到期時間（網站成員、後台人員共用）
+struct InviteResultSheet: View {
     let result: InviteResult
     @Environment(\.dismiss) private var dismiss
 

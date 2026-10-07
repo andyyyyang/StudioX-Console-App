@@ -256,7 +256,8 @@ nonisolated enum DemoServer {
     private static let adminTeam = #"""
     {"managedBy":null,"members":[
      {"id":"demo","email":"demo@studiox.tw","name":"Andy","level":"owner","createdAt":"2026-01-10T08:00:00.000Z","hasPassword":false},
-     {"id":"t2","email":"design@studiox.example","name":"設計","level":"manager","createdAt":"2026-05-03T08:00:00.000Z","hasPassword":true}]}
+     {"id":"t2","email":"design@studiox.example","name":"設計","level":"manager","createdAt":"2026-05-03T08:00:00.000Z","hasPassword":true}],
+     "invites":[{"id":"si1","email":"new@studiox.example","level":"staff","expiresAt":"2099-01-01T00:00:00.000Z","createdAt":"2026-10-06T08:00:00.000Z","invitedBy":"Andy"}]}
     """#
 
     private static var adminAudit: String { """
