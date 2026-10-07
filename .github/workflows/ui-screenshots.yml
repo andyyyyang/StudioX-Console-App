@@ -169,7 +169,12 @@ jobs:
               IFS='|' read -r name args wait <<< "$scene"
               echo "-- $label $appearance $name $(date +%T)"
               limit 20 xcrun simctl terminate "$dev" tw.studiox.console 2>/dev/null || true
-              limit 60 xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null || echo "   啟動逾時"
+              # 模擬器剛開機時有時要搬好幾分鐘資料：打不開等一下再試；還是打不開就跳過這張（不要截到主畫面、開機畫面）
+              if ! limit 60 xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null; then
+                echo "   啟動逾時，再試一次"
+                sleep 20
+                limit 60 xcrun simctl launch "$dev" tw.studiox.console $args >/dev/null || { echo "   還是打不開，這張跳過"; continue; }
+              fi
               sleep "${wait:-8}"
               limit 30 xcrun simctl io "$dev" screenshot "shots/$label-$appearance-$name.png" >/dev/null 2>&1 || echo "   截圖逾時"
               echo "   完成 $(date +%T)"
@@ -205,29 +210,33 @@ jobs:
           ONLY: ${{ contains(github.event.head_commit.message, '[appstore-shots-ipad]') && 'ipad' || '' }}
         run: |
           ls shots/*.png >/dev/null 2>&1 || { echo "沒有截到"; exit 0; }
+          # 先轉好放在旁邊，等一下疊到分支最新的版本上
+          out="$RUNNER_TEMP/shots-out"
+          mkdir -p "$out"
           if [ "$APPSTORE" = "yes" ]; then
             # App Store 用：原尺寸（高畫質 JPEG，宣傳圖用它合成）
-            mkdir -p docs/appstore/raw
-            # 只重拍 iPad（[appstore-shots-ipad]）時 iPhone 的留著
-            if [ "$ONLY" = "ipad" ]; then rm -f docs/appstore/raw/ipad13-*.jpg; else rm -f docs/appstore/raw/*.jpg; fi
-            for f in shots/*.png; do
-              sips -s format jpeg -s formatOptions 92 "$f" --out "docs/appstore/raw/$(basename "${f%.png}").jpg" >/dev/null
-            done
             target=docs/appstore/raw
-          else
-            mkdir -p docs/screenshots
-            rm -f docs/screenshots/*.jpg
             for f in shots/*.png; do
-              sips -Z 1000 -s format jpeg -s formatOptions 70 "$f" --out "docs/screenshots/$(basename "${f%.png}").jpg" >/dev/null
+              sips -s format jpeg -s formatOptions 92 "$f" --out "$out/$(basename "${f%.png}").jpg" >/dev/null
             done
+          else
             target=docs/screenshots
+            for f in shots/*.png; do
+              sips -Z 1000 -s format jpeg -s formatOptions 70 "$f" --out "$out/$(basename "${f%.png}").jpg" >/dev/null
+            done
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$target"
-          if git diff --cached --quiet; then echo "沒有變更"; exit 0; fi
-          git commit -m "UI 截圖（自動）[skip ci]"
+          # 每次都疊在分支最新的版本上（這段時間有人推了、別的截圖先提交了也不會衝突）；
+          # 只換這次截到的，沒截到的（逾時、被取消）留著上一次的，不會被刪掉
           for i in 1 2 3; do
-            git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && break
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard FETCH_HEAD
+            mkdir -p "$target"
+            cp "$out"/*.jpg "$target"/
+            git add "$target"
+            if git diff --cached --quiet; then echo "沒有變更"; exit 0; fi
+            git commit -q -m "UI 截圖（自動）[skip ci]"
+            git push origin "HEAD:$GITHUB_REF_NAME" && break
             sleep 5
           done
