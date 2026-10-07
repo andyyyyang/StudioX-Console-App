@@ -217,10 +217,12 @@ extension ConsoleAPI {
     }
 
     /// 退款（amountNtd 是「元」；不給＝全額退剩下的）
-    func proposeRefund(site: String, id: String, amountNtd: Int?, note: String?) async throws -> WriteOutcome {
+    /// 退款（全額＝取消訂單、通知客人）。restock：已出貨的單商品退回來、可以再賣才加回庫存
+    func proposeRefund(site: String, id: String, amountNtd: Int?, note: String?, restock: Bool = false) async throws -> WriteOutcome {
         var args: [String: JSONValue] = ["id": .string(id)]
         if let amountNtd { args["amountNtd"] = .number(Double(amountNtd)) }
         if let note, !note.isEmpty { args["note"] = .string(note) }
+        if restock { args["restock"] = true }
         return try await propose("refund_order", site: site, args)
     }
 

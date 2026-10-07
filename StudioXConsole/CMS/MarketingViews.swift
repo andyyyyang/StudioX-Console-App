@@ -442,13 +442,22 @@ struct LineCampaignComposer: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    /// 優惠碼：從啟用中的折價券選（或自己打）
+    /// 優惠碼：從能附的折價券選（網站只收通用、啟用中、沒過期、還沒用完的券，打別的會被擋）
     private var couponPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TextBlock(label: "優惠碼（選填）", limit: 30, value: bind("couponCode"), placeholder: "例如：MOON10")
-            let codes = coupons.compactMap { $0.raw["code"]?.string }.filter { !$0.isEmpty }
-            if !codes.isEmpty {
+            Text("優惠碼（選填）")
+                .textRole(.small)
+                .foregroundStyle(Theme.muted)
+            let codes = promoCodes
+            if codes.isEmpty {
+                Text("沒有可以附的通用折價券（要啟用中、沒過期、沒有指定會員）。")
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
+            } else {
                 FlowLayout(spacing: 6) {
+                    FilterChip(title: "不附", selected: (values["couponCode"]?.string ?? "").isEmpty) {
+                        values["couponCode"] = nil
+                    }
                     ForEach(codes.prefix(12), id: \.self) { code in
                         FilterChip(title: code, selected: values["couponCode"]?.string == code) {
                             values["couponCode"] = .string(code)
@@ -456,6 +465,18 @@ struct LineCampaignComposer: View {
                     }
                 }
             }
+        }
+    }
+
+    /// 能附在推播上的券：通用（沒指定會員）、沒過期、還沒用完
+    private var promoCodes: [String] {
+        coupons.compactMap { c -> String? in
+            let r = c.raw
+            guard let code = r["code"]?.string, !code.isEmpty else { return nil }
+            if let email = r["assignedUserEmail"]?.string, !email.isEmpty { return nil }
+            if let expires = r["expiresAt"]?.date, expires < .now { return nil }
+            if let limit = r["usageLimit"]?.int, let used = r["usageCount"]?.int, used >= limit { return nil }
+            return code
         }
     }
 
@@ -972,7 +993,7 @@ struct RecomputeTiersButton: View {
                 .buttonStyle(.brand(.ghost, size: .sm))
                 .disabled(working)
                 if userID == nil {
-                    Text("改了等級門檻之後用；等級有變的會員會收到通知。")
+                    Text("改了等級規則網站會自動重算；這裡是想馬上再算一次時用（不另外通知會員）。")
                         .textRole(.xs)
                         .foregroundStyle(Theme.muted)
                 }

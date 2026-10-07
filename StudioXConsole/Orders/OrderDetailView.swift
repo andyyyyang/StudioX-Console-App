@@ -84,8 +84,10 @@ struct OrderDetailView: View {
             }, onDone: { finished($0) })
         }
         .sheet(isPresented: $refunding) {
-            RefundSheet(totalCents: (detail?.totalCents ?? 0) - (detail?.refundCents ?? 0)) { amount, note in
-                Task { await propose { try await model.api.proposeRefund(site: site, id: orderID, amountNtd: amount, note: note) } }
+            RefundSheet(totalCents: (detail?.totalCents ?? 0) - (detail?.refundCents ?? 0),
+                        bankTransfer: detail?.bankTransfer != nil,
+                        shipped: detail.map { [OrderStatus.shipped, .completed].contains($0.summary.status) } ?? false) { amount, note, restock in
+                Task { await propose { try await model.api.proposeRefund(site: site, id: orderID, amountNtd: amount, note: note, restock: restock) } }
             }
         }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
@@ -216,13 +218,21 @@ struct OrderDetailView: View {
                             .buttonStyle(.brand(.danger, fullWidth: true))
                     }
                 }
-                Text(canRefund ? "退款會退回原付款方式（金額可以只退一部分）；下一步要打「退款」才會執行，金額超過門檻還要店主的驗證碼。" : "取消之後客人就不能付款了。")
+                Text(canRefund ? refundHint(d) : "取消之後客人就不能付款了，庫存和折價券會放回去。")
                     .textRole(.xs)
                     .foregroundStyle(Theme.muted)
             }
             .disabled(working)
             .padding(.top, 8)
         }
+    }
+
+    /// 退款的說明：匯款單要自己匯回去；全額退款＝取消訂單
+    private func refundHint(_ d: OrderDetail) -> String {
+        let how = d.bankTransfer != nil
+            ? "匯款單沒有線上退款：先把錢匯回客人的帳戶，這裡只記錄退了多少。"
+            : "退款會退回原付款方式（金額可以只退一部分）。"
+        return how + "全額退款會取消訂單、通知客人；下一步要打「退款」才會執行，金額超過門檻還要店主的驗證碼。"
     }
 
     // MARK: 品項與金額
@@ -649,13 +659,18 @@ struct ShipSheet: View {
     }
 }
 
-/// 退款：金額（元，預設全額退剩下的）與備註
+/// 退款：金額（元，預設全額退剩下的）、原因；已出貨的單全額退款時問商品有沒有退回來（要不要加回庫存）
 private struct RefundSheet: View {
     let totalCents: Int
-    var onSubmit: (Int?, String?) -> Void
+    /// 匯款單：沒有線上退款，店家自己匯回去，這裡只記錄
+    var bankTransfer = false
+    /// 已出貨／已完成：商品寄出去了，退回來、可以再賣才加回庫存
+    var shipped = false
+    var onSubmit: (Int?, String?, Bool) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var amount = ""
     @State private var note = ""
+    @State private var restock = false
     @FocusState private var focused: Int?
 
     private var maxNtd: Int { Int((Double(totalCents) / 100).rounded()) }
@@ -694,18 +709,30 @@ private struct RefundSheet: View {
                     }
                     .fieldText()
                 }
-                FieldBlock(label: "備註（選填）", focused: focused == 1) {
-                    TextField("例如：延誤補償", text: $note)
+                FieldBlock(label: "原因（選填）", focused: focused == 1) {
+                    TextField("例如：延誤補償、客人取消", text: $note)
                         .focused($focused, equals: 1)
                         .fieldText()
                 }
-                Text("下一步會出網站的確認，要打「退款」才會執行；金額超過門檻還要店主的驗證碼。")
+                // 已出貨的單全額退款：商品退回來、可以再賣才加回庫存（冷藏品寄出去多半回不來）
+                if shipped && partial == nil {
+                    Toggle(isOn: $restock) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("商品退回來了、可以再賣").textRole(.body).foregroundStyle(Theme.ink)
+                            Text("打開才會把這張單的數量加回庫存").textRole(.xs).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .tint(Theme.accent)
+                }
+                Text((bankTransfer ? "匯款單沒有線上退款：先把錢匯回客人的帳戶，這裡只記錄。" : "")
+                     + (partial == nil ? "全額退款會取消訂單、通知客人。" : "部分退款不改訂單狀態、不動庫存。")
+                     + "下一步會出網站的確認，要打「退款」才會執行；金額超過門檻還要店主的驗證碼。")
                     .textRole(.xs)
                     .foregroundStyle(Theme.muted)
                 Spacer()
                 Button("下一步") {
                     dismiss()
-                    onSubmit(partial, note.trimmingCharacters(in: .whitespaces))
+                    onSubmit(partial, note.trimmingCharacters(in: .whitespaces), shipped && partial == nil && restock)
                 }
                 .buttonStyle(.brand(.danger, size: .lg, fullWidth: true))
                 .disabled(!valid)

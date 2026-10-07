@@ -167,7 +167,13 @@ struct OrdersList: View {
         }
         .confirmSheet($proposal, siteName: { model.site($0)?.name ?? $0 }) { result in
             let n = result["updated"]?.int ?? selected.count
-            model.show("已標記 \(n) 張訂單\(bulkTarget == "completed" ? "完成" : "出貨")")
+            let skipped = (result["failed"]?.array ?? []).compactMap(\.string)
+            if skipped.isEmpty {
+                model.show("已標記 \(n) 張訂單\(bulkTarget == "completed" ? "完成" : "出貨")")
+            } else {
+                // 狀態不對的那幾張網站會跳過，說清楚是哪幾張、為什麼
+                model.show("已標記 \(n) 張；\(skipped.count) 張沒改：\(skipped.prefix(2).joined(separator: "；"))", tone: .warning)
+            }
             selecting = false
             selected = []
             Task {
