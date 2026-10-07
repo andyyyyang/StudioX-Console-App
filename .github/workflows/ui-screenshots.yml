@@ -111,6 +111,7 @@ jobs:
             "campaign|-demo -demoRoute campaign"
             "pending|-demo -demoRoute pending"
             "report|-demo -demoRoute report|10"
+            "traffic-names|-demo -demoRoute traffic -demoScroll names|10"
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )

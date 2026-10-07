@@ -934,9 +934,14 @@ struct TrafficPoint: Identifiable {
 
 struct TrafficTop: Identifiable {
     var id: String { key }
+    /// 網址（/zh/menu）、來源網域（google.com）、國家代碼…
     let key: String
     let visitors: Int
     let pageviews: Int
+    /// 網站查好的名稱：頁面標題（菜單）、來源網站名稱（Google 搜尋）；查不到是 nil，就顯示 key
+    var name: String? = nil
+    /// 那個網址打開是 404（有人從壞掉的連結進來）
+    var missing = false
 }
 
 struct ChannelShare: Identifiable {
@@ -970,6 +975,8 @@ struct ContentPageImpact: Identifiable {
     let viewed: Int
     let carted: Int
     let ordered: Int
+    /// 頁面標題（網站查好的）
+    var name: String? = nil
 }
 
 /// 流量（traffic_report；studiox-cms 與 yellowgirl-website 的 lib/analytics.ts）
@@ -1040,7 +1047,7 @@ struct TrafficReport {
             FunnelProduct(name: $0["name"]?.string ?? "", slug: $0["slug"]?.string ?? UUID().uuidString, viewers: $0["viewers"]?.int ?? 0, adders: $0["adders"]?.int ?? 0)
         }
         contentPages = (json["contentPages"]?.array ?? []).map {
-            ContentPageImpact(path: $0["path"]?.string ?? "", visitors: $0["visitors"]?.int ?? 0, viewed: $0["viewed"]?.int ?? 0, carted: $0["carted"]?.int ?? 0, ordered: $0["ordered"]?.int ?? 0)
+            ContentPageImpact(path: $0["path"]?.string ?? "", visitors: $0["visitors"]?.int ?? 0, viewed: $0["viewed"]?.int ?? 0, carted: $0["carted"]?.int ?? 0, ordered: $0["ordered"]?.int ?? 0, name: TrafficReport.nonEmpty($0["name"]?.string))
         }
     }
 
@@ -1070,7 +1077,20 @@ struct TrafficReport {
     }
 
     private static func tops(_ json: JSONValue?) -> [TrafficTop] {
-        (json?.array ?? []).map { TrafficTop(key: $0["key"]?.string ?? "（直接輸入）", visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0) }
+        (json?.array ?? []).map {
+            TrafficTop(
+                key: $0["key"]?.string ?? "（直接輸入）",
+                visitors: $0["visitors"]?.int ?? 0,
+                pageviews: $0["pageviews"]?.int ?? 0,
+                name: nonEmpty($0["name"]?.string),
+                missing: $0["missing"]?.bool ?? false
+            )
+        }
+    }
+
+    static func nonEmpty(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
     }
 
     static func channelLabel(_ raw: String) -> String {
@@ -1109,6 +1129,8 @@ struct SearchReport {
         /// 0…1
         let ctr: Double?
         let position: Double?
+        /// 頁面的標題（頁面那一欄才有）
+        var name: String? = nil
     }
 
     struct Point: Identifiable {
@@ -1162,7 +1184,9 @@ struct SearchReport {
             return Point(key: raw, label: label, date: date, clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0)
         }
         let rows = { (v: JSONValue?) in
-            (v?.array ?? []).map { Row(key: $0["key"]?.string ?? "", clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0, ctr: $0["ctr"]?.double, position: $0["position"]?.double) }
+            (v?.array ?? []).map {
+                Row(key: $0["key"]?.string ?? "", clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0, ctr: $0["ctr"]?.double, position: $0["position"]?.double, name: TrafficReport.nonEmpty($0["name"]?.string))
+            }
         }
         queries = rows(json["queries"])
         pages = rows(json["pages"])

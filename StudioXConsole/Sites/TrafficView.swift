@@ -84,29 +84,37 @@ struct TrafficView: View {
     @State private var error: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 56) {
-                VStack(alignment: .leading, spacing: 18) {
-                    PageHeader("流量", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
-                    FilterBar(items: [1, 7, 30, 90, 365], selection: $days, title: { $0 == 1 ? "今天" : $0 == 365 ? "一年" : "\($0) 天" })
-                }
-                .reveal()
-
-                if let r = report {
-                    if !r.installed {
-                        EmptyState(title: "還沒有流量資料", message: "網站裝好流量追蹤之後，這裡就看得到。")
-                    } else {
-                        content(r)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 56) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        PageHeader("流量", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
+                        FilterBar(items: [1, 7, 30, 90, 365], selection: $days, title: { $0 == 1 ? "今天" : $0 == 365 ? "一年" : "\($0) 天" })
                     }
-                } else if let error {
-                    ErrorNote(message: error) { Task { await load() } }
-                } else {
-                    SkeletonRows(rows: 4)
+                    .reveal()
+
+                    if let r = report {
+                        if !r.installed {
+                            EmptyState(title: "還沒有流量資料", message: "網站裝好流量追蹤之後，這裡就看得到。")
+                        } else {
+                            content(r)
+                        }
+                    } else if let error {
+                        ErrorNote(message: error) { Task { await load() } }
+                    } else {
+                        SkeletonRows(rows: 4)
+                    }
                 }
+                .pageWidth()
+                .padding(.top, 16)
+                .padding(.bottom, 64)
             }
-            .pageWidth()
-            .padding(.top, 16)
-            .padding(.bottom, 64)
+            // UI 截圖（-demoScroll names）：捲到熱門頁面、來源網站（看名稱）
+            .task(id: report != nil) {
+                guard DemoServer.screenshots, report != nil, UserDefaults.standard.string(forKey: "demoScroll") == "names" else { return }
+                try? await Task.sleep(for: .milliseconds(600))
+                proxy.scrollTo("breakdowns", anchor: .top)
+            }
         }
         .refreshable { await Task { await load() }.value }
         .brandPage()
@@ -178,6 +186,7 @@ struct TrafficView: View {
                 Breakdown(title: "行銷活動（utm）", items: r.campaigns)
             }
         }
+        .id("breakdowns")
 
         if !r.contentPages.isEmpty {
             ContentImpactView(pages: r.contentPages)
@@ -185,7 +194,8 @@ struct TrafficView: View {
     }
 }
 
-/// 一種排行（熱門頁面、來源…）：細線隔開、後面一條比例條
+/// 一種排行（熱門頁面、來源…）：細線隔開、後面一條比例條。
+/// 網站查得到名稱的（頁面標題、來源網站名稱）名稱在上、網址小字在下；打開是 404 的頁面標紅
 struct Breakdown: View {
     let title: String
     let items: [TrafficTop]
@@ -214,11 +224,7 @@ struct Breakdown: View {
                     ForEach(top) { item in
                         VStack(alignment: .leading, spacing: 7) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(name(item.key))
-                                    .textRole(.small)
-                                    .foregroundStyle(Theme.ink)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                                NamedKey(name: item.name ?? name(item.key), key: item.name == nil ? nil : item.key, missing: item.missing)
                                 Spacer(minLength: 12)
                                 Text(item.visitors.formatted())
                                     .font(.brand(14, .medium).monospacedDigit())
@@ -237,6 +243,39 @@ struct Breakdown: View {
                 }
             }
         }
+    }
+}
+
+/// 名稱一行、網址（或網域）小字一行；missing＝那個網址打開是 404
+struct NamedKey: View {
+    let name: String
+    var key: String?
+    var missing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                if missing {
+                    HeroIcon("exclamation-triangle", size: 13)
+                        .foregroundStyle(Theme.dangerFG)
+                        .accessibilityHidden(true)
+                }
+                Text(name)
+                    .textRole(.small)
+                    .foregroundStyle(missing ? Theme.dangerFG : Theme.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if let key, key != name {
+                Text(key)
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(missing ? "\(name)，\(key ?? "")，打開是 404" : key.map { "\(name)，\($0)" } ?? name)
     }
 }
 
@@ -425,11 +464,7 @@ struct ContentImpactView: View {
             RuledList(color: Theme.hair) {
                 ForEach(pages.prefix(12)) { p in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(p.path)
-                            .textRole(.small)
-                            .foregroundStyle(Theme.ink)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        NamedKey(name: p.name ?? p.path, key: p.name == nil ? nil : p.path)
                         HStack(spacing: 14) {
                             label("訪客", p.visitors)
                             label("看商品", p.viewed)
@@ -572,10 +607,14 @@ private struct SearchRows: View {
                     ForEach(rows) { row in
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(country ? TrafficReport.countryName(row.key.uppercased()) : row.key)
-                                    .textRole(.small)
-                                    .foregroundStyle(Theme.ink)
-                                    .lineLimit(2)
+                                if let name = row.name {
+                                    NamedKey(name: name, key: row.key)
+                                } else {
+                                    Text(country ? TrafficReport.countryName(row.key.uppercased()) : row.key)
+                                        .textRole(.small)
+                                        .foregroundStyle(Theme.ink)
+                                        .lineLimit(2)
+                                }
                                 if let ctr = row.ctr {
                                     Text(String(format: "點閱率 %.1f%%", ctr * 100))
                                         .textRole(.xs)

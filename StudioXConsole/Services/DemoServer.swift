@@ -515,9 +515,9 @@ nonisolated enum DemoServer {
         {"installed":true,"days":\(days),"live":\(base / 20 + 1),"visitors":\(values.reduce(0, +)),"pageviews":\(values.reduce(0, +) * 3),"visits":\(values.reduce(0, +) * 5 / 4),
          "bounceRate":0.38,"avgDurationMs":94000,"change":{"visitors":0.18,"pageviews":0.12},
          "trend":[\(trend(values))],
-         "pages":[{"key":"/","visitors":\(base * 3),"pageviews":\(base * 5)},{"key":"/shop","visitors":\(base * 2),"pageviews":\(base * 4)},{"key":"/shop/egg-rolls","visitors":\(base),"pageviews":\(base * 2)}],
-         "entries":[{"key":"/","visitors":\(base * 2),"pageviews":\(base * 2)}],
-         "referrers":[{"key":"instagram.com","visitors":\(base),"pageviews":\(base * 2)},{"key":"google.com","visitors":\(base / 2),"pageviews":\(base)}],
+         "pages":[{"key":"/","name":"首頁","visitors":\(base * 3),"pageviews":\(base * 5)},{"key":"/shop","name":"商店","visitors":\(base * 2),"pageviews":\(base * 4)},{"key":"/shop/egg-rolls","name":"原味手工蛋捲禮盒","visitors":\(base),"pageviews":\(base * 2)},{"key":"/about","name":"關於我們","visitors":\(base / 2),"pageviews":\(base / 2 + 3)}],
+         "entries":[{"key":"/","name":"首頁","visitors":\(base * 2),"pageviews":\(base * 2)},{"key":"/shop/egg-rolls","name":"原味手工蛋捲禮盒","visitors":\(base / 2),"pageviews":\(base / 2)},{"key":"/qr","name":"找不到的頁面","missing":true,"visitors":\(base / 6 + 1),"pageviews":\(base / 6 + 1)}],
+         "referrers":[{"key":"l.instagram.com","name":"Instagram","visitors":\(base),"pageviews":\(base * 2)},{"key":"google.com","name":"Google 搜尋","visitors":\(base / 2),"pageviews":\(base)},{"key":"line.me","name":"LINE","visitors":\(base / 3),"pageviews":\(base / 2)},{"key":"chatgpt.com","name":"ChatGPT","visitors":\(base / 8 + 1),"pageviews":\(base / 8 + 1)}],
          "countries":[{"key":"TW","visitors":\(base * 4),"pageviews":\(base * 9)},{"key":"HK","visitors":\(base / 5),"pageviews":\(base / 3)}],
          "devices":[{"key":"mobile","visitors":\(base * 3),"pageviews":\(base * 7)},{"key":"desktop","visitors":\(base),"pageviews":\(base * 3)}],
          "browsers":[{"key":"Safari","visitors":\(base * 2),"pageviews":\(base * 5)}],"oses":[{"key":"iOS","visitors":\(base * 2),"pageviews":\(base * 5)}],"campaigns":[],
@@ -533,7 +533,7 @@ nonisolated enum DemoServer {
      "totals":{"clicks":482,"impressions":12840,"ctr":0.0375,"position":8.4},"change":{"clicks":0.11,"impressions":0.06},
      "trend":[\(searchTrend)],
      "queries":[{"key":"台南 蛋捲","clicks":96,"impressions":1820,"ctr":0.052,"position":3.1},{"key":"手工蛋捲 禮盒","clicks":71,"impressions":1430,"ctr":0.049,"position":4.6}],
-     "pages":[{"key":"https://chenmai.studiox.tw/","clicks":210,"impressions":4100,"ctr":0.051,"position":5.2}],"countries":[{"key":"twn","clicks":460,"impressions":12100,"ctr":0.038,"position":8.1}]}
+     "pages":[{"key":"/","name":"首頁","clicks":210,"impressions":4100,"ctr":0.051,"position":5.2},{"key":"/shop/egg-rolls","name":"原味手工蛋捲禮盒","clicks":118,"impressions":2650,"ctr":0.045,"position":6.3}],"countries":[{"key":"twn","clicks":460,"impressions":12100,"ctr":0.038,"position":8.1}]}
     """ }
 
     // MARK: 內容（商品）
