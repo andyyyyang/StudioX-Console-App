@@ -25,6 +25,17 @@ struct SitesView: View {
                             }
                         }
                     }
+                    if model.canManageConsole {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Eyebrow("StudioX Console")
+                            RuledList {
+                                NavigationLink(value: Route.console(.home)) {
+                                    ConsoleSectionRow(section: ConsoleSection(page: .home, title: "平台管理", detail: "客戶與網站、服務、金鑰、計費、人員、紀錄", icon: "briefcase", caps: []))
+                                }
+                                .buttonStyle(.row)
+                            }
+                        }
+                    }
                     ConnectorCard()
                 }
                 .pageWidth()

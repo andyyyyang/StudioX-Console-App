@@ -197,6 +197,14 @@ struct MainView: View {
                 }
             }
             .hidden(!regular)
+            if model.canManageConsole {
+                TabSection("StudioX") {
+                    Tab("平台管理", image: "hi-briefcase", value: AppTab.console) {
+                        ConsoleWorkspace()
+                    }
+                }
+                .hidden(!regular)
+            }
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
@@ -285,6 +293,7 @@ struct RouteView: View {
         case .searchConsole(let site): SearchConsoleView(siteID: site)
         case .report(let site): OpsReportView(siteID: site)
         case .member(let site, let id): MemberView(site: site, memberID: id)
+        case .console(let page): ConsolePageView(page: page)
         }
     }
 }

@@ -385,6 +385,25 @@ final class ConsoleAPI {
         return .done(r)
     }
 
+    // MARK: 平台管理（console 自己的管理後台 /api/admin/*）
+
+    /// 和網頁後台同一支 API、同一張權限表（console 認 App 的 token，只有後台人員能用）。
+    /// 回 2xx 以外：把網站說明的原因（{error}）丟出去；403 是權限不夠
+    func admin(_ path: String, method: String = "GET", query: [URLQueryItem] = [], body: JSONValue? = nil) async throws -> JSONValue {
+        let (data, http) = try await send(retryable: method == "GET") {
+            // 「api/…」開頭的照原樣（例如 Xena 的設定在 api/copilot/settings），其他都是 api/admin/ 底下
+            try appRequest(path.hasPrefix("api/") ? path : "api/admin/\(path)", method: method, query: query, body: body)
+        }
+        let reply = (try? json(data)) ?? .null
+        guard (200..<300).contains(http.statusCode) else {
+            let message = reply["error"]?.string
+            if http.statusCode == 403 { throw APIError.scope(message ?? "你沒有這項權限") }
+            if http.statusCode == 404, message == "module_disabled" { throw APIError.tool("console 沒有開這項功能") }
+            throw APIError.tool(message ?? "伺服器回應 \(http.statusCode)，請稍後再試")
+        }
+        return reply
+    }
+
     // MARK: 通知（/api/app/devices、/api/app/notifications）
 
     private func appRequest(_ path: String, method: String = "GET", query: [URLQueryItem] = [], body: JSONValue? = nil) throws -> URLRequest {

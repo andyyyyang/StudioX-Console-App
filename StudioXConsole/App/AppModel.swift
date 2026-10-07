@@ -7,6 +7,39 @@ enum AppTab: Hashable {
     case xena, sites, orders, inbox, account, search
     /// iPad 的側欄：直接打開某個網站（網站代號）
     case site(String)
+    /// iPad 的側欄：StudioX Console 的平台管理（後台人員才有）
+    case console
+}
+
+/// 平台管理（console 自己的管理後台）的頁面
+enum ConsolePage: Hashable {
+    case home
+    /// 客戶與網站
+    case customers
+    /// 一個網站：設定、成員、邀請（console 的網站 id）
+    case site(String)
+    /// 客戶的申請（方案、服務）
+    case requests
+    /// 網站服務：每個網站開了哪些服務
+    case services
+    /// 一個網站的服務
+    case siteServices(String)
+    /// 金鑰庫
+    case keys
+    /// 用量（寄信、簡訊、AI）
+    case usage
+    /// 帳單
+    case billing
+    /// 方案（客戶訂了哪個方案）
+    case plans
+    /// 價目
+    case pricing
+    /// 後台人員
+    case team
+    /// 操作紀錄
+    case audit
+    /// Xena AI：開關、外部 AI 連接器、呼叫紀錄
+    case xena
 }
 
 /// 各分頁裡的下一層頁面（site 是網站代號）
@@ -31,6 +64,8 @@ enum Route: Hashable {
     case report(site: String)
     /// 會員
     case member(site: String, id: String)
+    /// 平台管理（不屬於任何一個網站）
+    case console(ConsolePage)
 
     var site: String {
         switch self {
@@ -38,6 +73,7 @@ enum Route: Hashable {
         case .order(let s, _), .thread(let s, _), .xenaConversation(let s, _), .inquiry(let s, _), .collection(let s, _), .record(let s, _, _),
              .create(let s, _), .member(let s, _): s
         case .traffic(let s), .searchConsole(let s), .report(let s): s
+        case .console: ""
         }
     }
 }
@@ -83,6 +119,8 @@ final class AppModel {
     }
     /// iPad：每個網站自己的一疊頁面
     var sitePaths: [String: [Route]] = [:]
+    /// iPad 側欄「平台管理」裡的下一層
+    var consolePath: [Route] = []
     var showXena = false {
         didSet {
             guard showXena else { return }
@@ -185,6 +223,10 @@ final class AppModel {
 
     var sites: [SiteSummary] { me?.sites ?? [] }
     var orderSites: [SiteSummary] { sites.filter(\.hasOrders) }
+    /// 平台管理（console 的後台人員）：能用哪些
+    var consoleCaps: Set<String> { me?.consoleCaps ?? [] }
+    var canManageConsole: Bool { consoleCaps.contains("console.read") || consoleCaps.contains("platform.read") || consoleCaps.contains("users.level") }
+    func can(_ cap: String) -> Bool { consoleCaps.contains(cap) }
     var supportSites: [SiteSummary] { sites.filter(\.hasSupport) }
 
     func site(_ id: String) -> SiteSummary? {
@@ -239,6 +281,10 @@ final class AppModel {
         case "campaign": open(.record(site: shop, entity: "campaign", id: "sc1"))
         case "pending": open(.collection(site: shop, entity: "pending_notification"))
         case "report": open(.report(site: shop))
+        case "console": open(.console(.home))
+        case "console-site": open(.console(.site("s1")))
+        case "console-services": open(.console(.siteServices("s1")))
+        case "console-billing": open(.console(.billing))
         case "product": open(.record(site: shop, entity: "product", id: "p1"))
         case "xena": showXena = true
         default: break
@@ -307,6 +353,7 @@ final class AppModel {
         accountPath = []
         searchPath = []
         sitePaths = [:]
+        consolePath = []
         showXena = false
         showAccount = false
         spokenReport = nil
@@ -423,6 +470,14 @@ final class AppModel {
             } else {
                 tab = .sites
                 sitesPath = [route]
+            }
+        case .console(let page):
+            if regular {
+                tab = .console
+                consolePath = page == .home ? [] : [route]
+            } else {
+                tab = .sites
+                sitesPath = page == .home ? [route] : [.console(.home), route]
             }
         default:
             if regular {
@@ -641,7 +696,11 @@ final class AppModel {
         regular = value
         if value {
             // 手機的「網站」分頁 → 側欄的那個網站
-            if tab == .sites {
+            if tab == .sites, case .console? = sitesPath.first {
+                // 手機的「網站 → 平台管理」→ 側欄的「平台管理」
+                consolePath = Array(sitesPath.dropFirst())
+                tab = .console
+            } else if tab == .sites {
                 if case .site(let id)? = sitesPath.first {
                     sitePaths[id] = Array(sitesPath.dropFirst())
                     tab = .site(id)
@@ -652,6 +711,9 @@ final class AppModel {
             }
         } else if case .site(let id) = tab {
             sitesPath = [.site(id)] + (sitePaths[id] ?? [])
+            tab = .sites
+        } else if tab == .console {
+            sitesPath = [.console(.home)] + consolePath
             tab = .sites
         } else if tab == .account {
             // 手機的分頁列沒有「我」：改成從首頁打開

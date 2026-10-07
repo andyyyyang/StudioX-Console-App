@@ -58,6 +58,10 @@ nonisolated enum DemoServer {
         case "/api/app/reply-draft": body = ["text": .string(replyDraft(request.httpBody))]
         case "/api/app/reply-suggest": body = parse(replySuggestion)
         case "/api/app/signature": body = ["name": "示範帳號", "title": "店長", "phone": ""]
+        case let path where path.hasPrefix("/api/admin/") || path == "/api/copilot/settings":
+            let reply = admin(path: path, method: request.httpMethod ?? "GET", body: request.httpBody)
+            status = reply.0
+            body = reply.1
         default:
             status = 404
             body = ["error": "not_found", "message": "示範模式沒有這個資料"]
@@ -66,6 +70,207 @@ nonisolated enum DemoServer {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["content-type": "application/json"])!
         return (data, response)
     }
+
+    // MARK: 平台管理（console 的 /api/admin/*）
+
+    /// 示範模式的平台管理：讀的回固定的資料，寫的一律回「示範模式不會真的改」
+    private static func admin(path: String, method: String, body: Data?) -> (Int, JSONValue) {
+        let p = path.replacingOccurrences(of: "/api/admin/", with: "")
+        if method != "GET" {
+            if p == "console/sites" {
+                return (200, ["site": ["id": "s_demo_new", "name": "新網站", "clientId": "site_demo"], "secret": "demo",
+                              "env": "CONSOLE_URL=https://console.studiox.tw\nCONSOLE_CLIENT_ID=site_demo\nCONSOLE_CLIENT_SECRET=（示範模式）"])
+            }
+            if p.hasSuffix("/invites") { return (200, ["url": "https://console.studiox.tw/invite/demo", "expiresAt": .string(ago(hours: -168)), "sent": false, "sendError": .null]) }
+            if p.hasSuffix("/test") { return (200, ["ok": true, "message": "示範模式：金鑰可以用"]) }
+            if p.hasSuffix("/line") { return (200, parse(lineConnect)) }
+            return (400, ["error": "示範模式不會真的修改；登入你的 StudioX 帳號就能操作。"])
+        }
+        switch p {
+        case "console": return (200, parse(adminOrgs))
+        case "console/stats":
+            return (200, parse(#"{"days":7,"sites":{"s1":{"visitors":1843,"pageviews":6120,"change":18,"live":12},"s2":{"visitors":412,"pageviews":1380,"change":-4,"live":3},"s3":{"visitors":96,"pageviews":240,"change":7,"live":1}}}"#))
+        case let x where x.hasPrefix("console/sites/"): return (200, parse(adminSite))
+        case "platform/requests": return (200, parse(adminRequests))
+        case "platform/services": return (200, parse(adminServices))
+        case let x where x.hasPrefix("platform/services/") && x.hasSuffix("/assistant"): return (200, parse(adminAssistant))
+        case let x where x.hasPrefix("platform/services/"): return (200, parse(adminSiteServices))
+        case "platform/keys": return (200, parse(adminKeys))
+        case let x where x.hasPrefix("platform/keys/"):
+            return (200, parse(#"{"id":"k1","provider":"anthropic","label":"StudioX 主帳號","orgId":null,"disabled":false,"values":{"apiKey":""},"filled":{"apiKey":true}}"#))
+        case "platform/usage": return (200, parse(adminUsage))
+        case "platform/ai-usage": return (200, parse(adminAiUsage))
+        case "platform/billing": return (200, parse(adminBilling))
+        case "platform/plans": return (200, parse(adminPlans))
+        case "platform/pricing": return (200, parse(adminPricing))
+        case "team": return (200, parse(adminTeam))
+        case "audit": return (200, parse(adminAudit))
+        case "mcp-connectors": return (200, parse(adminConnectors))
+        case "ai-records": return (200, parse(adminAiRecords))
+        case "/api/copilot/settings": return (200, parse(adminCopilot))
+        default: return (404, ["error": "示範模式沒有這個資料"])
+        }
+    }
+
+    private static var adminOrgs: String { """
+    {"orgs":[
+     {"id":"o1","name":"晨麥手作","note":"台南手工蛋捲","createdAt":"2026-03-02T08:00:00.000Z","updatedAt":"2026-09-30T08:00:00.000Z",
+      "sites":[{"id":"s1","orgId":"o1","name":"晨麥手作","siteUrl":"https://chenmai.studiox.tw","cmsUrl":"https://admin.chenmai.studiox.tw","status":"active","lastSyncAt":"\(ago(hours: 2))","lastSyncError":null,"members":4}]},
+     {"id":"o2","name":"StudioX","note":null,"createdAt":"2026-01-10T08:00:00.000Z","updatedAt":"2026-09-30T08:00:00.000Z",
+      "sites":[{"id":"s2","orgId":"o2","name":"StudioX.tw","siteUrl":"https://studiox.tw","cmsUrl":"https://cms.studiox.tw","status":"active","lastSyncAt":"\(ago(hours: 5))","lastSyncError":null,"members":3}]},
+     {"id":"o3","name":"木白設計","note":"室內設計工作室","createdAt":"2026-06-18T08:00:00.000Z","updatedAt":"2026-09-30T08:00:00.000Z",
+      "sites":[{"id":"s3","orgId":"o3","name":"木白設計","siteUrl":"https://mubai.studiox.tw","cmsUrl":"https://admin.mubai.studiox.tw","status":"active","lastSyncAt":"\(ago(hours: 30))","lastSyncError":"網站回應 502","members":2}]}
+    ]}
+    """ }
+
+    private static var adminSite: String { """
+    {"site":{"id":"s1","orgId":"o1","name":"晨麥手作","siteUrl":"https://chenmai.studiox.tw","cmsUrl":"https://admin.chenmai.studiox.tw","clientId":"site_chenmai","status":"active","supportDesk":false,"lastSyncAt":"\(ago(hours: 2))","lastSyncError":null,"createdAt":"2026-03-02T08:00:00.000Z","updatedAt":"2026-09-30T08:00:00.000Z"},
+     "org":{"id":"o1","name":"晨麥手作"},
+     "login":{"issuer":"https://console.studiox.tw","clientId":"site_chenmai","redirectUri":"https://admin.chenmai.studiox.tw/api/auth/callback/studiox","env":"CONSOLE_URL=https://console.studiox.tw"},
+     "members":[
+      {"userId":"u_a","email":"owner@chenmai.example","name":"晨麥店長","signature":{"title":"店長"},"level":"owner","since":"2026-03-02T08:00:00.000Z","appleLinked":true},
+      {"userId":"u_b","email":"ops@chenmai.example","name":"出貨小幫手","signature":null,"level":"fulfillment","since":"2026-05-11T08:00:00.000Z","appleLinked":true},
+      {"userId":"u_c","email":"cs@chenmai.example","name":"客服","signature":null,"level":"staff","since":"2026-07-20T08:00:00.000Z","appleLinked":false},
+      {"userId":"demo","email":"demo@studiox.tw","name":"Andy","signature":{"title":"StudioX"},"level":"manager","since":"2026-03-02T08:00:00.000Z","appleLinked":true}],
+     "invites":[{"id":"i1","email":"new@chenmai.example","level":"staff","expiresAt":"\(ago(hours: -120))","createdAt":"\(ago(hours: 48))"}]}
+    """ }
+
+    private static var adminRequests: String { """
+    {"requests":[
+     {"id":"r1","siteId":"s3","site":"木白設計","org":"木白設計","service":"plan:growth","label":"方案：成長","note":"想開 AI 客服跟 LINE","status":"pending","reply":null,"requestedByEmail":"owner@mubai.example","requestedByName":"木白","handledByEmail":null,"handledAt":null,"createdAt":"\(ago(hours: 6))"},
+     {"id":"r2","siteId":"s1","site":"晨麥手作","org":"晨麥手作","service":"line","label":"LINE 官方帳號","note":null,"status":"approved","reply":"已經接好了","requestedByEmail":"owner@chenmai.example","requestedByName":"晨麥店長","handledByEmail":"demo@studiox.tw","handledAt":"\(ago(hours: 200))","createdAt":"\(ago(hours: 230))"}
+    ]}
+    """ }
+
+    private static let adminServices = #"""
+    {"services":[{"id":"llm.anthropic","label":"Claude"},{"id":"email","label":"Email"},{"id":"sms","label":"簡訊"},{"id":"payment","label":"金流"},{"id":"line","label":"LINE"},{"id":"search","label":"Google 搜尋成效"},{"id":"assistant","label":"AI 客服"}],
+     "sites":[
+      {"id":"s1","name":"晨麥手作","org":"晨麥手作","orgId":"o1","status":"active","cmsUrl":"https://admin.chenmai.studiox.tw","services":{"llm.anthropic":{"enabled":true,"billable":true,"keyLabel":"StudioX 主帳號","own":false,"capNtd":3000},"email":{"enabled":true,"billable":true,"keyLabel":"Resend","own":false,"capNtd":null},"sms":{"enabled":true,"billable":true,"keyLabel":"三竹","own":false,"capNtd":null},"payment":{"enabled":true,"billable":false,"keyLabel":"晨麥金流","own":true,"capNtd":null},"line":{"enabled":true,"billable":false,"keyLabel":"晨麥 LINE","own":true,"capNtd":null},"assistant":{"enabled":true,"billable":true,"keyLabel":null,"own":false,"capNtd":null}}},
+      {"id":"s2","name":"StudioX.tw","org":"StudioX","orgId":"o2","status":"active","cmsUrl":"https://cms.studiox.tw","services":{"llm.anthropic":{"enabled":true,"billable":false,"keyLabel":"StudioX 主帳號","own":false,"capNtd":null},"email":{"enabled":true,"billable":false,"keyLabel":"Resend","own":false,"capNtd":null},"search":{"enabled":true,"billable":false,"keyLabel":"Search Console","own":false,"capNtd":null}}},
+      {"id":"s3","name":"木白設計","org":"木白設計","orgId":"o3","status":"active","cmsUrl":"https://admin.mubai.studiox.tw","services":{"email":{"enabled":true,"billable":true,"keyLabel":"Resend","own":false,"capNtd":null}}}
+     ]}
+    """#
+
+    private static let adminSiteServices = #"""
+    {"site":{"id":"s1","name":"晨麥手作","orgId":"o1","org":"晨麥手作","cmsUrl":"https://admin.chenmai.studiox.tw","status":"active"},
+     "services":[
+      {"id":"llm.anthropic","label":"Claude","description":"Xena、AI 客服用的模型","provider":"anthropic","providerLabel":"Anthropic（Claude）","via":"gateway","metering":"llm","settingsFields":[],"configured":true,"enabled":true,"keyId":"k1","billable":true,"capNtd":3000,"settings":{},"monthToDateNtd":842,"keys":[{"id":"k1","provider":"anthropic","label":"StudioX 主帳號","hint":"sk-ant-…a1b2","orgId":null,"disabled":false,"own":false}]},
+      {"id":"email","label":"Email","description":"訂單通知、客服信","provider":"resend","providerLabel":"Resend（Email）","via":"gateway","metering":"each","settingsFields":[{"key":"fromEmail","label":"寄件地址"},{"key":"fromName","label":"寄件人名稱","optional":true},{"key":"inboundWebhookSecret","label":"收信 Webhook 密鑰","secret":true,"optional":true}],"configured":true,"enabled":true,"keyId":"k2","billable":true,"capNtd":null,"settings":{"fromEmail":"hello@chenmai.example","fromName":"晨麥手作","inboundWebhookSecret":"••••（已設定）"},"monthToDateNtd":126,"keys":[{"id":"k2","provider":"resend","label":"Resend","hint":"re_…9f0c","orgId":null,"disabled":false,"own":false}]},
+      {"id":"sms","label":"簡訊","description":"行銷簡訊、通知","provider":"mitake","providerLabel":"三竹簡訊","via":"gateway","metering":"each","settingsFields":[],"configured":true,"enabled":true,"keyId":"k3","billable":true,"capNtd":null,"settings":{},"monthToDateNtd":318,"keys":[{"id":"k3","provider":"mitake","label":"三竹","hint":"…","orgId":null,"disabled":false,"own":false}]},
+      {"id":"line","label":"LINE 官方帳號","description":"客人在 LINE 問 Xena","provider":"line","providerLabel":"LINE 官方帳號","via":"site","metering":"none","settingsFields":[],"configured":true,"enabled":true,"keyId":"k4","billable":false,"capNtd":null,"settings":{},"monthToDateNtd":null,"keys":[{"id":"k4","provider":"line","label":"晨麥 LINE","hint":"…3a91","orgId":"o1","disabled":false,"own":true}]},
+      {"id":"search","label":"Google 搜尋成效","description":"Search Console 的點擊、曝光","provider":"gsc","providerLabel":"Google 服務帳戶（Search Console）","via":"gateway","metering":"none","settingsFields":[{"key":"property","label":"資源"}],"configured":false,"enabled":false,"keyId":null,"billable":true,"capNtd":null,"settings":{},"monthToDateNtd":null,"keys":[{"id":"k5","provider":"gsc","label":"Search Console","hint":"…","orgId":null,"disabled":false,"own":false}]}
+     ]}
+    """#
+
+    private static let adminAssistant = #"""
+    {"site":{"id":"s1","name":"晨麥手作"},"configured":true,"enabled":true,
+     "settings":{"provider":"anthropic","modelMode":"latest","model":"","family":"claude-haiku","includePreview":false,"maxOutputTokens":1200,"fastReplies":true,"followUps":true,"temperature":null,"instructions":"語氣親切，蛋捲的保存方式要講清楚。","rateLimit":20,"allowedOrigins":[],"logConversations":true,"retentionDays":180},
+     "providers":[{"id":"anthropic","name":"Anthropic","provisioned":true,"families":[{"family":"claude-haiku","latest":"Claude Haiku"},{"family":"claude-sonnet","latest":"Claude Sonnet"}]},{"id":"openai","name":"OpenAI","provisioned":false,"families":[]}],
+     "fromSite":null}
+    """#
+
+    private static let lineConnect = #"""
+    {"ok":true,"webhook":"https://admin.chenmai.studiox.tw/api/line/webhook","account":{"name":"晨麥手作","id":"@chenmai","picture":null},
+     "steps":[{"key":"key","label":"金鑰","ok":true},{"key":"token","label":"換 token","ok":true},{"key":"webhook","label":"設定 Webhook","ok":true},{"key":"test","label":"LINE 打一次測試","ok":true},{"key":"autoreply","label":"關掉官方帳號的自動回應","ok":null,"detail":"LINE 沒有 API，要到官方帳號後台點一下"}]}
+    """#
+
+    private static var adminKeys: String { """
+    {"keys":[
+      {"id":"k1","provider":"anthropic","label":"StudioX 主帳號","hint":"sk-ant-…a1b2","orgId":null,"org":null,"disabled":false,"lastUsedAt":"\(ago(hours: 0.2))","createdAt":"2026-02-01T08:00:00.000Z","updatedAt":"2026-02-01T08:00:00.000Z","sites":3},
+      {"id":"k6","provider":"openai","label":"OpenAI 備援","hint":"sk-…7d2e","orgId":null,"org":null,"disabled":false,"lastUsedAt":"\(ago(hours: 20))","createdAt":"2026-04-01T08:00:00.000Z","updatedAt":"2026-04-01T08:00:00.000Z","sites":1},
+      {"id":"k2","provider":"resend","label":"Resend","hint":"re_…9f0c","orgId":null,"org":null,"disabled":false,"lastUsedAt":"\(ago(hours: 1))","createdAt":"2026-02-01T08:00:00.000Z","updatedAt":"2026-02-01T08:00:00.000Z","sites":3},
+      {"id":"k4","provider":"line","label":"晨麥 LINE","hint":"…3a91","orgId":"o1","org":"晨麥手作","disabled":false,"lastUsedAt":"\(ago(hours: 4))","createdAt":"2026-08-01T08:00:00.000Z","updatedAt":"2026-08-01T08:00:00.000Z","sites":1}],
+     "providers":{"anthropic":{"label":"Anthropic（Claude）","fields":[{"key":"apiKey","label":"API 金鑰","secret":true,"placeholder":"sk-ant-…"}]},
+                  "openai":{"label":"OpenAI","fields":[{"key":"apiKey","label":"API 金鑰","secret":true,"placeholder":"sk-…"}]},
+                  "resend":{"label":"Resend（Email）","fields":[{"key":"apiKey","label":"API 金鑰","secret":true,"placeholder":"re_…"}]},
+                  "line":{"label":"LINE 官方帳號","fields":[{"key":"channelId","label":"Messaging API：Channel ID","optional":true},{"key":"channelSecret","label":"Messaging API：Channel secret","secret":true}]}},
+     "orgs":[{"id":"o1","name":"晨麥手作"},{"id":"o2","name":"StudioX"},{"id":"o3","name":"木白設計"}]}
+    """ }
+
+    private static var adminUsage: String {
+        let daily = (0..<7).map { (i: Int) -> String in
+            let cost: Int = 180_000_000 + i * 22_000_000
+            let price: Int = 260_000_000 + i * 31_000_000
+            return "{\"day\":\"\(day(6 - i))\",\"costMicros\":\(cost),\"priceMicros\":\(price)}"
+        }.joined(separator: ",")
+        return """
+        {"period":"2026-10","rows":[
+          {"orgId":"o1","org":"晨麥手作","siteId":"s1","site":"晨麥手作","service":"llm.anthropic","model":"Claude Haiku","billable":true,"calls":1820,"quantity":1820,"costMicros":612000000,"priceMicros":842000000},
+          {"orgId":"o1","org":"晨麥手作","siteId":"s1","site":"晨麥手作","service":"sms","model":null,"billable":true,"calls":420,"quantity":420,"costMicros":294000000,"priceMicros":378000000},
+          {"orgId":"o1","org":"晨麥手作","siteId":"s1","site":"晨麥手作","service":"email","model":null,"billable":true,"calls":1260,"quantity":1260,"costMicros":63000000,"priceMicros":126000000},
+          {"orgId":"o3","org":"木白設計","siteId":"s3","site":"木白設計","service":"email","model":null,"billable":true,"calls":84,"quantity":84,"costMicros":4200000,"priceMicros":8400000}],
+         "daily":[\(daily)],"totals":{"costMicros":973200000,"priceMicros":1354400000,"calls":3584}}
+        """
+    }
+
+    private static let adminAiUsage = #"""
+    {"period":"2026-10","sites":[{"id":"s1","name":"晨麥手作"}],"features":["assistant","copilot"],
+     "rows":[{"siteId":"s1","site":"晨麥手作","feature":"assistant","service":"llm.anthropic","model":"Claude Haiku","calls":1640,"input":2840000,"output":412000,"cacheRead":1900000,"costMicros":540000000,"priceMicros":742000000},
+             {"siteId":"s1","site":"晨麥手作","feature":"copilot","service":"llm.anthropic","model":"Claude Sonnet","calls":180,"input":620000,"output":88000,"cacheRead":410000,"costMicros":72000000,"priceMicros":100000000}],
+     "recent":[],"daily":[]}
+    """#
+
+    private static let adminBilling = #"""
+    {"period":"2026-10","statements":[
+     {"orgId":"o1","org":"晨麥手作","statement":{"id":"b1","status":"issued","note":null,"issuedAt":"2026-10-01T02:00:00.000Z","paidAt":null},
+      "lines":[{"siteId":null,"site":"—","service":"plan","label":"方案：成長","quantity":1,"unit":"月","amountMicros":2980000000},{"siteId":"s1","site":"晨麥手作","service":"sms","label":"簡訊（超過內含的 300 則）","quantity":120,"unit":"則","amountMicros":108000000},{"siteId":"s1","site":"晨麥手作","service":"llm","label":"AI 用量","quantity":1820,"unit":"次","amountMicros":842000000}],
+      "subtotalMicros":3930000000,"adjustmentMicros":0,"totalMicros":3930000000},
+     {"orgId":"o3","org":"木白設計","statement":null,
+      "lines":[{"siteId":null,"site":"—","service":"plan","label":"方案：入門","quantity":1,"unit":"月","amountMicros":990000000}],
+      "subtotalMicros":990000000,"adjustmentMicros":0,"totalMicros":990000000}
+    ]}
+    """#
+
+    private static let adminPlans = #"""
+    {"catalog":{"plans":[
+      {"id":"starter","name":"入門","tagline":"一個網站、基本的後台","price":990,"lines":["Xena 每月 300 則","Email 1,000 封"]},
+      {"id":"growth","name":"成長","tagline":"AI 客服、LINE、行銷","price":2980,"lines":["Xena 每月 2,000 則","AI 客服","簡訊 300 則","Email 5,000 封"]}],
+     "addons":[{"id":"seats","name":"多 3 個座位","description":"後台人員多 3 位","price":300,"public":true,"effect":{"kind":"seats","seats":3}}]},
+     "models":{},
+     "orgs":[{"id":"o1","name":"晨麥手作","sites":1,"subscription":{"planId":"growth","addons":[{"id":"seats","qty":1}],"note":null},"monthlyFeeNtd":3280},
+             {"id":"o3","name":"木白設計","sites":1,"subscription":{"planId":"starter","addons":[],"note":null},"monthlyFeeNtd":990},
+             {"id":"o2","name":"StudioX","sites":1,"subscription":null,"monthlyFeeNtd":null}]}
+    """#
+
+    private static let adminPricing = #"""
+    {"pricing":{"fxUsdTwd":32.5,"llmMarkup":1.3,"email":{"cost":0.05,"price":0.1},"sms":{"cost":0.7,"price":0.9},"orgs":{"o1":{"smsPrice":0.85}}},
+     "orgs":[{"id":"o1","name":"晨麥手作"},{"id":"o2","name":"StudioX"},{"id":"o3","name":"木白設計"}]}
+    """#
+
+    private static let adminTeam = #"""
+    {"managedBy":null,"members":[
+     {"id":"demo","email":"demo@studiox.tw","name":"Andy","level":"owner","createdAt":"2026-01-10T08:00:00.000Z","hasPassword":false},
+     {"id":"t2","email":"design@studiox.example","name":"設計","level":"manager","createdAt":"2026-05-03T08:00:00.000Z","hasPassword":true}]}
+    """#
+
+    private static var adminAudit: String { """
+    {"entries":[
+     {"id":"a1","action":"console.member","actionLabel":"網站成員","actorName":"Andy","actorEmail":"demo@studiox.tw","actorLevel":"owner","entityType":null,"entityId":null,"entityLabel":null,"summary":"「晨麥手作」成員職能：員工 → 訂單處理人員","detail":null,"source":"app","ok":true,"createdAt":"\(ago(hours: 1))"},
+     {"id":"a2","action":"platform.service","actionLabel":"平台：網站服務","actorName":"Andy","actorEmail":"demo@studiox.tw","actorLevel":"owner","entityType":null,"entityId":null,"entityLabel":null,"summary":"「晨麥手作」的 Claude：每月上限 NT$3,000","detail":null,"source":"admin","ok":true,"createdAt":"\(ago(hours: 26))"},
+     {"id":"a3","action":"console.invite","actionLabel":"邀請","actorName":"Andy","actorEmail":"demo@studiox.tw","actorLevel":"owner","entityType":null,"entityId":null,"entityLabel":null,"summary":"產生「晨麥手作」的邀請（員工）並寄出","detail":null,"source":"app","ok":true,"createdAt":"\(ago(hours: 48))"},
+     {"id":"a4","action":"platform.key","actionLabel":"平台：金鑰","actorName":"Andy","actorEmail":"demo@studiox.tw","actorLevel":"owner","entityType":null,"entityId":null,"entityLabel":null,"summary":"新增金鑰「OpenAI 備援」","detail":null,"source":"admin","ok":true,"createdAt":"\(ago(hours: 140))"}]}
+    """ }
+
+    private static var adminConnectors: String { """
+    {"clients":[{"clientId":"c1","clientName":"Claude","lastUsedAt":"\(ago(hours: 3))","isEnabled":true,"activeTokens":2,"createdAt":"\(ago(hours: 400))"},
+                {"clientId":"c2","clientName":"ChatGPT","lastUsedAt":"\(ago(hours: 50))","isEnabled":true,"activeTokens":1,"createdAt":"\(ago(hours: 900))"}]}
+    """ }
+
+    private static var adminAiRecords: String { """
+    {"all":true,"who":"all","page":1,"total":3,"more":false,"stats":{"calls":1240,"copilot":980,"failed":12,"writes":64,"external":260},
+     "records":[
+      {"id":"m1","tool":"chenmai.studiox.tw:update_order","site":"chenmai.studiox.tw","label":"更新訂單","args":null,"ok":true,"proposal":false,"approvedVia":"chat","approvedViaLabel":"對話確認","xena":true,"source":"Xena AI（Console）","actorEmail":"demo@studiox.tw","error":null,"durationMs":820,"createdAt":"\(ago(hours: 0.5))"},
+      {"id":"m2","tool":"chenmai.studiox.tw:traffic_report","site":"chenmai.studiox.tw","label":"看流量","args":null,"ok":true,"proposal":false,"approvedVia":null,"approvedViaLabel":null,"xena":false,"source":"Claude","actorEmail":"demo@studiox.tw","error":null,"durationMs":1420,"createdAt":"\(ago(hours: 3))"},
+      {"id":"m3","tool":"chenmai.studiox.tw:issue_coupons","site":"chenmai.studiox.tw","label":"發折價券","args":null,"ok":true,"proposal":true,"approvedVia":"proposal","approvedViaLabel":"提案（還沒執行）","xena":true,"source":"Xena AI（Console）","actorEmail":"demo@studiox.tw","error":null,"durationMs":210,"createdAt":"\(ago(hours: 5))"}]}
+    """ }
+
+    private static let adminCopilot = #"""
+    {"settings":{"enabled":true},"plan":null,"ceiling":{"tier":"flagship","label":"旗艦"},"auto":true,
+     "tiers":[{"tier":"light","label":"輕量","allowed":true,"models":["Anthropic · Claude Haiku"]},{"tier":"standard","label":"標準","allowed":true,"models":["Anthropic · Claude Sonnet"]}],
+     "fallback":{"provider":"OpenAI","model":"GPT","tierLabel":"標準"},"jev":{"ready":true,"source":"vault","vault":null},"problem":null,
+     "providers":[{"id":"anthropic","name":"Anthropic","hasKey":true,"source":"vault","vault":null},{"id":"openai","name":"OpenAI","hasKey":true,"source":"vault","vault":null},{"id":"google","name":"Google","hasKey":false,"source":null,"vault":null}],
+     "platform":true,"vault":null}
+    """#
 
     // MARK: 回覆建議（Xena 分析過這位客人）
 
@@ -240,7 +445,7 @@ nonisolated enum DemoServer {
     private static let basicTools = #"["list","get","search","update","traffic_report"]"#
 
     private static var me: String { """
-    {"user":{"id":"demo","name":"Andy","email":"demo@studiox.tw","staff":true},
+    {"user":{"id":"demo","name":"Andy","email":"demo@studiox.tw","staff":true,"consoleLevel":"owner","consoleLevelLabel":"負責人","consoleCaps":["console.read","console.manage","platform.read","platform.manage","users.level","audit.read","mcp.manage"]},
      "sites":[
       {"site":"chenmai.studiox.tw","name":"晨麥手作","org":"晨麥手作","url":"https://chenmai.studiox.tw","adminUrl":"https://chenmai.studiox.tw/login?sso=studiox","level":"owner","levelLabel":"負責人","icon":null,"tools":\(shopTools),
        "stats":{"live":12,"visitors":1843,"pageviews":6120,"change":0.18,"trend":[\(trend([210, 245, 232, 268, 301, 287, 300]))]}},

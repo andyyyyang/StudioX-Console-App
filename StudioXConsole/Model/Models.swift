@@ -27,6 +27,11 @@ struct Me {
     var imageURL: URL?
     /// StudioX 員工
     var staff: Bool
+    /// console 的後台等級（owner／manager…；不是後台人員是 nil）與名稱
+    var consoleLevel: String?
+    var consoleLevelLabel: String?
+    /// 平台管理用得到的能力（console.read、platform.manage…）：App 照這個決定顯示哪些管理頁
+    var consoleCaps: Set<String>
     var sites: [SiteSummary]
 
     init(_ json: JSONValue) {
@@ -36,6 +41,9 @@ struct Me {
         name = u["name"]?.string ?? email.split(separator: "@").first.map(String.init) ?? "你"
         imageURL = u["image"]?.string.flatMap(URL.init(string:))
         staff = u["staff"]?.bool ?? false
+        consoleLevel = u["consoleLevel"]?.string
+        consoleLevelLabel = u["consoleLevelLabel"]?.string
+        consoleCaps = Set((u["consoleCaps"]?.array ?? []).compactMap(\.string))
         sites = (json["sites"]?.array ?? []).map(SiteSummary.init)
     }
 }
@@ -1122,7 +1130,9 @@ struct TrafficReport {
 /// Google 搜尋成效（search_report；lib/search-console.ts）
 struct SearchReport {
     struct Row: Identifiable {
-        var id: String { key }
+        /// 第幾列＋key：舊版網站的頁面清單可能有兩列一樣的路徑（http／www 分開算），id 不能重複
+        var id: String { "\(index)·\(key)" }
+        var index = 0
         let key: String
         let clicks: Int
         let impressions: Int
@@ -1184,8 +1194,8 @@ struct SearchReport {
             return Point(key: raw, label: label, date: date, clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0)
         }
         let rows = { (v: JSONValue?) in
-            (v?.array ?? []).map {
-                Row(key: $0["key"]?.string ?? "", clicks: $0["clicks"]?.int ?? 0, impressions: $0["impressions"]?.int ?? 0, ctr: $0["ctr"]?.double, position: $0["position"]?.double, name: TrafficReport.nonEmpty($0["name"]?.string))
+            (v?.array ?? []).enumerated().map { i, r in
+                Row(index: i, key: r["key"]?.string ?? "", clicks: r["clicks"]?.int ?? 0, impressions: r["impressions"]?.int ?? 0, ctr: r["ctr"]?.double, position: r["position"]?.double, name: TrafficReport.nonEmpty(r["name"]?.string))
             }
         }
         queries = rows(json["queries"])

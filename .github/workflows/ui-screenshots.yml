@@ -112,6 +112,10 @@ jobs:
             "pending|-demo -demoRoute pending"
             "report|-demo -demoRoute report|10"
             "traffic-names|-demo -demoRoute traffic -demoScroll names|10"
+            "console|-demo -demoRoute console"
+            "console-site|-demo -demoRoute console-site"
+            "console-services|-demo -demoRoute console-services"
+            "console-billing|-demo -demoRoute console-billing"
             "voice|-demo -demoVoice YES|12"
             "account|-demo -demoTab account"
           )
