@@ -96,7 +96,10 @@ final class AppModel {
     }
 
     private(set) var phase: Phase
-    private(set) var me: Me?
+    private(set) var me: Me? {
+        // 平台管理者：首頁「要處理」也列 console 的待辦
+        didSet { briefing.loadsPlatform = canManageConsole }
+    }
     private(set) var loadError: String?
     /// 各網站的資料與欄位定義（/api/app/schema）
     private(set) var schemas: [String: SiteSchema] = [:]
@@ -666,11 +669,15 @@ final class AppModel {
         case .orders(let site, let status):
             openOrders(site: site, status: status)
         case .open(let route):
-            if case .order(let site, _) = route {
+            switch route {
+            case .order(let site, _):
                 // 返回時是那個網站的「等出貨」
                 openOrders(site: site, status: "paid")
-            } else {
+            case .thread, .xenaConversation, .inquiry:
                 openNeedsYou()
+            default:
+                showXena = false
+                showAccount = false
             }
             open(route)
         case .askXena(let prompt):

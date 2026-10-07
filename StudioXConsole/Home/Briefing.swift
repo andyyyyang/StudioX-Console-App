@@ -7,6 +7,7 @@ import SwiftUI
 ///   - 客人在等回覆的客服信（support_thread）
 ///   - Xena 轉給專人的網站客服對話（assistant_conversation）、她正在回答的對話、新的專案詢問（inquiry）
 ///   - 信箱裡還沒分的信（mailbox）
+///   - 平台管理者：console 的待辦（服務申請、帳單、同步失敗…）
 @Observable
 final class Briefing {
     private(set) var ops: [String: OpsReport] = [:]
@@ -21,6 +22,10 @@ final class Briefing {
     private(set) var mail: [MailSummary] = []
     /// 等你決定：console 看數據找到的優化（要處理的事是 attention）
     private(set) var decisions: [Decision] = []
+    /// StudioX Console 的待辦（平台管理者才有）
+    private(set) var platform: [ConsoleTodo] = []
+    /// 要不要拿 console 的待辦（AppModel 照登入的人有沒有平台管理權限設）
+    @ObservationIgnored var loadsPlatform = false
     /// 拿不到資料的網站（網站代號 → 原因）
     private(set) var failures: [String: String] = [:]
     private(set) var loading = false
@@ -46,6 +51,7 @@ final class Briefing {
         inquiries = []
         mail = []
         decisions = []
+        platform = []
         failures = [:]
         updatedAt = nil
     }
@@ -85,6 +91,16 @@ final class Briefing {
             if let found = try? await api.decisions() {
                 withAnimation(Motion.ease) { self.decisions = found }
             }
+        }
+        // console 的待辦：一樣不等；拿不到就留著上一次的
+        if loadsPlatform {
+            Task { [api] in
+                if let todos = try? await api.consoleTodos() {
+                    withAnimation(Motion.ease) { self.platform = todos }
+                }
+            }
+        } else if !platform.isEmpty {
+            platform = []
         }
         // 一個網站一個請求序列；網站之間同時跑（結果各自寫回這裡）
         let ids = sites.map(\.id)
@@ -177,6 +193,14 @@ final class Briefing {
                 title: "Xena 轉給專人的對話 \(handoffs.count) 段",
                 detail: handoffs.prefix(2).map { $0.contactName ?? $0.firstQuestion ?? "訪客" }.joined(separator: "、"),
                 action: action
+            ))
+        }
+        // StudioX Console 的待辦（服務申請、帳單、同步失敗…）：點了打開平台管理的那一頁
+        for todo in platform {
+            out.append(AttentionItem(
+                id: "console-\(todo.key)", site: "", icon: todo.icon, tone: todo.tone,
+                title: todo.title, detail: "StudioX Console・\(todo.detail)",
+                action: .open(Route.console(todo.page))
             ))
         }
         if let first = inquiries.first {

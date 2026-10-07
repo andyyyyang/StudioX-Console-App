@@ -129,6 +129,11 @@ struct ConsoleSiteDetail {
     var env: String
     var members: [Member]
     var invites: [Invite]
+    /// 上線進度（建立網站 → 登入設定 → 負責人 → 方案 → 服務 → LINE）；console 舊版沒有就是空的
+    var launch: [LaunchStep]
+
+    /// 上線進度裡必要的步驟都完成了（LINE 這種選用的不算）
+    var launched: Bool { launch.allSatisfy { $0.optional || $0.state == "done" } }
 
     init(_ j: JSONValue) {
         let s = j["site"] ?? .null
@@ -156,6 +161,117 @@ struct ConsoleSiteDetail {
         invites = (j["invites"]?.array ?? []).map {
             Invite(id: $0["id"]?.string ?? "", email: $0["email"]?.string, level: $0["level"]?.string ?? "staff",
                    expiresAt: $0["expiresAt"]?.date, createdAt: $0["createdAt"]?.date)
+        }
+        launch = (j["launch"]?.array ?? []).map(LaunchStep.init)
+    }
+}
+
+/// 網站上線的一步（console 的 lib/console/launch.ts）
+struct LaunchStep: Identifiable, Hashable {
+    /// site、login、owner、plan、services、line
+    let key: String
+    var label: String
+    /// done、waiting（等對方）、todo
+    var state: String
+    var detail: String
+    /// 後台的網址（# 開頭是同一頁的區塊）
+    var href: String?
+    var optional: Bool
+    var id: String { key }
+
+    init(_ j: JSONValue) {
+        key = j["key"]?.string ?? ""
+        label = j["label"]?.string ?? ""
+        state = j["state"]?.string ?? "todo"
+        detail = j["detail"]?.string ?? ""
+        href = j["href"]?.string
+        optional = j["optional"]?.bool ?? false
+    }
+
+    var icon: String {
+        switch state {
+        case "done": "check-circle"
+        case "waiting": "clock"
+        default: optional ? "information-circle" : "exclamation-circle"
+        }
+    }
+
+    var tone: Tone {
+        switch state {
+        case "done": .active
+        case "waiting": .info
+        default: optional ? .neutral : .warning
+        }
+    }
+}
+
+// MARK: - 待辦
+
+/// console 的待辦（GET /api/admin/console/todos；後台首頁最上面那一塊）：首頁「要處理」也列出來
+struct ConsoleTodo: Identifiable, Hashable {
+    /// requests、drafts、unpaid、sync、unstaffed、nokey、cap、disabledKey
+    let key: String
+    var title: String
+    var detail: String
+    var count: Int
+    /// 後台的網址；只有一筆時直接是那一筆
+    var href: String
+    var tone: Tone
+    var id: String { key }
+
+    init(_ j: JSONValue) {
+        key = j["key"]?.string ?? ""
+        title = j["title"]?.string ?? ""
+        detail = j["detail"]?.string ?? ""
+        count = j["count"]?.int ?? 0
+        href = j["href"]?.string ?? ""
+        switch j["tone"]?.string ?? "" {
+        case "danger": tone = .danger
+        case "warning": tone = .warning
+        default: tone = .info
+        }
+    }
+
+    var icon: String {
+        switch key {
+        case "requests": "inbox"
+        case "drafts": "document-text"
+        case "unpaid": "banknotes"
+        case "sync": "exclamation-triangle"
+        case "unstaffed": "users"
+        case "cap": "chart-bar"
+        default: "key"
+        }
+    }
+
+    /// 點了去 App 的哪一頁
+    var page: ConsolePage { ConsolePage(adminPath: href) ?? .home }
+}
+
+extension ConsolePage {
+    /// 後台網址 → App 的平台管理頁（/admin/console/sites/<id>、/admin/platform/billing?…）；對不上回 nil
+    init?(adminPath href: String) {
+        let path = href.split(whereSeparator: { $0 == "?" || $0 == "#" }).first.map(String.init) ?? ""
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.first == "admin" else { return nil }
+        let rest = Array(parts.dropFirst())
+        if rest == ["console"] {
+            self = .customers
+        } else if rest.count == 3, rest[0] == "console", rest[1] == "sites" {
+            self = .site(rest[2])
+        } else if rest == ["platform"] {
+            self = .usage
+        } else if rest.count >= 2, rest[0] == "platform" {
+            switch rest[1] {
+            case "requests": self = .requests
+            case "billing": self = .billing
+            case "keys": self = .keys
+            case "plans": self = .plans
+            case "services": self = rest.count >= 3 ? .siteServices(rest[2]) : .services
+            default: return nil
+            }
+        } else {
+            return nil
         }
     }
 }

@@ -88,6 +88,7 @@ nonisolated enum DemoServer {
         }
         switch p {
         case "console": return (200, parse(adminOrgs))
+        case "console/todos": return (200, parse(adminTodos))
         case "console/stats":
             return (200, parse(#"{"days":7,"sites":{"s1":{"visitors":1843,"pageviews":6120,"change":18,"live":12},"s2":{"visitors":412,"pageviews":1380,"change":-4,"live":3},"s3":{"visitors":96,"pageviews":240,"change":7,"live":1}}}"#))
         case let x where x.hasPrefix("console/sites/"): return (200, parse(adminSite))
@@ -123,6 +124,13 @@ nonisolated enum DemoServer {
     ]}
     """ }
 
+    private static var adminTodos: String { """
+    {"todos":[
+     {"key":"requests","title":"1 筆服務申請等你處理","detail":"木白設計：方案：成長","count":1,"href":"/admin/platform/requests","tone":"warning"},
+     {"key":"sync","title":"1 個網站同步失敗","detail":"木白設計：網站回應 502","count":1,"href":"/admin/console/sites/s3","tone":"danger"}
+    ]}
+    """ }
+
     private static var adminSite: String { """
     {"site":{"id":"s1","orgId":"o1","name":"晨麥手作","siteUrl":"https://chenmai.studiox.tw","cmsUrl":"https://admin.chenmai.studiox.tw","clientId":"site_chenmai","status":"active","supportDesk":false,"lastSyncAt":"\(ago(hours: 2))","lastSyncError":null,"createdAt":"2026-03-02T08:00:00.000Z","updatedAt":"2026-09-30T08:00:00.000Z"},
      "org":{"id":"o1","name":"晨麥手作"},
@@ -132,7 +140,14 @@ nonisolated enum DemoServer {
       {"userId":"u_b","email":"ops@chenmai.example","name":"出貨小幫手","signature":null,"level":"fulfillment","since":"2026-05-11T08:00:00.000Z","appleLinked":true},
       {"userId":"u_c","email":"cs@chenmai.example","name":"客服","signature":null,"level":"staff","since":"2026-07-20T08:00:00.000Z","appleLinked":false},
       {"userId":"demo","email":"demo@studiox.tw","name":"Andy","signature":{"title":"StudioX"},"level":"manager","since":"2026-03-02T08:00:00.000Z","appleLinked":true}],
-     "invites":[{"id":"i1","email":"new@chenmai.example","level":"staff","expiresAt":"\(ago(hours: -120))","createdAt":"\(ago(hours: 48))"}]}
+     "invites":[{"id":"i1","email":"new@chenmai.example","level":"staff","expiresAt":"\(ago(hours: -120))","createdAt":"\(ago(hours: 48))"}],
+     "launch":[
+      {"key":"site","label":"建立網站","state":"done","detail":"已建立"},
+      {"key":"login","label":"登入設定","state":"done","detail":"網站後台已設好環境變數，同步成功"},
+      {"key":"owner","label":"網站負責人","state":"done","detail":"負責人已加入"},
+      {"key":"plan","label":"方案","state":"done","detail":"成長"},
+      {"key":"services","label":"服務","state":"done","detail":"4 項服務開通中","href":"/admin/platform/services/s1"},
+      {"key":"line","label":"LINE 官方帳號","state":"done","detail":"已接上","optional":true}]}
     """ }
 
     private static var adminRequests: String { """
@@ -210,8 +225,9 @@ nonisolated enum DemoServer {
      "recent":[],"daily":[]}
     """#
 
-    private static let adminBilling = #"""
-    {"period":"2026-10","statements":[
+    // 月份照現在（帳單頁的月份選單只列最近 12 個月）
+    private static var adminBilling: String { #"""
+    {"period":"\#(PeriodPicker.current)","statements":[
      {"orgId":"o1","org":"晨麥手作","statement":{"id":"b1","status":"issued","note":null,"issuedAt":"2026-10-01T02:00:00.000Z","paidAt":null},
       "lines":[{"siteId":null,"site":"—","service":"plan","label":"方案：成長","quantity":1,"unit":"月","amountMicros":2980000000},{"siteId":"s1","site":"晨麥手作","service":"sms","label":"簡訊（超過內含的 300 則）","quantity":120,"unit":"則","amountMicros":108000000},{"siteId":"s1","site":"晨麥手作","service":"llm","label":"AI 用量","quantity":1820,"unit":"次","amountMicros":842000000}],
       "subtotalMicros":3930000000,"adjustmentMicros":0,"totalMicros":3930000000},
@@ -219,7 +235,7 @@ nonisolated enum DemoServer {
       "lines":[{"siteId":null,"site":"—","service":"plan","label":"方案：入門","quantity":1,"unit":"月","amountMicros":990000000}],
       "subtotalMicros":990000000,"adjustmentMicros":0,"totalMicros":990000000}
     ]}
-    """#
+    """# }
 
     private static let adminPlans = #"""
     {"catalog":{"plans":[

@@ -7,7 +7,8 @@ struct CustomersView: View {
     @State private var load = AdminLoad<[ConsoleOrg]>()
     @State private var stats: [String: ConsoleSiteStats] = [:]
     @State private var addingOrg = false
-    @State private var addingSite = false
+    /// 新增網站：nil＝沒開；空字串＝自己選客戶；客戶 id＝那個客戶底下
+    @State private var addingSiteFor: String?
     @State private var secret: SiteSecret?
 
     var body: some View {
@@ -21,7 +22,11 @@ struct CustomersView: View {
                 }
                 if let orgs = load.value {
                     if orgs.isEmpty {
-                        EmptyState(title: "還沒有客戶", message: "先新增一個客戶，再替他新增網站。")
+                        if model.can("console.manage") {
+                            EmptyState(title: "還沒有客戶", message: "新增客戶時可以順便建第一個網站。", actionTitle: "新增客戶", action: { addingOrg = true })
+                        } else {
+                            EmptyState(title: "還沒有客戶")
+                        }
                     }
                     ForEach(orgs) { org in
                         orgSection(org)
@@ -39,10 +44,10 @@ struct CustomersView: View {
         .pageTitle("客戶與網站")
         .task { if load.value == nil { await refresh() } }
         .sheet(isPresented: $addingOrg) {
-            NewOrgSheet { await refresh() }
+            NewOrgSheet(onDone: { await refresh() }, onSiteCreated: { secret = $0 })
         }
-        .sheet(isPresented: $addingSite) {
-            NewSiteSheet(orgs: load.value ?? []) { created in
+        .sheet(isPresented: Binding(get: { addingSiteFor != nil }, set: { if !$0 { addingSiteFor = nil } })) {
+            NewSiteSheet(orgs: load.value ?? [], preselect: addingSiteFor ?? "") { created in
                 secret = created
                 Task { await refresh() }
             }
@@ -53,7 +58,7 @@ struct CustomersView: View {
     private var addMenu: some View {
         Menu {
             Button("新增客戶", systemImage: "person.crop.rectangle.badge.plus") { addingOrg = true }
-            Button("新增網站", systemImage: "globe") { addingSite = true }
+            Button("新增網站", systemImage: "globe") { addingSiteFor = "" }
                 .disabled((load.value ?? []).isEmpty)
         } label: {
             AddIconLabel()
@@ -83,15 +88,23 @@ struct CustomersView: View {
     @ViewBuilder
     private func orgSection(_ org: ConsoleOrg) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(org.name)
-                    .textRole(.h3)
-                    .foregroundStyle(Theme.ink)
-                if let note = org.note, !note.isEmpty {
-                    Text(note)
-                        .textRole(.small)
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(org.name)
+                        .textRole(.h3)
+                        .foregroundStyle(Theme.ink)
+                    if let note = org.note, !note.isEmpty {
+                        Text(note)
+                            .textRole(.small)
+                            .foregroundStyle(Theme.muted)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                // 這個客戶底下再加一個網站（不用再選客戶）
+                if model.can("console.manage") {
+                    Button("＋ 網站") { addingSiteFor = org.id }
+                        .buttonStyle(.brand(.ghost, size: .sm))
                 }
             }
             if org.sites.isEmpty {
@@ -151,28 +164,69 @@ struct ConsoleSiteRow: View {
 
 // MARK: - 新增客戶、網站
 
+/// 新增客戶；填了網站網址就順便建第一個網站（後台網址預填 https://cms.<網域>），建好給一次登入設定
 private struct NewOrgSheet: View {
     var onDone: () async -> Void
+    /// 順便建了第一個網站：只出現這一次的登入設定
+    var onSiteCreated: (SiteSecret) -> Void
     @Environment(AppModel.self) private var model
     @State private var name = ""
     @State private var note = ""
+    @State private var siteURL = "https://"
+    @State private var cmsURL = "https://"
+    /// 後台網址自己改過就不再跟著網站網址預填
+    @State private var cmsEdited = false
 
     var body: some View {
-        AdminSheet(title: "新增客戶", subtitle: "客戶是一個公司或品牌，底下可以有好幾個網站。", action: "新增", disabled: name.trimmingCharacters(in: .whitespaces).isEmpty) {
-            await model.adminRun("新增了「\(name)」") {
-                _ = try await model.api.admin("console", method: "POST", body: ["name": .string(name.trimmingCharacters(in: .whitespaces)), "note": .string(note)])
+        AdminSheet(title: "新增客戶", subtitle: "客戶是一個公司或品牌，底下可以有好幾個網站；填了網站網址就順便建第一個網站。", action: wantsSite ? "新增客戶與網站" : "新增", disabled: !valid) {
+            let clean = name.trimmingCharacters(in: .whitespaces)
+            var created: SiteSecret?
+            let ok = await model.adminRun("新增了「\(clean)」") {
+                var body: [String: JSONValue] = ["name": .string(clean), "note": .string(note)]
+                if wantsSite {
+                    var site: [String: JSONValue] = ["name": .string(clean), "siteUrl": .string(front), "cmsUrl": .string(cms)]
+                    if front == cms { site["siteUrl"] = nil }
+                    body["site"] = .object(site)
+                }
+                let r = try await model.api.admin("console", method: "POST", body: .object(body))
+                if let env = r["env"]?.string {
+                    created = SiteSecret(siteName: r["site"]?["name"]?.string ?? clean, env: env)
+                }
                 await onDone()
             }
+            if ok, let created { onSiteCreated(created) }
+            return ok
         } content: {
             AdminTextField(label: "客戶名稱", text: $name, placeholder: "例如：黃毛丫頭", required: true)
+            AdminTextField(label: "網站網址（選填）", text: $siteURL, placeholder: "https://example.com", hint: "填了就順便建第一個網站（名稱先用客戶名稱，之後可以改）", keyboard: .URL)
+            if wantsSite {
+                AdminTextField(label: "網站後台網址", text: cmsBinding, placeholder: "https://cms.example.com", hint: "網站後台（studiox-cms）的網址，要 https", required: true, keyboard: .URL)
+            }
             AdminTextField(label: "備註（選填）", text: $note, placeholder: "聯絡人、合約…只有 StudioX 看得到", multiline: true)
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
+        .onChange(of: siteURL) { _, url in
+            guard !cmsEdited, let host = URL(string: url.trimmingCharacters(in: .whitespaces))?.host(), host.contains(".") else { return }
+            let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            cmsURL = "https://cms.\(bare)"
+        }
+    }
+
+    private var front: String { siteURL.trimmingCharacters(in: .whitespaces) }
+    private var cms: String { cmsURL.trimmingCharacters(in: .whitespaces) }
+    private var wantsSite: Bool { front.count > "https://".count }
+    private var valid: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && (!wantsSite || URL(string: cms)?.host() != nil)
+    }
+    private var cmsBinding: Binding<String> {
+        Binding(get: { cmsURL }, set: { cmsURL = $0; cmsEdited = true })
     }
 }
 
 private struct NewSiteSheet: View {
     let orgs: [ConsoleOrg]
+    /// 從客戶卡片的「＋ 網站」來的：先選好那個客戶
+    var preselect = ""
     var onCreated: (SiteSecret) -> Void
     @Environment(AppModel.self) private var model
     @State private var orgID = ""
@@ -199,7 +253,9 @@ private struct NewSiteSheet: View {
             AdminTextField(label: "前台網址（選填）", text: $siteURL, placeholder: "https://example.com", hint: "客人看到的網站；和後台同一個就不用填", keyboard: .URL)
         }
         .presentationDetents([.large])
-        .onAppear { if orgID.isEmpty { orgID = orgs.first?.id ?? "" } }
+        .onAppear {
+            if orgID.isEmpty { orgID = orgs.contains(where: { $0.id == preselect }) ? preselect : orgs.first?.id ?? "" }
+        }
     }
 
     private var valid: Bool {
@@ -248,7 +304,8 @@ struct ConsoleSiteView: View {
         .pageTitle(load.value?.name ?? "網站")
         .task { if load.value == nil { await refresh() } }
         .sheet(isPresented: $addingMember) {
-            AddMemberSheet(siteID: siteID, isOwner: isOwner) { await refresh() }
+            AddMemberSheet(siteID: siteID, isOwner: isOwner, firstMember: load.value?.members.isEmpty == true,
+                           onDone: { await refresh() }, onInvited: { invite = $0 })
         }
         .sheet(isPresented: $inviting) {
             InviteSheet(siteID: siteID, isOwner: isOwner) { result in
@@ -279,6 +336,44 @@ struct ConsoleSiteView: View {
         }
     }
 
+    /// 上線進度：每一步做完了沒，沒做的點了去那裡（登入設定、成員就在這一頁下面）
+    private func launchCard(_ d: ConsoleSiteDetail) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHead("上線進度", aside: "\(d.launch.filter { $0.state == "done" }.count)／\(d.launch.count) 完成", role: .h3)
+            RuledList {
+                ForEach(d.launch) { step in
+                    launchRow(step)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func launchRow(_ step: LaunchStep) -> some View {
+        let row = HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HeroIcon(step.icon, size: 16)
+                .foregroundStyle(step.tone.foreground)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(step.label + (step.optional ? "（選用）" : ""))
+                    .textRole(.body)
+                    .foregroundStyle(Theme.ink)
+                Text(step.detail)
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.vertical, 10)
+        // 還沒做、有地方可以去（另一頁）的才能點；同一頁的（# 開頭）往下捲就看得到
+        if step.state != "done", let href = step.href, !href.hasPrefix("#"), let page = ConsolePage(adminPath: href) {
+            NavigationLink(value: Route.console(page)) { row.contentShape(.rect) }
+                .buttonStyle(.row)
+        } else {
+            row
+        }
+    }
+
     @ViewBuilder
     private func content(_ d: ConsoleSiteDetail) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -304,12 +399,17 @@ struct ConsoleSiteView: View {
             }
         }
 
+        // 上線進度：還有必要的步驟沒做完才出現
+        if !d.launch.isEmpty, !d.launched {
+            launchCard(d)
+        }
+
         // 成員
         VStack(alignment: .leading, spacing: 12) {
             SectionHead("成員・\(d.members.count)", role: .h3) {
                 if canManage {
                     Menu {
-                        Button("加已有帳號的人", systemImage: "person.badge.plus") { addingMember = true }
+                        Button("用 Email 加人", systemImage: "person.badge.plus") { addingMember = true }
                         Button("產生邀請連結", systemImage: "link") { inviting = true }
                     } label: {
                         MoreLinkLabel(title: "加人")
@@ -317,7 +417,7 @@ struct ConsoleSiteView: View {
                 }
             }
             if d.members.isEmpty {
-                Text("還沒有成員。產生邀請連結傳給對方，用 Apple 登入就加入了。")
+                Text("還沒有成員。填對方的 Email：有 StudioX 帳號的直接加進來，還沒有的會收到邀請信。")
                     .textRole(.small)
                     .foregroundStyle(Theme.muted)
             } else {
@@ -487,26 +587,49 @@ struct ConsoleSiteView: View {
 
 // MARK: - 成員、邀請
 
+/// 用 Email 加人：有 StudioX 帳號的直接加進網站；還沒有的（console 回 no_account）改寄邀請信——
+/// 同一個欄位，不用先知道對方有沒有帳號
 private struct AddMemberSheet: View {
     let siteID: String
     let isOwner: Bool
+    /// 網站還沒有任何成員：第一位預設負責人（只有 StudioX 的負責人能指派）
+    var firstMember = false
     var onDone: () async -> Void
+    /// 對方還沒有帳號、寄了邀請：給上一頁顯示邀請連結
+    var onInvited: (InviteResult) -> Void
     @Environment(AppModel.self) private var model
     @State private var email = ""
     @State private var level = "manager"
 
     var body: some View {
-        AdminSheet(title: "加已有帳號的人", subtitle: "對方要已經用這個 Email 登入過 StudioX；還沒有帳號的人請改用邀請連結。", action: "加進網站", disabled: !email.contains("@")) {
-            await model.adminRun("加進來了") {
-                let r = try await model.api.admin("console/sites/\(siteID)/members", method: "POST", body: ["email": .string(email.trimmingCharacters(in: .whitespaces)), "level": .string(level)])
-                if r["sync"]?["ok"]?.bool == false { model.show("加好了，但推到網站失敗：\(r["sync"]?["error"]?.string ?? "")", tone: .warning) }
+        AdminSheet(title: "加人", subtitle: "有 StudioX 帳號的直接加進網站；還沒有的會收到邀請信（7 天內有效），用 Apple 登入就加入。", action: "加進網站", disabled: !email.contains("@")) {
+            let to = email.trimmingCharacters(in: .whitespaces)
+            var invited: InviteResult?
+            let ok = await model.adminRun(nil) {
+                do {
+                    let r = try await model.api.admin("console/sites/\(siteID)/members", method: "POST", body: ["email": .string(to), "level": .string(level)])
+                    if r["sync"]?["ok"]?.bool == false {
+                        model.show("加好了，但推到網站失敗：\(r["sync"]?["error"]?.string ?? "")", tone: .warning)
+                    } else {
+                        model.show("把 \(to) 加進來了")
+                    }
+                } catch let e as AdminCodeError where e.code == "no_account" {
+                    // 還沒有帳號：寄邀請信
+                    let r = try await model.api.admin("console/sites/\(siteID)/invites", method: "POST",
+                                                      body: ["level": .string(level), "email": .string(to), "send": .bool(true)])
+                    invited = InviteResult(url: r["url"]?.string ?? "", email: to, sent: r["sent"]?.bool ?? false,
+                                           sendError: r["sendError"]?.string, expiresAt: r["expiresAt"]?.date)
+                }
                 await onDone()
             }
+            if ok, let invited { onInvited(invited) }
+            return ok
         } content: {
             AdminTextField(label: "Email", text: $email, placeholder: "name@example.com", required: true, keyboard: .emailAddress)
             LevelPicker(level: $level, isOwner: isOwner)
         }
         .presentationDetents([.medium, .large])
+        .onAppear { if firstMember && isOwner { level = "owner" } }
     }
 }
 

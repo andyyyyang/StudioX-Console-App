@@ -217,12 +217,23 @@ private struct UsageChart: View {
 
 // MARK: - 帳單
 
-/// 每個客戶這個月的帳單（console 的 /admin/platform/billing）：草稿每次打開重算；開立、標成已付款、作廢
+/// 每個客戶這個月的帳單（console 的 /admin/platform/billing）：草稿每次打開重算；開立、標成已付款、作廢。
+/// 打開時讓 console 挑月份（月初上個月還有草稿就是上個月）；草稿可以一次全部開立
 struct BillingView: View {
     @Environment(AppModel.self) private var model
-    @State private var period = PeriodPicker.current
+    /// 空的＝還沒決定：第一次讓 console 挑
+    @State private var period = ""
+    /// console 挑好月份、設進 period 時不用再讀一次
+    @State private var skipReload = false
     @State private var load = AdminLoad<[OrgStatement]>()
     @State private var opened: OrgStatement?
+    @State private var confirmIssueAll = false
+    @State private var issuing = false
+
+    /// 要開立的草稿（金額 0 的不開，和 console 一樣）
+    private var drafts: [OrgStatement] {
+        (load.value ?? []).filter { $0.status == "draft" && $0.totalMicros != 0 }
+    }
 
     var body: some View {
         ScrollView {
@@ -230,7 +241,7 @@ struct BillingView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     PageHeader("帳單", eyebrow: "平台管理", subtitle: "草稿每次打開都照最新的用量重算；開立之後就固定了。")
                     HStack {
-                        PeriodPicker(period: $period)
+                        if !period.isEmpty { PeriodPicker(period: $period) }
                         Spacer()
                     }
                 }
@@ -240,8 +251,20 @@ struct BillingView: View {
                 if let list = load.value {
                     let total = list.reduce(0) { $0 + $1.totalMicros }
                     StatGrid(columns: 2) {
-                        Stat(value: Double(total) / 1_000_000, label: "這個月合計", format: { ntdMicros(Int($0 * 1_000_000)) })
+                        Stat(value: Double(total) / 1_000_000, label: "合計", format: { ntdMicros(Int($0 * 1_000_000)) })
                         Stat(value: Double(list.filter { $0.status == "paid" }.count), label: "已付款", note: "共 \(list.count) 位客戶")
+                    }
+                    if model.can("platform.manage"), !drafts.isEmpty {
+                        Button {
+                            confirmIssueAll = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                if issuing { ProgressView().controlSize(.small).tint(Theme.onAccent) }
+                                Text("開立全部草稿（\(drafts.count) 張）")
+                            }
+                        }
+                        .buttonStyle(.brand(.accent, size: .md, fullWidth: true))
+                        .disabled(issuing)
                     }
                     RuledList {
                         ForEach(list) { s in
@@ -276,16 +299,55 @@ struct BillingView: View {
         .refreshable { await Task { await refresh() }.value }
         .brandPage()
         .pageTitle("帳單")
-        .task(id: period) { await refresh() }
+        .task(id: period) {
+            if skipReload {
+                skipReload = false
+            } else {
+                await refresh()
+            }
+        }
         .sheet(item: $opened) { s in
             StatementSheet(statement: s, period: period) { await refresh() }
+        }
+        .confirmationDialog("開立 \(drafts.count) 張帳單？", isPresented: $confirmIssueAll, titleVisibility: .visible) {
+            Button("開立全部（\(ntdMicros(drafts.reduce(0) { $0 + $1.totalMicros }))）") { Task { await issueAll() } }
+        } message: {
+            Text("\(PeriodPicker.label(period))的草稿照現在的用量開立，開立之後明細就固定了（還能改回草稿）。不會寄給客戶。")
         }
     }
 
     private func refresh() async {
+        var picked: String?
         await load.run {
-            (try await model.api.admin("platform/billing", query: [URLQueryItem(name: "period", value: period)])["statements"]?.array ?? []).map(OrgStatement.init)
+            // 還沒選月份：不帶 period，console 回它挑的月份
+            let query = period.isEmpty ? [] : [URLQueryItem(name: "period", value: period)]
+            let r = try await model.api.admin("platform/billing", query: query)
+            picked = r["period"]?.string
+            return (r["statements"]?.array ?? []).map(OrgStatement.init)
         }
+        if period.isEmpty, let picked {
+            skipReload = true
+            period = picked
+        }
+    }
+
+    /// 一次開立這個月所有的草稿（console 每張各寫一筆操作紀錄）
+    private func issueAll() async {
+        issuing = true
+        defer { issuing = false }
+        var result: JSONValue = .null
+        let ok = await model.adminRun(nil) {
+            result = try await model.api.admin("platform/billing/issue-all", method: "POST", body: ["period": .string(period)])
+        }
+        guard ok else { return }
+        let issued = result["issued"]?.int ?? 0
+        let failed = result["failed"]?.array ?? []
+        if failed.isEmpty {
+            model.show("開立了 \(issued) 張帳單")
+        } else {
+            model.show("開立了 \(issued) 張，\(failed.count) 張沒開成：\(failed.compactMap { $0["org"]?.string }.joined(separator: "、"))", tone: .warning)
+        }
+        await refresh()
     }
 }
 

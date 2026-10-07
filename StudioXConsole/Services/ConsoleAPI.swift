@@ -2,6 +2,13 @@ import AuthenticationServices
 import Foundation
 import SwiftUI
 
+/// 管理 API 回的錯誤帶了代號（{ error, code }）：畫面可以照代號接著做（例如對方還沒有帳號就改寄邀請）
+nonisolated struct AdminCodeError: LocalizedError {
+    let message: String
+    let code: String
+    var errorDescription: String? { message }
+}
+
 nonisolated enum APIError: LocalizedError {
     /// 登入過期或被撤銷：要重新登入
     case unauthorized
@@ -399,9 +406,20 @@ final class ConsoleAPI {
             let message = reply["error"]?.string
             if http.statusCode == 403 { throw APIError.scope(message ?? "你沒有這項權限") }
             if http.statusCode == 404, message == "module_disabled" { throw APIError.tool("console 沒有開這項功能") }
+            // 帶代號的（例如加人時 no_account：對方還沒有帳號）：畫面看代號決定下一步
+            if let code = reply["code"]?.string { throw AdminCodeError(message: message ?? code, code: code) }
             throw APIError.tool(message ?? "伺服器回應 \(http.statusCode)，請稍後再試")
         }
         return reply
+    }
+
+    /// console 的待辦（平台管理者；服務申請、帳單、同步失敗…）。console 還沒更新（404）就是沒有
+    func consoleTodos() async throws -> [ConsoleTodo] {
+        do {
+            return (try await admin("console/todos")["todos"]?.array ?? []).map(ConsoleTodo.init)
+        } catch APIError.tool {
+            return []
+        }
     }
 
     // MARK: 通知（/api/app/devices、/api/app/notifications）
