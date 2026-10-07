@@ -229,7 +229,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 每次都疊在分支最新的版本上（這段時間有人推了、別的截圖先提交了也不會衝突）；
           # 只換這次截到的，沒截到的（逾時、被取消）留著上一次的，不會被刪掉
-          for i in 1 2 3; do
+          # GitHub 偶爾回 500（Internal Server Error）：多試幾次、間隔拉長；都失敗就讓這一步失敗（看得到沒提交）
+          for i in 1 2 3 4 5 6; do
             git fetch -q origin "$GITHUB_REF_NAME"
             git reset -q --hard FETCH_HEAD
             mkdir -p "$target"
@@ -237,6 +238,8 @@ jobs:
             git add "$target"
             if git diff --cached --quiet; then echo "沒有變更"; exit 0; fi
             git commit -q -m "UI 截圖（自動）[skip ci]"
-            git push origin "HEAD:$GITHUB_REF_NAME" && break
-            sleep 5
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then echo "提交了"; exit 0; fi
+            sleep $((i * 15))
           done
+          echo "::error::截圖推不回分支（GitHub 一直回錯誤），截圖在這次執行的 artifact"
+          exit 1
