@@ -396,7 +396,11 @@ nonisolated enum DemoServer {
         case ("email_signature", _): return #"{"lines":["示範帳號｜店長","晨麥手作","02 2345 6789 · hello@chenmai.tw · chenmai.studiox.tw"]}"#
         case ("ops_report", _):
             guard site == "chenmai.studiox.tw" else { return nil }
-            return args["section"]?.string == "members" ? membersReport : ops(days: args["days"]?.int ?? 1)
+            switch args["section"]?.string {
+            case "members": return membersReport
+            case "regions": return regionsReport(days: args["days"]?.int ?? 90)
+            default: return ops(days: args["days"]?.int ?? 1)
+            }
         case ("traffic_report", _): return traffic(site: site, days: args["days"]?.int ?? 7)
         case ("search_report", _): return search
         case ("list", "order"): return orders(status: args["status"]?.string)
@@ -794,6 +798,31 @@ nonisolated enum DemoServer {
             entities = [simple("news", "最新消息"), simple("page_seo", "頁面 SEO")]
         }
         return #"{"site":{"name":"\#(site)","host":"\#(site)"},"level":"owner","tools":[],"entities":[\#(entities.joined(separator: ","))]}"#
+    }
+
+    /// 哪裡的人最常訂購（示範：區間越長數字越大）
+    private static func regionsReport(days: Int) -> String {
+        let k = Double(max(30, min(days, 365))) / 90
+        func n(_ base: Double) -> Int { max(1, Int((base * k).rounded())) }
+        // 縣市、訂單、買家、回購率、客單價、最多的區
+        let rows: [(String, Double, Double, Int, Int, [(String, Double)])] = [
+            ("臺北市", 128, 96, 34, 1520, [("大安區", 31), ("信義區", 22), ("中山區", 19)]),
+            ("新北市", 104, 83, 27, 1380, [("板橋區", 28), ("新店區", 17), ("中和區", 15)]),
+            ("臺中市", 47, 39, 13, 1460, [("西屯區", 14), ("北屯區", 9)]),
+            ("桃園市", 39, 33, 10, 1290, [("桃園區", 12), ("中壢區", 10)]),
+            ("高雄市", 28, 25, 7, 1350, [("左營區", 8), ("鼓山區", 6)]),
+            ("新竹市", 16, 13, 4, 1610, [("東區", 9)]),
+        ]
+        let total = rows.reduce(0) { $0 + n($1.1) } + n(31)
+        let located = total - n(31)
+        let revenueTotal = rows.reduce(0) { $0 + n($1.1) * $1.4 }
+        let cities = rows.map { r -> String in
+            let orders = n(r.1), buyers = n(r.2)
+            let revenue = orders * r.4
+            let districts = r.5.map { #"{"district":"\#($0.0)","orders":\#(n($0.1))}"# }.joined(separator: ",")
+            return #"{"city":"\#(r.0)","orders":\#(orders),"buyers":\#(buyers),"repeatRatePercent":\#(r.3),"revenueLabel":"NT$\#(revenue.formatted())","revenueSharePercent":\#(Int((Double(revenue) / Double(revenueTotal) * 92).rounded())),"avgOrderLabel":"NT$\#(r.4.formatted())","topDistricts":[\#(districts)]}"#
+        }.joined(separator: ",")
+        return #"{"days":\#(days),"summary":"最近 \#(days) 天付款 \#(total) 張，認得出地區 \#(located) 張（\#(located * 100 / total)%）。最多的是臺北市：\#(n(128)) 張、\#(n(96)) 位買家。","orders":\#(total),"located":\#(located),"coveragePercent":\#(located * 100 / total),"cities":[\#(cities)],"unknown":{"orders":\#(n(31)),"pickupWithoutAddress":\#(n(29)),"unreadable":\#(n(2))}}"#
     }
 
     // MARK: 行銷、通知、整合

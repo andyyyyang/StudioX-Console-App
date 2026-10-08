@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// 營運報表（網站後台首頁的數字）：選一段時間看訂單、收款、等出貨、客服待辦、異常；
-/// 會員：總數、這個月新加入、累積消費、各等級人數、消費最多的五位（點進會員頁）。
+/// 會員：總數、這個月新加入、累積消費、各等級人數、消費最多的五位（點進會員頁）；
+/// 哪裡的人最常訂購：付款的訂單照收件的地方分縣市（網站的 ops_report section=regions，只有總數、沒有客人的資料）。
 struct OpsReportView: View {
     let siteID: String
 
@@ -9,39 +10,67 @@ struct OpsReportView: View {
     @State private var days = 7
     @State private var report: JSONValue?
     @State private var members: JSONValue?
+    @State private var regions: JSONValue?
+    /// 地區看比較長的時間才有意義：自己的區間（預設 90 天）
+    @State private var regionDays = 90
     @State private var error: String?
     @State private var loading = false
 
     private var site: SiteSummary? { model.site(siteID) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 44) {
-                VStack(alignment: .leading, spacing: 18) {
-                    PageHeader("營運報表", eyebrow: site?.name ?? siteID)
-                    FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "昨天" : "\($0) 天" })
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 44) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        PageHeader("營運報表", eyebrow: site?.name ?? siteID)
+                        FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "昨天" : "\($0) 天" })
+                    }
+                    if let error {
+                        ErrorNote(message: error) { Task { await load() } }
+                    }
+                    if let r = report {
+                        orders(r)
+                    } else if loading {
+                        SkeletonRows(rows: 4)
+                    }
+                    if let m = members {
+                        memberSection(m)
+                    }
+                    if let r = regions {
+                        regionSection(r)
+                            .id("regions")
+                    }
                 }
-                if let error {
-                    ErrorNote(message: error) { Task { await load() } }
-                }
-                if let r = report {
-                    orders(r)
-                } else if loading {
-                    SkeletonRows(rows: 4)
-                }
-                if let m = members {
-                    memberSection(m)
-                }
+                .frame(maxWidth: Metric.readable + 160, alignment: .leading)
+                .pageWidth()
+                .padding(.top, 16)
+                .padding(.bottom, 64)
             }
-            .frame(maxWidth: Metric.readable + 160, alignment: .leading)
-            .pageWidth()
-            .padding(.top, 16)
-            .padding(.bottom, 64)
+            // UI 截圖（-demoScroll regions）：捲到「哪裡的人最常訂購」
+            .task(id: regions != nil) {
+                guard DemoServer.screenshots, regions != nil, UserDefaults.standard.string(forKey: "demoScroll") == "regions" else { return }
+                try? await Task.sleep(for: .milliseconds(600))
+                proxy.scrollTo("regions", anchor: .top)
+            }
         }
-        .refreshable { await Task { await load() }.value }
+        .refreshable {
+            await Task {
+                await load()
+                await loadRegions()
+            }.value
+        }
         .brandPage()
         .pageTitle("營運報表")
         .task(id: days) { await load() }
+        .task(id: regionDays) { await loadRegions() }
+    }
+
+    /// 網站有地區報表才放（舊版網站回錯誤就不顯示）；換區間時讀不到就留著上一次的
+    private func loadRegions() async {
+        guard let r = try? await model.api.tool("ops_report", site: siteID, ["section": "regions", "days": .number(Double(regionDays))]),
+              r["cities"] != nil else { return }
+        withAnimation(Motion.ease) { regions = r }
     }
 
     private func load() async {
@@ -116,6 +145,47 @@ struct OpsReportView: View {
         }
     }
 
+    // MARK: 地區
+
+    @ViewBuilder
+    private func regionSection(_ r: JSONValue) -> some View {
+        let cities = r["cities"]?.array ?? []
+        VStack(alignment: .leading, spacing: 20) {
+            SectionHead("哪裡的人最常訂購", role: .h3)
+            FilterBar(items: [30, 90, 365, 3650], selection: $regionDays, title: { $0 == 365 ? "一年" : $0 == 3650 ? "全部" : "\($0) 天" })
+            if let summary = r["summary"]?.string {
+                Text(summary)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !cities.isEmpty {
+                let top = max(1, cities.compactMap { $0["orders"]?.int }.max() ?? 1)
+                RuledList {
+                    ForEach(cities.prefix(12).indices, id: \.self) { i in
+                        RegionRow(rank: i + 1, city: cities[i], maxOrders: top)
+                    }
+                }
+            }
+            Text(regionNote(r))
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 這份數字有多少代表性：認得出地區的比例、7-11 舊單沒有門市地址
+    private func regionNote(_ r: JSONValue) -> String {
+        var parts = ["照收件的地方算（宅配看地址、7-11 看取貨門市；送禮的算收件人那裡）。"]
+        if let located = r["located"]?.int, let total = r["orders"]?.int, total > 0 {
+            parts.append("認得出地區 \(located) / \(total) 張（\(r["coveragePercent"]?.int ?? 0)%）。")
+        }
+        if let old = r["unknown"]?["pickupWithoutAddress"]?.int, old > 0 {
+            parts.append("7-11 取貨的舊單 \(old) 張沒有門市地址，10/8 起會記下來。")
+        }
+        return parts.joined()
+    }
+
     // MARK: 會員
 
     @ViewBuilder
@@ -166,6 +236,59 @@ struct OpsReportView: View {
                 }
             }
         }
+    }
+}
+
+/// 一個縣市：名次、訂單（橫條）、買家、營收與占比、客單價、回購率、最多的區
+private struct RegionRow: View {
+    let rank: Int
+    let city: JSONValue
+    let maxOrders: Int
+
+    var body: some View {
+        let orders = city["orders"]?.int ?? 0
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text("\(rank)")
+                    .font(.brand(13, .medium).monospacedDigit())
+                    .foregroundStyle(rank == 1 ? Theme.accentText : Theme.muted)
+                    .frame(width: 22, alignment: .leading)
+                Text(city["city"]?.string ?? "")
+                    .textRole(.h4)
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 64, alignment: .leading)
+                GeometryReader { g in
+                    Capsule()
+                        .fill(rank == 1 ? Theme.accent : Theme.ink.opacity(0.75))
+                        .frame(width: max(4, g.size.width * CGFloat(orders) / CGFloat(maxOrders)))
+                }
+                .frame(height: 8)
+                Text("\(orders) 張")
+                    .font(.brand(13, .medium).monospacedDigit())
+                    .foregroundStyle(Theme.ink)
+                    .frame(minWidth: 52, alignment: .trailing)
+            }
+            Text(detail)
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+                .padding(.leading, 34)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var detail: String {
+        var parts = ["\(city["buyers"]?.int ?? 0) 位買家"]
+        if let revenue = city["revenueLabel"]?.string { parts.append("\(revenue)（\(city["revenueSharePercent"]?.int ?? 0)%）") }
+        if let avg = city["avgOrderLabel"]?.string { parts.append("客單 \(avg)") }
+        parts.append("回購 \(city["repeatRatePercent"]?.int ?? 0)%")
+        let districts = (city["topDistricts"]?.array ?? []).prefix(3).compactMap { d -> String? in
+            guard let name = d["district"]?.string, let n = d["orders"]?.int else { return nil }
+            return "\(name) \(n)"
+        }
+        if !districts.isEmpty { parts.append("最多：" + districts.joined(separator: "、")) }
+        return parts.joined(separator: "・")
     }
 }
 

@@ -112,6 +112,7 @@ jobs:
             "campaign|-demo -demoRoute campaign"
             "pending|-demo -demoRoute pending"
             "report|-demo -demoRoute report|10"
+            "report-regions|-demo -demoRoute report -demoScroll regions|12"
             "traffic-names|-demo -demoRoute traffic -demoScroll names|10"
             "console|-demo -demoRoute console"
             "console-site|-demo -demoRoute console-site"
