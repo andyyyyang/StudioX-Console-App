@@ -399,6 +399,7 @@ nonisolated enum DemoServer {
             switch args["section"]?.string {
             case "members": return membersReport
             case "regions": return regionsReport(days: args["days"]?.int ?? 90)
+            case "queue": return queueReport(days: args["days"]?.int ?? 30)
             default: return ops(days: args["days"]?.int ?? 1)
             }
         case ("traffic_report", _): return traffic(site: site, days: args["days"]?.int ?? 7)
@@ -823,6 +824,18 @@ nonisolated enum DemoServer {
             return #"{"city":"\#(r.0)","orders":\#(orders),"buyers":\#(buyers),"repeatRatePercent":\#(r.3),"revenueLabel":"NT$\#(revenue.formatted())","revenueSharePercent":\#(Int((Double(revenue) / Double(revenueTotal) * 92).rounded())),"avgOrderLabel":"NT$\#(r.4.formatted())","topDistricts":[\#(districts)]}"#
         }.joined(separator: ",")
         return #"{"days":\#(days),"summary":"最近 \#(days) 天付款 \#(total) 張，認得出地區 \#(located) 張（\#(located * 100 / total)%）。最多的是臺北市：\#(n(128)) 張、\#(n(96)) 位買家。","orders":\#(total),"located":\#(located),"coveragePercent":\#(located * 100 / total),"cities":[\#(cities)],"unknown":{"orders":\#(n(31)),"pickupWithoutAddress":\#(n(29)),"unreadable":\#(n(2))}}"#
+    }
+
+    /// 現場排隊 → 線上成交（示範：區間越長數字越大）
+    private static func queueReport(days: Int) -> String {
+        let k = Double(max(7, min(days, 365))) / 30
+        func n(_ base: Double) -> Int { max(1, Int((base * k).rounded())) }
+        let tickets = n(420), scanned = n(236), viewed = n(118), carted = n(41), ordered = n(17)
+        let orders = n(38), coupon = n(19), member = n(8), device = orders - coupon - member
+        let claimed = n(64), used = n(27), newMembers = n(41)
+        let pct = { (a: Int, b: Int) in b > 0 ? Int((Double(a) / Double(b) * 100).rounded()) : 0 }
+        let revenue = orders * 1580
+        return #"{"days":\#(days),"summary":"最近 \#(days) 天取號 \#(tickets) 張、\#(scanned) 位打開叫號頁（\#(pct(scanned, tickets))%）；當天看商品 \#(viewed) 位、加購物車 \#(carted) 位、下單 \#(ordered) 位。排隊帶來的訂單 \#(orders) 張、NT$\#(revenue.formatted())（占營收 18%），平均排隊後 2.6 天下單。","tickets":\#(tickets),"scanned":\#(scanned),"scanRatePercent":\#(pct(scanned, tickets)),"sameDay":{"viewed":\#(viewed),"carted":\#(carted),"ordered":\#(ordered),"viewRatePercent":\#(pct(viewed, scanned)),"cartRatePercent":\#(pct(carted, viewed)),"orderRatePercent":\#(pct(ordered, carted))},"gift":{"claimed":\#(claimed),"newMembers":\#(newMembers),"used":\#(used),"usedRatePercent":\#(pct(used, claimed))},"orders":{"count":\#(orders),"revenueLabel":"NT$\#(revenue.formatted())","revenueSharePercent":18,"orderSharePercent":21,"buyers":\#(n(34)),"avgDaysToOrder":2.6,"byEvidence":{"coupon":\#(coupon),"member":\#(member),"device":\#(device)}}}"#
     }
 
     // MARK: 行銷、通知、整合

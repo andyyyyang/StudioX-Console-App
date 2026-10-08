@@ -2,7 +2,8 @@ import SwiftUI
 
 /// 營運報表（網站後台首頁的數字）：選一段時間看訂單、收款、等出貨、客服待辦、異常；
 /// 會員：總數、這個月新加入、累積消費、各等級人數、消費最多的五位（點進會員頁）；
-/// 哪裡的人最常訂購：付款的訂單照收件的地方分縣市（網站的 ops_report section=regions，只有總數、沒有客人的資料）。
+/// 哪裡的人最常訂購：付款的訂單照收件的地方分縣市（網站的 ops_report section=regions，只有總數、沒有客人的資料）；
+/// 現場排隊 → 線上成交：取號、掃 QR 看叫號、當天看商品／加購物車／下單、排隊帶來的訂單（section=queue）。
 struct OpsReportView: View {
     let siteID: String
 
@@ -13,6 +14,9 @@ struct OpsReportView: View {
     @State private var regions: JSONValue?
     /// 地區看比較長的時間才有意義：自己的區間（預設 90 天）
     @State private var regionDays = 90
+    @State private var queue: JSONValue?
+    /// 現場排隊也有自己的區間（預設 30 天）：上面的「昨天」對排隊沒有意義
+    @State private var queueDays = 30
     @State private var error: String?
     @State private var loading = false
 
@@ -34,6 +38,10 @@ struct OpsReportView: View {
                     } else if loading {
                         SkeletonRows(rows: 4)
                     }
+                    if let q = queue {
+                        queueSection(q)
+                            .id("queue")
+                    }
                     if let m = members {
                         memberSection(m)
                     }
@@ -47,16 +55,18 @@ struct OpsReportView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 64)
             }
-            // UI 截圖（-demoScroll regions）：捲到「哪裡的人最常訂購」
-            .task(id: regions != nil) {
-                guard DemoServer.screenshots, regions != nil, UserDefaults.standard.string(forKey: "demoScroll") == "regions" else { return }
+            // UI 截圖（-demoScroll regions／queue）：捲到「哪裡的人最常訂購」／「現場排隊 → 線上成交」
+            .task(id: regions != nil && queue != nil) {
+                guard DemoServer.screenshots, regions != nil, queue != nil,
+                      let target = UserDefaults.standard.string(forKey: "demoScroll"), ["regions", "queue"].contains(target) else { return }
                 try? await Task.sleep(for: .milliseconds(600))
-                proxy.scrollTo("regions", anchor: .top)
+                proxy.scrollTo(target, anchor: .top)
             }
         }
         .refreshable {
             await Task {
                 await load()
+                await loadQueue()
                 await loadRegions()
             }.value
         }
@@ -64,6 +74,14 @@ struct OpsReportView: View {
         .pageTitle("營運報表")
         .task(id: days) { await load() }
         .task(id: regionDays) { await loadRegions() }
+        .task(id: queueDays) { await loadQueue() }
+    }
+
+    /// 網站有現場排隊的報表才放（沒有叫號的網站、舊版網站不顯示）；換區間時讀不到就留著上一次的
+    private func loadQueue() async {
+        guard let q = try? await model.api.tool("ops_report", site: siteID, ["section": "queue", "days": .number(Double(queueDays))]),
+              q["tickets"] != nil else { return }
+        withAnimation(Motion.ease) { queue = q }
     }
 
     /// 網站有地區報表才放（舊版網站回錯誤就不顯示）；換區間時讀不到就留著上一次的
@@ -143,6 +161,65 @@ struct OpsReportView: View {
                 .panel(padding: 16)
             }
         }
+    }
+
+    // MARK: 現場排隊
+
+    @ViewBuilder
+    private func queueSection(_ q: JSONValue) -> some View {
+        let same = q["sameDay"] ?? .null
+        let orders = q["orders"] ?? .null
+        let gift = q["gift"] ?? .null
+        let steps: [(String, Int, Int?)] = [
+            ("取號", q["tickets"]?.int ?? 0, nil),
+            ("掃 QR 看叫號", q["scanned"]?.int ?? 0, q["scanRatePercent"]?.int),
+            ("當天看商品", same["viewed"]?.int ?? 0, same["viewRatePercent"]?.int),
+            ("當天加購物車", same["carted"]?.int ?? 0, same["cartRatePercent"]?.int),
+            ("當天下單", same["ordered"]?.int ?? 0, same["orderRatePercent"]?.int),
+        ]
+        VStack(alignment: .leading, spacing: 20) {
+            SectionHead("現場排隊 → 線上成交", role: .h3)
+            FilterBar(items: [7, 30, 90, 365], selection: $queueDays, title: { $0 == 365 ? "一年" : "\($0) 天" })
+            if let summary = q["summary"]?.string {
+                Text(summary)
+                    .textRole(.small)
+                    .foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            let top = max(1, steps.map(\.1).max() ?? 1)
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(steps.indices, id: \.self) { i in
+                    QueueStepRow(label: steps[i].0, count: steps[i].1, rate: steps[i].2, maxCount: top, first: i == 0)
+                }
+            }
+            StatGrid {
+                Stat(value: Double(orders["count"]?.int ?? 0), label: "排隊帶來的訂單", format: { "\(Int($0)) 張" })
+                Stat(value: 0, label: "營收（占比）", format: { _ in
+                    orders["count"]?.int == 0 ? "—" : "\(orders["revenueLabel"]?.string ?? "—")（\(orders["revenueSharePercent"]?.int ?? 0)%）"
+                })
+                Stat(value: orders["avgDaysToOrder"]?.double ?? 0, label: "排隊後幾天下單", format: { _ in
+                    orders["avgDaysToOrder"]?.double.map { "平均 \($0.formatted(.number.precision(.fractionLength(0...1)))) 天" } ?? "—"
+                })
+                Stat(value: Double(gift["claimed"]?.int ?? 0), label: "領會員禮", format: { _ in
+                    let claimed = gift["claimed"]?.int ?? 0
+                    return claimed == 0 ? "0 位" : "\(claimed) 位・用掉 \(gift["used"]?.int ?? 0)"
+                })
+            }
+            Text(queueNote(q))
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 排隊帶來的訂單是怎麼認的、「當天」只算得到同一天
+    private func queueNote(_ q: JSONValue) -> String {
+        var parts: [String] = []
+        if let e = q["orders"]?["byEvidence"], (q["orders"]?["count"]?.int ?? 0) > 0 {
+            parts.append("排隊帶來的訂單：用了會員禮的券 \(e["coupon"]?.int ?? 0) 張、領過會員禮的會員 \(e["member"]?.int ?? 0) 張、這支手機排過隊 \(e["device"]?.int ?? 0) 張。")
+        }
+        parts.append("「當天」看的是流量（同一天、同一個瀏覽器）；之後幾天才下的單，要用了會員禮、領過會員禮，或用同一支手機下單（60 天內）才算得到。")
+        return parts.joined()
     }
 
     // MARK: 地區
@@ -236,6 +313,41 @@ struct OpsReportView: View {
                 }
             }
         }
+    }
+}
+
+/// 現場排隊的一步：名稱、人數（橫條）、占上一步幾 %
+private struct QueueStepRow: View {
+    let label: String
+    let count: Int
+    let rate: Int?
+    let maxCount: Int
+    let first: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .textRole(.small)
+                .foregroundStyle(Theme.ink)
+                .frame(width: 104, alignment: .leading)
+                .lineLimit(1)
+            GeometryReader { g in
+                Capsule()
+                    .fill(first ? Theme.ink.opacity(0.35) : Theme.accent)
+                    .frame(width: max(4, g.size.width * CGFloat(count) / CGFloat(maxCount)))
+            }
+            .frame(height: 8)
+            Text("\(count)")
+                .font(.brand(13, .medium).monospacedDigit())
+                .foregroundStyle(Theme.ink)
+                .frame(minWidth: 32, alignment: .trailing)
+            Text(rate.map { "\($0)%" } ?? "")
+                .font(.brand(12, .regular).monospacedDigit())
+                .foregroundStyle(Theme.muted)
+                .frame(width: 40, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(rate.map { "\(label) \(count)，上一步的 \($0)%" } ?? "\(label) \(count)")
     }
 }
 
