@@ -204,6 +204,11 @@ struct OpsReportView: View {
                     let claimed = gift["claimed"]?.int ?? 0
                     return claimed == 0 ? "0 位" : "\(claimed) 位・用掉 \(gift["used"]?.int ?? 0)"
                 })
+                // 會員禮快到期提醒（網站每天 11:20 提醒一次）：提醒了幾位、提醒之後才用掉幾張
+                Stat(value: Double(gift["reminded"]?.int ?? 0), label: "快到期提醒", format: { _ in
+                    let reminded = gift["reminded"]?.int ?? 0
+                    return reminded == 0 ? "—" : "\(reminded) 位・之後用掉 \(gift["usedAfterReminder"]?.int ?? 0)"
+                })
             }
             Text(queueNote(q))
                 .textRole(.xs)
@@ -215,6 +220,10 @@ struct OpsReportView: View {
     /// 排隊帶來的訂單是怎麼認的、「當天」只算得到同一天
     private func queueNote(_ q: JSONValue) -> String {
         var parts: [String] = []
+        // 叫號頁下面的「等的時候，逛逛可以帶回家的」商品：點進商店的人
+        if let fromQueue = q["sameDay"]?["fromQueue"]?.int, fromQueue > 0 {
+            parts.append("當天看商品的人裡，\(fromQueue) 位是從叫號頁的商品點進去的。")
+        }
         if let e = q["orders"]?["byEvidence"], (q["orders"]?["count"]?.int ?? 0) > 0 {
             parts.append("排隊帶來的訂單：用了會員禮的券 \(e["coupon"]?.int ?? 0) 張、領過會員禮的會員 \(e["member"]?.int ?? 0) 張、這支手機排過隊 \(e["device"]?.int ?? 0) 張。")
         }
