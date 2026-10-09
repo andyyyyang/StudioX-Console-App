@@ -12,6 +12,28 @@ struct TrafficChart: View {
     var metric: Measure = .visitors
 
     @State private var selected: String?
+    /// 圖的寬度：決定 X 軸標幾個日期（每個留大約 48pt，太多會擠在一起）
+    @State private var width: CGFloat = 0
+
+    /// X 軸要標的那幾個：平均挑、最後一天一定標（離它太近的前一個拿掉），最多 maxCount 個。
+    /// 時間是文字（類別軸），Swift Charts 不會自己幫類別軸挑幾個，不挑的話 30 天以上每天都標、擠成一團
+    static func axisKeys(_ keys: [String], maxCount: Int) -> [String] {
+        guard maxCount >= 2, keys.count > maxCount else { return keys }
+        let step = Int((Double(keys.count - 1) / Double(maxCount - 1)).rounded(.up))
+        var picks = Array(stride(from: 0, through: keys.count - 1, by: step))
+        let last = keys.count - 1
+        if let prev = picks.last, prev != last {
+            if last - prev <= step / 2 { picks.removeLast() }
+            picks.append(last)
+        }
+        return picks.map { keys[$0] }
+    }
+
+    /// 寬度能放幾個日期（iPhone 大約 7 個：一週剛好每天都標；iPad 最多 10 個）
+    static func labelCount(for width: CGFloat) -> Int {
+        guard width > 0 else { return 6 }
+        return min(10, max(2, Int(width / 48)))
+    }
 
     var body: some View {
         let value = { (p: TrafficPoint) in metric == .visitors ? p.visitors : p.pageviews }
@@ -19,6 +41,7 @@ struct TrafficChart: View {
         let picked = points.first { $0.key == selected }
         // 圖上的位置用完整日期（一年的走勢 M/d 會重複），軸上顯示短的
         let short = Dictionary(points.map { ($0.key, $0.label) }, uniquingKeysWith: { first, _ in first })
+        let ticks = Self.axisKeys(points.map(\.key), maxCount: Self.labelCount(for: width))
         Chart {
             ForEach(points) { p in
                 AreaMark(x: .value("時間", p.key), y: .value(name, value(p)))
@@ -59,14 +82,16 @@ struct TrafficChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                AxisValueLabel {
+            AxisMarks(values: ticks) { value in
+                // 萬一字型放大還是太擠：放不下的那幾個不標
+                AxisValueLabel(collisionResolution: .greedy) {
                     Text(short[value.as(String.self) ?? ""] ?? "")
                         .font(.brand(11, .regular))
                         .foregroundStyle(Theme.muted)
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .haptic(.selection, trigger: selected)
         .accessibilityLabel("\(name)走勢")
     }
