@@ -1020,7 +1020,7 @@ private struct XenaChatRow: View {
                 NavigateChip(title: nav.title, url: URL(string: nav.path, relativeTo: siteURL)?.absoluteURL)
             }
             if let queue = message.queue {
-                XenaQueueCardView(card: queue, url: URL(string: queue.path, relativeTo: siteURL)?.absoluteURL)
+                XenaQueueCardView(card: queue, pushed: message.push == "queue", url: URL(string: queue.path, relativeTo: siteURL)?.absoluteURL)
             }
             // Xena 沒有回到這一句（模型出錯、客人在回答出來之前離開了）：客人什麼都沒看到，專人要知道
             if xena, split.text.isEmpty, message.queue == nil, let error = message.error {
@@ -1465,6 +1465,8 @@ private struct NavigateChip: View {
 /// Xena 回答叫號進度附的叫號卡片：照客人看到的畫（號碼、現在叫到、狀態那一條、查的時間），點了打開那一號的進度頁
 private struct XenaQueueCardView: View {
     let card: XenaQueueCard
+    /// Xena 主動叫客人的那一則（客人說好了要叫他）
+    let pushed: Bool
     let url: URL?
     @Environment(\.openURL) private var openURL
 
@@ -1507,7 +1509,7 @@ private struct XenaQueueCardView: View {
         Button { if let url { openURL(url) } } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("叫號卡片", systemImage: "ticket")
+                    Label(pushed ? "Xena 主動叫客人" : "叫號卡片", systemImage: pushed ? "bell.badge.fill" : "ticket")
                         .font(.brand(11, .semibold, relativeTo: .caption2))
                         .foregroundStyle(Theme.muted)
                     Spacer()
@@ -1534,6 +1536,11 @@ private struct XenaQueueCardView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 7)
                     .background(tone.bg, in: .rect(cornerRadius: 10, style: .continuous))
+                if card.callMe {
+                    Label("客人說好了要叫他，叫到時 Xena 會主動說", systemImage: "bell")
+                        .font(.brand(11.5, .medium, relativeTo: .caption))
+                        .foregroundStyle(Theme.muted)
+                }
             }
             .padding(14)
             .frame(width: 240)

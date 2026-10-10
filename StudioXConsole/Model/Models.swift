@@ -696,6 +696,8 @@ struct XenaConversationMessage: Identifiable {
     var queue: XenaQueueCard?
     /// Xena 沒有回到這一句的原因（模型出錯、客人在回答出來之前離開了）
     var error: String?
+    /// Xena 主動說的（queue＝客人說好了要叫他，叫到那一號了），不是回答客人哪一句
+    var push: String?
     /// role 是 event 的種類：handoff / takeover / release / closed / reopened / contact / login / logout（舊的網站沒有）
     var event: String?
     /// 專人回覆時也寄了信給客人
@@ -722,6 +724,7 @@ struct XenaConversationMessage: Identifiable {
         }
         queue = m["queue"].flatMap(XenaQueueCard.init)
         error = m["error"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        push = m["push"]?.string
         event = m["event"]?.string
         emailed = m["emailed"]?.bool ?? false
     }
@@ -747,6 +750,8 @@ struct XenaQueueCard {
     var etaMinutes: Int?
     /// 現在還有幾位在等
     var waiting: Int
+    /// 客人說好了要叫他，記下來了
+    var callMe: Bool
     /// 客人看到的那一句（「421 號還在等，前面還有 2 位，大約 4 分鐘。」）
     var summary: String
     /// 叫號日 YYYYMMDD（進度頁 /q/<號碼>?d= 用）
@@ -763,6 +768,7 @@ struct XenaQueueCard {
         ahead = json["ahead"]?.int
         etaMinutes = json["etaMinutes"]?.int
         waiting = json["waiting"]?.int ?? 0
+        callMe = json["callMe"]?.bool ?? false
         summary = json["summary"]?.string ?? ""
         at = json["at"]?.date
     }
