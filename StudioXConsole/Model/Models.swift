@@ -692,6 +692,10 @@ struct XenaConversationMessage: Identifiable {
     var card: StaffCard?
     /// 專人推薦的商品（黃毛丫頭：LINE 上是左右滑的商品卡片）
     var products: [(name: String, slug: String)]
+    /// Xena 回答叫號進度附的叫號卡片（客人問「421好了嗎」；查的那一刻的樣子，舊的網站沒有）
+    var queue: XenaQueueCard?
+    /// Xena 沒有回到這一句的原因（模型出錯、客人在回答出來之前離開了）
+    var error: String?
     /// role 是 event 的種類：handoff / takeover / release / closed / reopened / contact / login / logout（舊的網站沒有）
     var event: String?
     /// 專人回覆時也寄了信給客人
@@ -716,6 +720,8 @@ struct XenaConversationMessage: Identifiable {
             guard let name = p["name"]?.string else { return nil }
             return (name, p["slug"]?.string ?? "")
         }
+        queue = m["queue"].flatMap(XenaQueueCard.init)
+        error = m["error"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         event = m["event"]?.string
         emailed = m["emailed"]?.bool ?? false
     }
@@ -726,6 +732,43 @@ struct XenaConversationMessage: Identifiable {
         let t = content.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty || t.hasPrefix("［卡片］") || t.hasPrefix("[卡片]")
     }
+}
+
+/// Xena 回答叫號進度附的叫號卡片（網站的 lib/queue/card.ts）：號碼、狀態、現在叫到幾號、前面幾位、大約幾分鐘
+struct XenaQueueCard {
+    /// 客人問的號碼；nil＝只問現在叫到幾號
+    var number: Int?
+    /// waiting / called / missed / served / unknown
+    var state: String?
+    /// 狀態的中文（等候中、輪到了、過號、已叫過、查不到）
+    var stateLabel: String?
+    var current: Int?
+    var ahead: Int?
+    var etaMinutes: Int?
+    /// 現在還有幾位在等
+    var waiting: Int
+    /// 客人看到的那一句（「421 號還在等，前面還有 2 位，大約 4 分鐘。」）
+    var summary: String
+    /// 叫號日 YYYYMMDD（進度頁 /q/<號碼>?d= 用）
+    var day: String
+    var at: Date?
+
+    init?(_ json: JSONValue) {
+        guard let day = json["day"]?.string, !day.isEmpty else { return nil }
+        self.day = day
+        number = json["number"]?.int
+        state = json["state"]?.string
+        stateLabel = json["stateLabel"]?.string
+        current = json["current"]?.int
+        ahead = json["ahead"]?.int
+        etaMinutes = json["etaMinutes"]?.int
+        waiting = json["waiting"]?.int ?? 0
+        summary = json["summary"]?.string ?? ""
+        at = json["at"]?.date
+    }
+
+    /// 進度頁（不含網域）：有號碼是那一號的，沒有是現場候號進度
+    var path: String { number.map { "/zh/q/\($0)?d=\(day)" } ?? "/zh/q" }
 }
 
 /// Xena 想的回覆建議（console 的 /api/app/reply-suggest）：這位客人的分析、回覆用得到的事實、三種下一句

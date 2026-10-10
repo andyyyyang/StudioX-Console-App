@@ -1019,6 +1019,18 @@ private struct XenaChatRow: View {
             if let nav = message.navigate {
                 NavigateChip(title: nav.title, url: URL(string: nav.path, relativeTo: siteURL)?.absoluteURL)
             }
+            if let queue = message.queue {
+                XenaQueueCardView(card: queue, url: URL(string: queue.path, relativeTo: siteURL)?.absoluteURL)
+            }
+            // Xena 沒有回到這一句（模型出錯、客人在回答出來之前離開了）：客人什麼都沒看到，專人要知道
+            if xena, split.text.isEmpty, message.queue == nil, let error = message.error {
+                Label("Xena 沒有回到這一句：\(error)", systemImage: "exclamationmark.bubble")
+                    .font(.brand(12, .medium, relativeTo: .caption))
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .overlay { Capsule().strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [3, 3])) }
+            }
             if let card = message.card {
                 StaffCardView(card: card)
                     .contextMenu { menu }
@@ -1447,6 +1459,92 @@ private struct NavigateChip: View {
         }
         .buttonStyle(.press)
         .disabled(url == nil)
+    }
+}
+
+/// Xena 回答叫號進度附的叫號卡片：照客人看到的畫（號碼、現在叫到、狀態那一條、查的時間），點了打開那一號的進度頁
+private struct XenaQueueCardView: View {
+    let card: XenaQueueCard
+    let url: URL?
+    @Environment(\.openURL) private var openURL
+
+    /// 狀態那一條的顏色：輪到了（主色）、過號（紅）、叫過了（綠）、其他（淡底）
+    private var tone: (fg: Color, bg: Color) {
+        switch card.state {
+        case "called": (fg: Theme.onPrimary, bg: Theme.primary)
+        case "missed": (fg: Theme.dangerFG, bg: Theme.dangerFG.opacity(0.12))
+        case "served": (fg: Theme.successFG, bg: Theme.successFG.opacity(0.12))
+        default: (fg: Theme.ink, bg: Theme.soft)
+        }
+    }
+
+    private var statusText: String {
+        guard card.number != nil else { return card.waiting > 0 ? "還有 \(card.waiting) 位在等" : "現在不用排隊" }
+        switch card.state {
+        case "waiting":
+            let minutes = card.etaMinutes ?? 1
+            if let ahead = card.ahead, ahead > 0 { return "前面還有 \(ahead) 位・大約 \(minutes) 分鐘" }
+            return "下一位就是你・大約 \(minutes) 分鐘"
+        case "called": return "輪到了，請到櫃台取餐"
+        case "missed": return "已過號，請到櫃台"
+        case "served": return "已經叫過了"
+        default: return card.stateLabel ?? "今天查不到這個號碼"
+        }
+    }
+
+    private func figure(_ label: String, _ value: String, big: Bool) -> some View {
+        VStack(alignment: big ? .leading : .trailing, spacing: 1) {
+            Text(label)
+                .font(.brand(11, .medium, relativeTo: .caption2))
+                .foregroundStyle(Theme.muted)
+            Text(value)
+                .font(.brand(big ? 38 : 24, .bold, relativeTo: big ? .largeTitle : .title2).monospacedDigit())
+                .foregroundStyle(Theme.ink)
+        }
+    }
+
+    var body: some View {
+        Button { if let url { openURL(url) } } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("叫號卡片", systemImage: "ticket")
+                        .font(.brand(11, .semibold, relativeTo: .caption2))
+                        .foregroundStyle(Theme.muted)
+                    Spacer()
+                    if let at = card.at {
+                        Text("\(at.formatted(date: .omitted, time: .shortened)) 查詢")
+                            .font(.brand(11, .medium, relativeTo: .caption2))
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+                HStack(alignment: .lastTextBaseline) {
+                    if let number = card.number {
+                        figure("號碼", "\(number)", big: true)
+                        Spacer()
+                        figure("現在叫到", card.current.map(String.init) ?? "—", big: false)
+                    } else {
+                        figure("現在叫到", card.current.map(String.init) ?? "—", big: true)
+                        Spacer()
+                        figure("等候", "\(card.waiting) 位", big: false)
+                    }
+                }
+                Text(statusText)
+                    .font(.brand(13, .semibold, relativeTo: .subheadline))
+                    .foregroundStyle(tone.fg)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(tone.bg, in: .rect(cornerRadius: 10, style: .continuous))
+            }
+            .padding(14)
+            .frame(width: 240)
+            .background(Theme.surface)
+            .clipShape(.rect(cornerRadius: 18, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.line, lineWidth: 1) }
+        }
+        .buttonStyle(.press)
+        .disabled(url == nil)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("叫號卡片：\(card.summary.isEmpty ? statusText : card.summary)")
     }
 }
 
