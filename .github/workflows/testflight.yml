@@ -1,6 +1,7 @@
 # 推上來就出一版 TestFlight：GitHub 的 Mac 用 App Store Connect API 金鑰自己簽章、封存、上傳，
 # 再寫好「測試內容」、交給內部測試群組。金鑰放在 repo 的 Secrets（見 README「TestFlight」）：
 #   ASC_KEY_ID、ASC_ISSUER_ID、ASC_PRIVATE_KEY（.p8 的內容）、APPLE_TEAM_ID
+#   ASC_PRIVATE_KEY 是 App Store Connect API 的金鑰，不是推播金鑰（推播金鑰是 console 的 APNS_KEY，放 Railway）
 # 還沒設定 Secrets 時整個流程會跳過（不會失敗）。
 name: TestFlight
 

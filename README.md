@@ -40,6 +40,8 @@ Signing & Capabilities 選自己的 Team 就能跑模擬器或實機。專案用
   **第一次設定（只有這幾步要在網頁上做）**：
   1. App Store Connect → 使用者與存取權 → 整合 → App Store Connect API → 團隊金鑰「＋」：名稱 `GitHub TestFlight`、存取權 **Admin**
      （要能建憑證與描述檔）→ 下載 `.p8`（只能下載一次），記下金鑰 ID 與上面的 Issuer ID
+     這把**不是推播金鑰**：兩種都叫 `AuthKey_XXXXXXXXXX.p8`、長得一樣。推播金鑰是 developer.apple.com → Keys 建的（勾 APNs），
+     放 Railway console 服務的 `APNS_KEY`（見下面「通知」）；放錯地方 Apple 會拒絕（這裡是 401、推播是 `InvalidProviderToken`）
   2. GitHub 這個 repo → Settings → Secrets and variables → Actions → New repository secret，新增四個：
      | 名稱 | 內容 |
      |---|---|
