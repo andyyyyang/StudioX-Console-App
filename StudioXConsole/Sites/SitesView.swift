@@ -273,19 +273,24 @@ struct SiteHeader: View {
     }
 }
 
-// MARK: - 概況（流量＋昨天的營運）
+// MARK: - 概況（流量＋商店，同一段期間）
 
 struct SiteOverview: View {
     let site: SiteSummary
     @Environment(AppModel.self) private var model
-    @State private var days = 7
     @State private var report: TrafficReport?
     @State private var ops: OpsReport?
     @State private var error: String?
     @State private var loading = false
 
+    /// 區間和流量、營運報表、Google 搜尋共用（AnalyticsRange）：流量與商店的數字是同一段期間
+    private var days: Int { model.analyticsRange(site.id) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 56) {
+            if site.hasTraffic || site.hasOrders {
+                AnalyticsRangeBar(siteID: site.id, dates: report?.days == days ? report?.rangeLabel : nil, note: days == 1 ? "0 點到現在" : nil)
+            }
             if site.hasTraffic {
                 traffic
             }
@@ -304,8 +309,8 @@ struct SiteOverview: View {
         defer { loading = false }
         error = nil
         do {
-            if site.hasTraffic { report = try await model.api.traffic(site: site.id, days: days) }
-            if site.hasOrders, ops == nil { ops = try await model.api.ops(site: site.id, days: 1) }
+            if site.hasTraffic { report = try await model.api.traffic(site: site.id, days: days, interval: TrendInterval.standard(days: days)) }
+            if site.hasOrders { ops = try await model.api.ops(site: site.id, days: days, includeToday: true) }
         } catch {
             self.error = error.localizedDescription
         }
@@ -318,7 +323,6 @@ struct SiteOverview: View {
                 NavigationLink(value: Route.traffic(site: site.id)) { MoreLinkLabel(title: "完整報表") }
                     .buttonStyle(.press)
             }
-            FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "今天" : "\($0) 天" })
             if let r = report {
                 if !r.installed {
                     EmptyState(title: "還沒有流量資料", message: "網站裝好流量追蹤之後，這裡就看得到。")
@@ -343,7 +347,7 @@ struct SiteOverview: View {
 
     private func store(_ ops: OpsReport) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("昨天的商店") {
+            SectionHead("\(AnalyticsRange.phrase(days))的商店") {
                 NavigationLink(value: Route.report(site: site.id)) { MoreLinkLabel(title: "完整報表") }
                     .buttonStyle(.press)
             }

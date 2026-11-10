@@ -3,17 +3,28 @@ import SwiftUI
 
 // 流量與 Google 搜尋（網站後台的「流量」「搜尋成效」；traffic_report、search_report）。
 
-// MARK: - 走勢圖（手指按住可以看每一天的數字）
+// MARK: - 走勢圖（手指按住可以看每一格的數字；zoomable 時兩指縮放、放大後左右滑）
 
 struct TrafficChart: View {
     enum Measure { case visitors, pageviews }
 
     let points: [TrafficPoint]
     var metric: Measure = .visitors
+    /// 兩指縮放、放大後左右滑（流量完整報表用；概況的小圖不用）
+    var zoomable = false
 
     @State private var selected: String?
-    /// 圖的寬度：決定 X 軸標幾個日期（每個留大約 48pt，太多會擠在一起）
+    /// 圖的寬度：決定 X 軸標幾個（每個留大約 48pt，太多會擠在一起）
     @State private var width: CGFloat = 0
+    /// 畫面裡放幾格（nil＝全部）
+    @State private var visible: Int?
+    /// 兩指縮放開始時：幾格、最右邊是第幾格（縮放時右邊固定，最新的不會跑掉）
+    @State private var pinch: (count: Int, right: Int)?
+    /// 放大後滑到哪裡：畫面最左邊那一格的 key
+    @State private var scrollKey = ""
+
+    /// 最少放大到幾格
+    static let minVisible = 6
 
     /// X 軸要標的那幾個：平均挑、最後一天一定標（離它太近的前一個拿掉），最多 maxCount 個。
     /// 時間是文字（類別軸），Swift Charts 不會自己幫類別軸挑幾個，不挑的話 30 天以上每天都標、擠成一團
@@ -29,19 +40,31 @@ struct TrafficChart: View {
         return picks.map { keys[$0] }
     }
 
-    /// 寬度能放幾個日期（iPhone 大約 7 個：一週剛好每天都標；iPad 最多 10 個）
-    static func labelCount(for width: CGFloat) -> Int {
-        guard width > 0 else { return 6 }
-        return min(10, max(2, Int(width / 48)))
+    /// 放大之後：畫面裡大約放 maxCount 個，固定每隔幾格標一個（從最後一格往回數，左右滑的時候標籤不會跳）
+    static func strideKeys(_ keys: [String], visible: Int, maxCount: Int) -> [String] {
+        guard !keys.isEmpty else { return [] }
+        let step = max(1, Int((Double(visible) / Double(max(maxCount, 1))).rounded(.up)))
+        return stride(from: keys.count - 1, through: 0, by: -step).map { keys[$0] }.reversed()
+    }
+
+    /// 寬度能放幾個標籤（iPhone 大約 7 個：一週剛好每天都標；iPad 最多 10 個）；標籤長（11/5 14時）的少放一點
+    static func labelCount(for width: CGFloat, long: Bool = false) -> Int {
+        guard width > 0 else { return long ? 4 : 6 }
+        return min(10, max(2, Int(width / (long ? 76 : 48))))
     }
 
     var body: some View {
         let value = { (p: TrafficPoint) in metric == .visitors ? p.visitors : p.pageviews }
         let name = metric == .visitors ? "訪客" : "瀏覽"
         let picked = points.first { $0.key == selected }
-        // 圖上的位置用完整日期（一年的走勢 M/d 會重複），軸上顯示短的
+        // 圖上的位置用網站給的原始標籤（一年的走勢 M/d 會重複），軸上顯示短的
         let short = Dictionary(points.map { ($0.key, $0.label) }, uniquingKeysWith: { first, _ in first })
-        let ticks = Self.axisKeys(points.map(\.key), maxCount: Self.labelCount(for: width))
+        let keys = points.map(\.key)
+        let count = zoomable ? min(max(visible ?? keys.count, Self.minVisible), keys.count) : keys.count
+        let zoomed = zoomable && count < keys.count
+        let long = (points.first?.label.count ?? 0) > 6
+        let maxLabels = Self.labelCount(for: width, long: long)
+        let ticks = zoomed ? Self.strideKeys(keys, visible: count, maxCount: maxLabels) : Self.axisKeys(keys, maxCount: maxLabels)
         Chart {
             ForEach(points) { p in
                 AreaMark(x: .value("時間", p.key), y: .value(name, value(p)))
@@ -58,7 +81,7 @@ struct TrafficChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                     .annotation(position: .top, spacing: 6, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(picked.label)
+                            Text(picked.detail ?? picked.label)
                                 .textRole(.xs)
                                 .foregroundStyle(Theme.inverseMuted)
                             Text("\(value(picked).formatted()) \(name)")
@@ -91,9 +114,52 @@ struct TrafficChart: View {
                 }
             }
         }
+        // 放大後：畫面裡只放 count 格，左右滑看其他的（放大的時候按住要停一下才會出現數字，不會和滑動搶）
+        .chartScrollableAxes(zoomed ? .horizontal : [])
+        .chartXVisibleDomain(length: count)
+        .chartScrollPosition(x: $scrollKey)
+        .simultaneousGesture(magnify(keys: keys, count: count), including: zoomable && keys.count > Self.minVisible ? .all : .subviews)
+        .overlay(alignment: .topTrailing) {
+            if zoomed {
+                Button {
+                    withAnimation(Motion.ease) { visible = nil }
+                } label: {
+                    Text("顯示全部")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Theme.press, in: .capsule)
+                }
+                .buttonStyle(.press)
+                .transition(.opacity)
+            }
+        }
+        // 換了區間、級距（點不一樣了）：回到全部
+        .onChange(of: keys) { visible = nil; pinch = nil }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .haptic(.selection, trigger: selected)
         .accessibilityLabel("\(name)走勢")
+        .accessibilityHint(zoomable ? "兩指縮放可以看細一點，放大後左右滑" : "")
+    }
+
+    /// 兩指縮放：張開放大（畫面裡放比較少格）、捏起來縮小；右邊那一格固定不動
+    private func magnify(keys: [String], count: Int) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { v in
+                guard keys.count > Self.minVisible else { return }
+                if pinch == nil {
+                    let lead = count < keys.count ? (keys.firstIndex(of: scrollKey) ?? keys.count - count) : 0
+                    pinch = (count, min(keys.count - 1, lead + count - 1))
+                }
+                guard let start = pinch else { return }
+                let n = min(keys.count, max(Self.minVisible, Int((Double(start.count) / max(Double(v.magnification), 0.05)).rounded())))
+                guard n != count else { return }
+                let lead = max(0, min(keys.count - n, start.right - n + 1))
+                visible = n >= keys.count ? nil : n
+                scrollKey = keys[lead]
+            }
+            .onEnded { _ in pinch = nil }
     }
 }
 
@@ -103,10 +169,18 @@ struct TrafficView: View {
     let siteID: String
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var days = 7
     @State private var metric: TrafficChart.Measure = .visitors
+    /// 走勢的級距：沒選過（nil）照區間用預設（TrendInterval.standard）；換到不能用的區間就回預設
+    @State private var picked: TrendInterval?
     @State private var report: TrafficReport?
     @State private var error: String?
+
+    /// 區間和概況、營運報表、Google 搜尋共用（AnalyticsRange）
+    private var days: Int { model.analyticsRange(siteID) }
+    private var interval: TrendInterval {
+        if let picked, TrendInterval.options(days: days).contains(picked) { return picked }
+        return TrendInterval.standard(days: days)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -114,7 +188,8 @@ struct TrafficView: View {
                 VStack(alignment: .leading, spacing: 56) {
                     VStack(alignment: .leading, spacing: 18) {
                         PageHeader("流量", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
-                        FilterBar(items: [1, 7, 30, 90, 365], selection: $days, title: { $0 == 1 ? "今天" : $0 == 365 ? "一年" : "\($0) 天" })
+                        // 整頁的數字、走勢、時段、排行都是這一段期間
+                        AnalyticsRangeBar(siteID: siteID, dates: report?.days == days ? report?.rangeLabel : nil, note: days == 1 ? "0 點到現在" : nil)
                     }
                     .reveal()
 
@@ -144,13 +219,13 @@ struct TrafficView: View {
         .refreshable { await Task { await load() }.value }
         .brandPage()
         .pageTitle("流量")
-        .task(id: days) { await load() }
+        .task(id: "\(days)-\(interval.rawValue)") { await load() }
     }
 
     private func load() async {
         error = nil
         do {
-            report = try await model.api.traffic(site: siteID, days: days)
+            report = try await model.api.traffic(site: siteID, days: days, interval: interval)
         } catch {
             self.error = error.localizedDescription
         }
@@ -172,7 +247,8 @@ struct TrafficView: View {
 
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text(days == 1 ? "今天每小時" : "每天")
+                // 網站回的級距（舊版網站不認得 interval，照它實際給的寫）
+                Text(TrendInterval(rawValue: r.interval)?.heading ?? "每天")
                     .textRole(.h4)
                     .foregroundStyle(Theme.ink)
                 Spacer()
@@ -181,7 +257,19 @@ struct TrafficView: View {
                     FilterChip(title: "瀏覽", selected: metric == .pageviews) { metric = .pageviews }
                 }
             }
-            TrafficChart(points: r.trend, metric: metric)
+            let options = TrendInterval.options(days: days)
+            if options.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(options, id: \.self) { o in
+                        FilterChip(title: o.title, selected: interval == o) { picked = o }
+                    }
+                    Spacer()
+                    Text("兩指縮放")
+                        .textRole(.xs)
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            TrafficChart(points: r.trend, metric: metric, zoomable: true)
                 .frame(height: sizeClass == .regular ? 300 : 220)
                 .animation(Motion.ease, value: metric)
         }
@@ -193,6 +281,9 @@ struct TrafficView: View {
         if r.weekHours.count == 7, r.weekHours.contains(where: { $0.contains { $0 > 0 } }) {
             VStack(alignment: .leading, spacing: 20) {
                 SectionHead("什麼時候來", role: .h3)
+                Text("\(AnalyticsRange.phrase(days))的瀏覽，照星期幾、幾點分")
+                    .textRole(.xs)
+                    .foregroundStyle(Theme.muted)
                 WeekHeatmap(grid: r.weekHours)
             }
         }
@@ -518,18 +609,21 @@ struct SearchConsoleView: View {
     let siteID: String
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var days = 28
     @State private var showImpressions = false
     @State private var tab = 0
     @State private var report: SearchReport?
     @State private var error: String?
+
+    /// 區間和流量、營運報表共用（AnalyticsRange）；Google 的資料晚 1～2 天，「今天」先看最近 7 天
+    private var range: Int { model.analyticsRange(siteID) }
+    private var days: Int { range == 1 ? 7 : range }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 56) {
                 VStack(alignment: .leading, spacing: 18) {
                     PageHeader("Google 搜尋", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "Google Search Console 的資料，大約晚 1～2 天。")
-                    FilterBar(items: [7, 28, 90, 365], selection: $days, title: { $0 == 365 ? "一年" : "\($0) 天" })
+                    AnalyticsRangeBar(siteID: siteID, dates: report?.rangeLabel, note: range == 1 ? "Google 的資料晚 1～2 天，「今天」先看最近 7 天" : nil)
                 }
                 .reveal()
 
