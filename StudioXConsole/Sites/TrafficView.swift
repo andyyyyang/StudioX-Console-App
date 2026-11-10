@@ -176,10 +176,15 @@ struct TrafficView: View {
     @State private var error: String?
 
     /// 區間和概況、營運報表、Google 搜尋共用（AnalyticsRange）
-    private var days: Int { model.analyticsRange(siteID) }
+    private var range: ReportRange { model.reportRange(siteID) }
+    private var days: Int { range.days }
     private var interval: TrendInterval {
         if let picked, TrendInterval.options(days: days).contains(picked) { return picked }
         return TrendInterval.standard(days: days)
+    }
+    /// 走勢的標題和導覽列的選單都用這個換級距
+    private var intervalBinding: Binding<TrendInterval> {
+        Binding(get: { interval }, set: { new in withAnimation(Motion.ease) { picked = new } })
     }
 
     var body: some View {
@@ -189,7 +194,7 @@ struct TrafficView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         PageHeader("流量", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
                         // 整頁的數字、走勢、時段、排行都是這一段期間
-                        AnalyticsRangeBar(siteID: siteID, dates: report?.days == days ? report?.rangeLabel : nil, note: days == 1 ? "0 點到現在" : nil)
+                        AnalyticsRangeBar(siteID: siteID, dates: report?.days == days ? report?.rangeLabel : nil, note: !range.isCustom && days == 1 ? "0 點到現在" : nil)
                     }
                     .reveal()
 
@@ -219,13 +224,15 @@ struct TrafficView: View {
         .refreshable { await Task { await load() }.value }
         .brandPage()
         .pageTitle("流量")
-        .task(id: "\(days)-\(interval.rawValue)") { await load() }
+        // 往下捲、上面的區間列看不到了也能換：導覽列右上角的選單（區間＋走勢的級距）
+        .toolbar { AnalyticsRangeToolbar(siteID: siteID, interval: intervalBinding, intervals: TrendInterval.options(days: days)) }
+        .task(id: "\(range.key)-\(interval.rawValue)") { await load() }
     }
 
     private func load() async {
         error = nil
         do {
-            report = try await model.api.traffic(site: siteID, days: days, interval: interval)
+            report = try await model.api.traffic(site: siteID, range: range, interval: interval)
         } catch {
             self.error = error.localizedDescription
         }
@@ -247,31 +254,19 @@ struct TrafficView: View {
 
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                // 網站回的級距（舊版網站不認得 interval，照它實際給的寫）
-                Text(TrendInterval(rawValue: r.interval)?.heading ?? "每天")
-                    .textRole(.h4)
-                    .foregroundStyle(Theme.ink)
+                IntervalHeading(current: TrendInterval(rawValue: r.interval) ?? .day, options: TrendInterval.options(days: days), selection: intervalBinding)
                 Spacer()
                 HStack(spacing: 6) {
                     FilterChip(title: "訪客", selected: metric == .visitors) { metric = .visitors }
                     FilterChip(title: "瀏覽", selected: metric == .pageviews) { metric = .pageviews }
                 }
             }
-            let options = TrendInterval.options(days: days)
-            if options.count > 1 {
-                HStack(spacing: 6) {
-                    ForEach(options, id: \.self) { o in
-                        FilterChip(title: o.title, selected: interval == o) { picked = o }
-                    }
-                    Spacer()
-                    Text("兩指縮放")
-                        .textRole(.xs)
-                        .foregroundStyle(Theme.muted)
-                }
-            }
             TrafficChart(points: r.trend, metric: metric, zoomable: true)
                 .frame(height: sizeClass == .regular ? 300 : 220)
                 .animation(Motion.ease, value: metric)
+            Text("按住看數字・兩指縮放、放大後左右滑")
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
         }
 
         if !r.funnel.isEmpty {
@@ -281,7 +276,7 @@ struct TrafficView: View {
         if r.weekHours.count == 7, r.weekHours.contains(where: { $0.contains { $0 > 0 } }) {
             VStack(alignment: .leading, spacing: 20) {
                 SectionHead("什麼時候來", role: .h3)
-                Text("\(AnalyticsRange.phrase(days))的瀏覽，照星期幾、幾點分")
+                Text("\(range.phrase)的瀏覽，照星期幾、幾點分")
                     .textRole(.xs)
                     .foregroundStyle(Theme.muted)
                 WeekHeatmap(grid: r.weekHours)
@@ -306,6 +301,43 @@ struct TrafficView: View {
 
         if !r.contentPages.isEmpty {
             ContentImpactView(pages: r.contentPages)
+        }
+    }
+}
+
+/// 走勢的標題「每天 ⌄」：按下去換每小時／每天／每週／每月（這段期間只有一種時就只是標題）。
+/// current 是網站實際回的級距（舊版網站不認得 interval 時照它給的寫）
+struct IntervalHeading: View {
+    let current: TrendInterval
+    let options: [TrendInterval]
+    @Binding var selection: TrendInterval
+
+    var body: some View {
+        if options.count > 1 {
+            Menu {
+                Picker("走勢", selection: $selection) {
+                    ForEach(options, id: \.self) { o in
+                        Text(o.heading).tag(o)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 5) {
+                    Text(current.heading)
+                        .textRole(.h4)
+                        .contentTransition(.numericText())
+                    HeroIcon("chevron-down", size: 13)
+                }
+                .foregroundStyle(Theme.ink)
+            }
+            .menuOrder(.fixed)
+            .accessibilityLabel("走勢：\(current.heading)，按兩下換")
+            .haptic(.selection, trigger: selection)
+        } else {
+            Text(current.heading)
+                .textRole(.h4)
+                .foregroundStyle(Theme.ink)
         }
     }
 }
@@ -615,15 +647,16 @@ struct SearchConsoleView: View {
     @State private var error: String?
 
     /// 區間和流量、營運報表共用（AnalyticsRange）；Google 的資料晚 1～2 天，「今天」先看最近 7 天
-    private var range: Int { model.analyticsRange(siteID) }
-    private var days: Int { range == 1 ? 7 : range }
+    private var range: ReportRange { model.reportRange(siteID) }
+    /// 實際去問 Google 的期間：「今天」還沒有資料，改看最近 7 天
+    private var query: ReportRange { !range.isCustom && range.days == 1 ? .last(7) : range }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 56) {
                 VStack(alignment: .leading, spacing: 18) {
                     PageHeader("Google 搜尋", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "Google Search Console 的資料，大約晚 1～2 天。")
-                    AnalyticsRangeBar(siteID: siteID, dates: report?.rangeLabel, note: range == 1 ? "Google 的資料晚 1～2 天，「今天」先看最近 7 天" : nil)
+                    AnalyticsRangeBar(siteID: siteID, dates: report?.rangeLabel, note: !range.isCustom && range.days == 1 ? "Google 的資料晚 1～2 天，「今天」先看最近 7 天" : range.endsToday ? "Google 的資料晚 1～2 天" : nil)
                 }
                 .reveal()
 
@@ -649,13 +682,14 @@ struct SearchConsoleView: View {
         .refreshable { await Task { await load() }.value }
         .brandPage()
         .pageTitle("Google 搜尋")
-        .task(id: days) { await load() }
+        .toolbar { AnalyticsRangeToolbar(siteID: siteID) }
+        .task(id: query.key) { await load() }
     }
 
     private func load() async {
         error = nil
         do {
-            report = try await model.api.searchReport(site: siteID, days: days)
+            report = try await model.api.searchReport(site: siteID, range: query)
         } catch {
             self.error = error.localizedDescription
         }
@@ -669,8 +703,8 @@ struct SearchConsoleView: View {
             Stat(value: (r.ctr ?? 0) * 100, label: "點閱率", format: { String(format: "%.1f%%", $0) })
             Stat(value: r.position ?? 0, label: "平均排名", format: { String(format: "%.1f", $0) })
         }
-        if let range = r.rangeLabel {
-            Text("\(range)・\(r.property ?? "")")
+        if let dates = r.rangeLabel {
+            Text("\(dates)・\(r.property ?? "")")
                 .textRole(.xs)
                 .foregroundStyle(Theme.muted)
         }

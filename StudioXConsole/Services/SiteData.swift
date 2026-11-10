@@ -120,9 +120,29 @@ extension ConsoleAPI {
         return OpsReport(try await tool("ops_report", site: site, args))
     }
 
+    /// 流量：報表頁共用的期間（ReportRange：往回幾天或自訂起訖）
+    func traffic(site: String, range: ReportRange, interval: TrendInterval?) async throws -> TrafficReport {
+        var args = range.args
+        if let interval { args["interval"] = .string(interval.rawValue) }
+        return TrafficReport(try await tool("traffic_report", site: site, args))
+    }
+
+    /// 營運報表（訂單）：和流量同一段期間（含今天往回，或自訂起訖）
+    func ops(site: String, range: ReportRange) async throws -> OpsReport {
+        var args = range.args
+        args["section"] = "orders"
+        args["includeToday"] = true
+        return OpsReport(try await tool("ops_report", site: site, args))
+    }
+
     /// Google 搜尋成效（days：往回幾天，預設 28）
     func searchReport(site: String, days: Int = 28) async throws -> SearchReport {
         SearchReport(try await tool("search_report", site: site, ["days": .number(Double(days))]))
+    }
+
+    /// Google 搜尋成效：自訂起訖帶 from／to，否則往回 days 天
+    func searchReport(site: String, range: ReportRange) async throws -> SearchReport {
+        SearchReport(try await tool("search_report", site: site, range.args))
     }
 
     // MARK: 內容與資料（網站後台的 list / get，照 /api/app/schema 的實體）

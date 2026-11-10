@@ -114,7 +114,10 @@ struct SiteHomeView: View {
             .brandPage()
             .pageTitle(site.name)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
-            .toolbar { AskXenaToolbar(model: model) }
+            .toolbar {
+                if site.hasTraffic || site.hasOrders { AnalyticsRangeToolbar(siteID: site.id) }
+                AskXenaToolbar(model: model)
+            }
         } else {
             EmptyState(title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
                 .pageWidth()
@@ -173,7 +176,10 @@ struct SiteWorkspace: View {
             .brandPage()
             .pageTitle(site.name)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
-            .toolbar { AskXenaToolbar(model: model) }
+            .toolbar {
+                if site.hasTraffic || site.hasOrders { AnalyticsRangeToolbar(siteID: site.id) }
+                AskXenaToolbar(model: model)
+            }
         case .traffic:
             TrafficView(siteID: site.id)
         case .search:
@@ -284,12 +290,13 @@ struct SiteOverview: View {
     @State private var loading = false
 
     /// 區間和流量、營運報表、Google 搜尋共用（AnalyticsRange）：流量與商店的數字是同一段期間
-    private var days: Int { model.analyticsRange(site.id) }
+    private var range: ReportRange { model.reportRange(site.id) }
+    private var days: Int { range.days }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 56) {
             if site.hasTraffic || site.hasOrders {
-                AnalyticsRangeBar(siteID: site.id, dates: report?.days == days ? report?.rangeLabel : nil, note: days == 1 ? "0 點到現在" : nil)
+                AnalyticsRangeBar(siteID: site.id, dates: report?.days == days ? report?.rangeLabel : nil, note: !range.isCustom && days == 1 ? "0 點到現在" : nil)
             }
             if site.hasTraffic {
                 traffic
@@ -301,7 +308,7 @@ struct SiteOverview: View {
                 ErrorNote(message: error) { Task { await load() } }
             }
         }
-        .task(id: days) { await load() }
+        .task(id: range.key) { await load() }
     }
 
     private func load() async {
@@ -309,8 +316,8 @@ struct SiteOverview: View {
         defer { loading = false }
         error = nil
         do {
-            if site.hasTraffic { report = try await model.api.traffic(site: site.id, days: days, interval: TrendInterval.standard(days: days)) }
-            if site.hasOrders { ops = try await model.api.ops(site: site.id, days: days, includeToday: true) }
+            if site.hasTraffic { report = try await model.api.traffic(site: site.id, range: range, interval: TrendInterval.standard(days: days)) }
+            if site.hasOrders { ops = try await model.api.ops(site: site.id, range: range) }
         } catch {
             self.error = error.localizedDescription
         }
@@ -347,7 +354,7 @@ struct SiteOverview: View {
 
     private func store(_ ops: OpsReport) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            SectionHead("\(AnalyticsRange.phrase(days))的商店") {
+            SectionHead("\(range.phrase)的商店") {
                 NavigationLink(value: Route.report(site: site.id)) { MoreLinkLabel(title: "完整報表") }
                     .buttonStyle(.press)
             }
