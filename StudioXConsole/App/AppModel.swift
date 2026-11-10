@@ -122,8 +122,8 @@ final class AppModel {
     }
     /// iPad：每個網站自己的一疊頁面
     var sitePaths: [String: [Route]] = [:]
-    /// 每個網站報表看的區間（天）：概況、流量、營運報表、Google 搜尋共用（Sites/AnalyticsRange.swift）
-    var analyticsDays: [String: Int] = [:]
+    /// 每個網站報表看的期間：概況、流量、營運報表、Google 搜尋共用（Sites/AnalyticsRange.swift）
+    var analyticsRanges: [String: ReportRange] = [:]
     /// iPad 側欄「平台管理」左邊選的那一頁（深連結、通知打開的也選在這裡）
     var consoleSection: ConsolePage = .customers
     /// iPad 側欄「平台管理」裡的下一層

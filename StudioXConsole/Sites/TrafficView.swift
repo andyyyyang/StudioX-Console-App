@@ -176,7 +176,8 @@ struct TrafficView: View {
     @State private var error: String?
 
     /// 區間和概況、營運報表、Google 搜尋共用（AnalyticsRange）
-    private var days: Int { model.analyticsRange(siteID) }
+    private var range: ReportRange { model.reportRange(siteID) }
+    private var days: Int { range.days }
     private var interval: TrendInterval {
         if let picked, TrendInterval.options(days: days).contains(picked) { return picked }
         return TrendInterval.standard(days: days)
@@ -193,7 +194,7 @@ struct TrafficView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         PageHeader("流量", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "訪客以「同一天、同一個瀏覽器」算一位；時間是台北時間。")
                         // 整頁的數字、走勢、時段、排行都是這一段期間
-                        AnalyticsRangeBar(siteID: siteID, dates: report?.days == days ? report?.rangeLabel : nil, note: days == 1 ? "0 點到現在" : nil)
+                        AnalyticsRangeBar(siteID: siteID, dates: report?.days == days ? report?.rangeLabel : nil, note: !range.isCustom && days == 1 ? "0 點到現在" : nil)
                     }
                     .reveal()
 
@@ -225,13 +226,13 @@ struct TrafficView: View {
         .pageTitle("流量")
         // 往下捲、上面的區間列看不到了也能換：導覽列右上角的選單（區間＋走勢的級距）
         .toolbar { AnalyticsRangeToolbar(siteID: siteID, interval: intervalBinding, intervals: TrendInterval.options(days: days)) }
-        .task(id: "\(days)-\(interval.rawValue)") { await load() }
+        .task(id: "\(range.key)-\(interval.rawValue)") { await load() }
     }
 
     private func load() async {
         error = nil
         do {
-            report = try await model.api.traffic(site: siteID, days: days, interval: interval)
+            report = try await model.api.traffic(site: siteID, range: range, interval: interval)
         } catch {
             self.error = error.localizedDescription
         }
@@ -275,7 +276,7 @@ struct TrafficView: View {
         if r.weekHours.count == 7, r.weekHours.contains(where: { $0.contains { $0 > 0 } }) {
             VStack(alignment: .leading, spacing: 20) {
                 SectionHead("什麼時候來", role: .h3)
-                Text("\(AnalyticsRange.phrase(days))的瀏覽，照星期幾、幾點分")
+                Text("\(range.phrase)的瀏覽，照星期幾、幾點分")
                     .textRole(.xs)
                     .foregroundStyle(Theme.muted)
                 WeekHeatmap(grid: r.weekHours)
@@ -646,15 +647,16 @@ struct SearchConsoleView: View {
     @State private var error: String?
 
     /// 區間和流量、營運報表共用（AnalyticsRange）；Google 的資料晚 1～2 天，「今天」先看最近 7 天
-    private var range: Int { model.analyticsRange(siteID) }
-    private var days: Int { range == 1 ? 7 : range }
+    private var range: ReportRange { model.reportRange(siteID) }
+    /// 實際去問 Google 的期間：「今天」還沒有資料，改看最近 7 天
+    private var query: ReportRange { !range.isCustom && range.days == 1 ? .last(7) : range }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 56) {
                 VStack(alignment: .leading, spacing: 18) {
                     PageHeader("Google 搜尋", eyebrow: model.site(siteID)?.name ?? siteID, subtitle: "Google Search Console 的資料，大約晚 1～2 天。")
-                    AnalyticsRangeBar(siteID: siteID, dates: report?.rangeLabel, note: range == 1 ? "Google 的資料晚 1～2 天，「今天」先看最近 7 天" : nil)
+                    AnalyticsRangeBar(siteID: siteID, dates: report?.rangeLabel, note: !range.isCustom && range.days == 1 ? "Google 的資料晚 1～2 天，「今天」先看最近 7 天" : range.endsToday ? "Google 的資料晚 1～2 天" : nil)
                 }
                 .reveal()
 
@@ -681,13 +683,13 @@ struct SearchConsoleView: View {
         .brandPage()
         .pageTitle("Google 搜尋")
         .toolbar { AnalyticsRangeToolbar(siteID: siteID) }
-        .task(id: days) { await load() }
+        .task(id: query.key) { await load() }
     }
 
     private func load() async {
         error = nil
         do {
-            report = try await model.api.searchReport(site: siteID, days: days)
+            report = try await model.api.searchReport(site: siteID, range: query)
         } catch {
             self.error = error.localizedDescription
         }
@@ -701,8 +703,8 @@ struct SearchConsoleView: View {
             Stat(value: (r.ctr ?? 0) * 100, label: "點閱率", format: { String(format: "%.1f%%", $0) })
             Stat(value: r.position ?? 0, label: "平均排名", format: { String(format: "%.1f", $0) })
         }
-        if let range = r.rangeLabel {
-            Text("\(range)・\(r.property ?? "")")
+        if let dates = r.rangeLabel {
+            Text("\(dates)・\(r.property ?? "")")
                 .textRole(.xs)
                 .foregroundStyle(Theme.muted)
         }

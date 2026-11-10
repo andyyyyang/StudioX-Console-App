@@ -17,7 +17,8 @@ struct OpsReportView: View {
 
     private var site: SiteSummary? { model.site(siteID) }
     /// 整頁（訂單、現場排隊、地區）同一段期間，和概況、流量、Google 搜尋共用（AnalyticsRange）：含今天往回算
-    private var days: Int { model.analyticsRange(siteID) }
+    private var range: ReportRange { model.reportRange(siteID) }
+    private var days: Int { range.days }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -25,7 +26,7 @@ struct OpsReportView: View {
                 VStack(alignment: .leading, spacing: 44) {
                     VStack(alignment: .leading, spacing: 18) {
                         PageHeader("營運報表", eyebrow: site?.name ?? siteID)
-                        AnalyticsRangeBar(siteID: siteID, note: days == 1 ? "0 點到現在" : "含今天")
+                        AnalyticsRangeBar(siteID: siteID, note: range.isCustom ? nil : days == 1 ? "0 點到現在" : "含今天")
                     }
                     if let error {
                         ErrorNote(message: error) { Task { await load() } }
@@ -71,7 +72,7 @@ struct OpsReportView: View {
         .pageTitle("營運報表")
         // 往下捲之後也能換區間
         .toolbar { AnalyticsRangeToolbar(siteID: siteID) }
-        .task(id: days) {
+        .task(id: range.key) {
             await load()
             await loadQueue()
             await loadRegions()
@@ -80,14 +81,14 @@ struct OpsReportView: View {
 
     /// 網站有現場排隊的報表才放（沒有叫號的網站、舊版網站不顯示）；換區間時讀不到就留著上一次的
     private func loadQueue() async {
-        guard let q = try? await model.api.tool("ops_report", site: siteID, ["section": "queue", "days": .number(Double(days))]),
+        guard let q = try? await model.api.tool("ops_report", site: siteID, range.args.merging(["section": "queue"], uniquingKeysWith: { _, new in new })),
               q["tickets"] != nil else { return }
         withAnimation(Motion.ease) { queue = q }
     }
 
     /// 網站有地區報表才放（舊版網站回錯誤就不顯示）；換區間時讀不到就留著上一次的
     private func loadRegions() async {
-        guard let r = try? await model.api.tool("ops_report", site: siteID, ["section": "regions", "days": .number(Double(days))]),
+        guard let r = try? await model.api.tool("ops_report", site: siteID, range.args.merging(["section": "regions"], uniquingKeysWith: { _, new in new })),
               r["cities"] != nil else { return }
         withAnimation(Motion.ease) { regions = r }
     }
@@ -96,7 +97,7 @@ struct OpsReportView: View {
         loading = true
         defer { loading = false }
         do {
-            report = try await model.api.tool("ops_report", site: siteID, ["section": "orders", "days": .number(Double(days)), "includeToday": true])
+            report = try await model.api.tool("ops_report", site: siteID, range.args.merging(["section": "orders", "includeToday": true], uniquingKeysWith: { _, new in new }))
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -113,7 +114,7 @@ struct OpsReportView: View {
     private func orders(_ r: JSONValue) -> some View {
         let ops = OpsReport(r)
         VStack(alignment: .leading, spacing: 24) {
-            SectionHead("訂單與收款・\(ops.rangeLabel.isEmpty ? AnalyticsRange.phrase(days) : ops.rangeLabel)", role: .h3) {
+            SectionHead("訂單與收款・\(ops.rangeLabel.isEmpty ? range.phrase : ops.rangeLabel)", role: .h3) {
                 MoreLink("看訂單") {
                     model.openOrders(site: siteID, status: "all")
                 }
@@ -179,7 +180,7 @@ struct OpsReportView: View {
             ("當天下單", same["ordered"]?.int ?? 0, same["orderRatePercent"]?.int),
         ]
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("現場排隊 → 線上成交・\(AnalyticsRange.phrase(days))", role: .h3)
+            SectionHead("現場排隊 → 線上成交・\(range.phrase)", role: .h3)
             if let summary = q["summary"]?.string {
                 Text(summary)
                     .textRole(.small)
@@ -237,7 +238,7 @@ struct OpsReportView: View {
     private func regionSection(_ r: JSONValue) -> some View {
         let cities = r["cities"]?.array ?? []
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("哪裡的人最常訂購・\(AnalyticsRange.phrase(days))", role: .h3)
+            SectionHead("哪裡的人最常訂購・\(range.phrase)", role: .h3)
             if let summary = r["summary"]?.string {
                 Text(summary)
                     .textRole(.small)
