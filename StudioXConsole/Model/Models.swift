@@ -982,11 +982,13 @@ struct TrafficPoint: Identifiable {
     var id: String { key }
     /// 網站給的原始標籤（2026-10-02、2026-10-02T14）：一年的走勢裡 M/d 會重複，用這個當 id 與圖上的位置
     let key: String
-    /// 10/2、14時
+    /// 軸上的短標籤：10/2、14時、11月
     let label: String
     let date: Date?
     let visitors: Int
     let pageviews: Int
+    /// 手指按住時的完整說明（11/5 14:00–15:00、11/3–11/9 這週）；沒有就用 label
+    var detail: String? = nil
 }
 
 struct TrafficTop: Identifiable {
@@ -1040,6 +1042,10 @@ struct ContentPageImpact: Identifiable {
 struct TrafficReport {
     var installed: Bool
     var days: Int
+    /// 走勢的級距（hour／day／week／month）：網站照 App 要的給；舊版網站沒有這欄，今天是小時、其他是天
+    var interval: String
+    /// 這段期間：11/4 – 11/10（網站時區；舊版網站沒有）
+    var rangeLabel: String?
     var live: Int
     var visitors: Int
     var pageviews: Int
@@ -1071,6 +1077,11 @@ struct TrafficReport {
     init(_ json: JSONValue) {
         installed = json["installed"]?.bool ?? true
         days = json["days"]?.int ?? 7
+        let iv = json["interval"]?.string ?? (days == 1 ? "hour" : "day")
+        interval = iv
+        if let start = json["range"]?["start"]?.string, let end = json["range"]?["end"]?.string {
+            rangeLabel = start == end ? TrafficReport.monthDay(start) : "\(TrafficReport.monthDay(start)) – \(TrafficReport.monthDay(end))"
+        }
         live = json["live"]?.int ?? 0
         visitors = json["visitors"]?.int ?? 0
         pageviews = json["pageviews"]?.int ?? 0
@@ -1079,9 +1090,11 @@ struct TrafficReport {
         avgDurationMs = json["avgDurationMs"]?.double
         change = json["change"]?["visitors"]?.double
         pageviewsChange = json["change"]?["pageviews"]?.double
+        let multiDay = days > 1
         trend = (json["trend"]?.array ?? []).map {
             let raw = $0["label"]?.string ?? ""
-            return TrafficPoint(key: raw, label: TrafficReport.shortLabel(raw), date: TrafficReport.day(raw), visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0)
+            let l = TrafficReport.pointLabels(raw, interval: iv, multiDay: multiDay)
+            return TrafficPoint(key: raw, label: l.label, date: TrafficReport.day(raw), visitors: $0["visitors"]?.int ?? 0, pageviews: $0["pageviews"]?.int ?? 0, detail: l.detail)
         }
         pages = TrafficReport.tops(json["pages"])
         entries = TrafficReport.tops(json["entries"])
@@ -1116,6 +1129,42 @@ struct TrafficReport {
     }
 
     /// "2026-10-02" → "10/2"；"2026-10-02T14" → "14時"
+    /// 走勢一格的標籤（軸上短的、按住看的完整的）：
+    /// 小時 2026-11-05T14 → 14時（多天時 11/5 14時）／11/5 14:00–15:00；天 2026-11-05 → 11/5／11/5（三）；
+    /// 週 2026-11-03（那週的星期一）→ 11/3／11/3 – 11/9；月 2026-11 → 11月（一月寫年份）／2026 年 11 月
+    static func pointLabels(_ raw: String, interval: String, multiDay: Bool) -> (label: String, detail: String) {
+        let date = day(raw)
+        let cal = Calendar.taipei
+        let md = { (d: Date) -> String in
+            let c = cal.dateComponents([.month, .day], from: d)
+            return "\(c.month ?? 0)/\(c.day ?? 0)"
+        }
+        guard let date else { return (shortLabel(raw), raw) }
+        switch interval {
+        case "hour":
+            let h = cal.component(.hour, from: date)
+            let span = "\(h):00–\(h + 1):00"
+            return (multiDay ? "\(md(date)) \(h)時" : "\(h)時", multiDay ? "\(md(date)) \(span)" : span)
+        case "week":
+            let end = cal.date(byAdding: .day, value: 6, to: date) ?? date
+            return (md(date), "\(md(date)) – \(md(end)) 這週")
+        case "month":
+            let c = cal.dateComponents([.year, .month], from: date)
+            let m = c.month ?? 0
+            return (m == 1 ? "\(c.year ?? 0)/1" : "\(m)月", "\(c.year ?? 0) 年 \(m) 月")
+        default:
+            let w = ["日", "一", "二", "三", "四", "五", "六"][(cal.component(.weekday, from: date) - 1) % 7]
+            return (md(date), "\(md(date))（\(w)）")
+        }
+    }
+
+    /// "2026-11-04" → "11/4"
+    static func monthDay(_ raw: String) -> String {
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3 else { return raw }
+        return "\(Int(parts[1]) ?? 0)/\(Int(parts[2]) ?? 0)"
+    }
+
     private static func shortLabel(_ raw: String) -> String {
         if raw.contains("T"), let hour = raw.split(separator: "T").last {
             return "\(Int(hour) ?? 0)時"
@@ -1125,10 +1174,11 @@ struct TrafficReport {
         return "\(Int(parts[1]) ?? 0)/\(Int(parts[2]) ?? 0)"
     }
 
-    private static func day(_ raw: String) -> Date? {
+    static func day(_ raw: String) -> Date? {
         let parts = raw.split(separator: "T").first?.split(separator: "-").compactMap { Int($0) } ?? []
-        guard parts.count == 3 else { return nil }
-        var c = DateComponents(year: parts[0], month: parts[1], day: parts[2])
+        // 月的走勢是 2026-11（當成那個月的 1 號）
+        guard parts.count == 3 || parts.count == 2 else { return nil }
+        var c = DateComponents(year: parts[0], month: parts[1], day: parts.count == 3 ? parts[2] : 1)
         if raw.contains("T"), let h = raw.split(separator: "T").last.flatMap({ Int($0) }) { c.hour = h }
         return Calendar.taipei.date(from: c)
     }

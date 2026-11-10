@@ -8,19 +8,16 @@ struct OpsReportView: View {
     let siteID: String
 
     @Environment(AppModel.self) private var model
-    @State private var days = 7
     @State private var report: JSONValue?
     @State private var members: JSONValue?
     @State private var regions: JSONValue?
-    /// 地區看比較長的時間才有意義：自己的區間（預設 90 天）
-    @State private var regionDays = 90
     @State private var queue: JSONValue?
-    /// 現場排隊也有自己的區間（預設 30 天）：上面的「昨天」對排隊沒有意義
-    @State private var queueDays = 30
     @State private var error: String?
     @State private var loading = false
 
     private var site: SiteSummary? { model.site(siteID) }
+    /// 整頁（訂單、現場排隊、地區）同一段期間，和概況、流量、Google 搜尋共用（AnalyticsRange）：含今天往回算
+    private var days: Int { model.analyticsRange(siteID) }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -28,7 +25,7 @@ struct OpsReportView: View {
                 VStack(alignment: .leading, spacing: 44) {
                     VStack(alignment: .leading, spacing: 18) {
                         PageHeader("營運報表", eyebrow: site?.name ?? siteID)
-                        FilterBar(items: [1, 7, 30, 90], selection: $days, title: { $0 == 1 ? "昨天" : "\($0) 天" })
+                        AnalyticsRangeBar(siteID: siteID, note: days == 1 ? "0 點到現在" : "含今天")
                     }
                     if let error {
                         ErrorNote(message: error) { Task { await load() } }
@@ -72,21 +69,23 @@ struct OpsReportView: View {
         }
         .brandPage()
         .pageTitle("營運報表")
-        .task(id: days) { await load() }
-        .task(id: regionDays) { await loadRegions() }
-        .task(id: queueDays) { await loadQueue() }
+        .task(id: days) {
+            await load()
+            await loadQueue()
+            await loadRegions()
+        }
     }
 
     /// 網站有現場排隊的報表才放（沒有叫號的網站、舊版網站不顯示）；換區間時讀不到就留著上一次的
     private func loadQueue() async {
-        guard let q = try? await model.api.tool("ops_report", site: siteID, ["section": "queue", "days": .number(Double(queueDays))]),
+        guard let q = try? await model.api.tool("ops_report", site: siteID, ["section": "queue", "days": .number(Double(days))]),
               q["tickets"] != nil else { return }
         withAnimation(Motion.ease) { queue = q }
     }
 
     /// 網站有地區報表才放（舊版網站回錯誤就不顯示）；換區間時讀不到就留著上一次的
     private func loadRegions() async {
-        guard let r = try? await model.api.tool("ops_report", site: siteID, ["section": "regions", "days": .number(Double(regionDays))]),
+        guard let r = try? await model.api.tool("ops_report", site: siteID, ["section": "regions", "days": .number(Double(days))]),
               r["cities"] != nil else { return }
         withAnimation(Motion.ease) { regions = r }
     }
@@ -95,7 +94,7 @@ struct OpsReportView: View {
         loading = true
         defer { loading = false }
         do {
-            report = try await model.api.tool("ops_report", site: siteID, ["section": "orders", "days": .number(Double(days))])
+            report = try await model.api.tool("ops_report", site: siteID, ["section": "orders", "days": .number(Double(days)), "includeToday": true])
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -112,7 +111,7 @@ struct OpsReportView: View {
     private func orders(_ r: JSONValue) -> some View {
         let ops = OpsReport(r)
         VStack(alignment: .leading, spacing: 24) {
-            SectionHead("訂單與收款・\(ops.rangeLabel.isEmpty ? (days == 1 ? "昨天" : "最近 \(days) 天") : ops.rangeLabel)", role: .h3) {
+            SectionHead("訂單與收款・\(ops.rangeLabel.isEmpty ? AnalyticsRange.phrase(days) : ops.rangeLabel)", role: .h3) {
                 MoreLink("看訂單") {
                     model.openOrders(site: siteID, status: "all")
                 }
@@ -178,8 +177,7 @@ struct OpsReportView: View {
             ("當天下單", same["ordered"]?.int ?? 0, same["orderRatePercent"]?.int),
         ]
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("現場排隊 → 線上成交", role: .h3)
-            FilterBar(items: [7, 30, 90, 365], selection: $queueDays, title: { $0 == 365 ? "一年" : "\($0) 天" })
+            SectionHead("現場排隊 → 線上成交・\(AnalyticsRange.phrase(days))", role: .h3)
             if let summary = q["summary"]?.string {
                 Text(summary)
                     .textRole(.small)
@@ -237,8 +235,7 @@ struct OpsReportView: View {
     private func regionSection(_ r: JSONValue) -> some View {
         let cities = r["cities"]?.array ?? []
         VStack(alignment: .leading, spacing: 20) {
-            SectionHead("哪裡的人最常訂購", role: .h3)
-            FilterBar(items: [30, 90, 365, 3650], selection: $regionDays, title: { $0 == 365 ? "一年" : $0 == 3650 ? "全部" : "\($0) 天" })
+            SectionHead("哪裡的人最常訂購・\(AnalyticsRange.phrase(days))", role: .h3)
             if let summary = r["summary"]?.string {
                 Text(summary)
                     .textRole(.small)

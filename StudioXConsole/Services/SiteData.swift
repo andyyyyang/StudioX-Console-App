@@ -106,14 +106,18 @@ extension ConsoleAPI {
         return ListPage(items: (r["items"]?.array ?? []).map { InquirySummary(site: site, $0) }, r)
     }
 
-    /// 流量（days：1＝今天）
-    func traffic(site: String, days: Int = 7) async throws -> TrafficReport {
-        TrafficReport(try await tool("traffic_report", site: site, ["days": .number(Double(days))]))
+    /// 流量（days：1＝今天 0 點到現在；interval：走勢的級距 hour／day／week／month，不給由網站決定）
+    func traffic(site: String, days: Int = 7, interval: TrendInterval? = nil) async throws -> TrafficReport {
+        var args: [String: JSONValue] = ["days": .number(Double(days))]
+        if let interval { args["interval"] = .string(interval.rawValue) }
+        return TrafficReport(try await tool("traffic_report", site: site, args))
     }
 
-    /// 營運報表（days：1＝昨天）
-    func ops(site: String, days: Int = 1) async throws -> OpsReport {
-        OpsReport(try await tool("ops_report", site: site, ["section": "orders", "days": .number(Double(days))]))
+    /// 營運報表（days：1＝昨天；includeToday：含今天往回 days 天到現在，和流量同一段期間，1＝今天）
+    func ops(site: String, days: Int = 1, includeToday: Bool = false) async throws -> OpsReport {
+        var args: [String: JSONValue] = ["section": "orders", "days": .number(Double(days))]
+        if includeToday { args["includeToday"] = .bool(true) }
+        return OpsReport(try await tool("ops_report", site: site, args))
     }
 
     /// Google 搜尋成效（days：往回幾天，預設 28）

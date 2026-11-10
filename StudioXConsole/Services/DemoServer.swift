@@ -402,7 +402,7 @@ nonisolated enum DemoServer {
             case "queue": return queueReport(days: args["days"]?.int ?? 30)
             default: return ops(days: args["days"]?.int ?? 1)
             }
-        case ("traffic_report", _): return traffic(site: site, days: args["days"]?.int ?? 7)
+        case ("traffic_report", _): return traffic(site: site, days: args["days"]?.int ?? 7, interval: args["interval"]?.string)
         case ("search_report", _): return search
         case ("list", "order"): return orders(status: args["status"]?.string)
         case ("get", "order"): return order(id: args["id"]?.string ?? "o1")
@@ -735,14 +735,47 @@ nonisolated enum DemoServer {
         }.joined(separator: ",")
     }
 
-    private static func traffic(site: String, days: Int) -> String {
+    /// 走勢照要的級距給（和網站的 trendSeries 一樣的標籤：小時 2026-11-05T14、天與週 2026-11-05、月 2026-11）
+    private static func demoTrend(base: Int, days: Int, interval: String) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
+        calendar.firstWeekday = 2
+        let now = Date.now
+        let first = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: calendar.startOfDay(for: now))!
+        let component: Calendar.Component = interval == "hour" ? .hour : interval == "week" ? .weekOfYear : interval == "month" ? .month : .day
+        var t: Date
+        switch interval {
+        case "week": t = calendar.dateInterval(of: .weekOfYear, for: first)!.start
+        case "month": t = calendar.dateInterval(of: .month, for: first)!.start
+        default: t = first
+        }
+        var out: [String] = []
+        var i = 0
+        while t <= now {
+            let c = calendar.dateComponents([.year, .month, .day, .hour], from: t)
+            let label: String = switch interval {
+            case "hour": String(format: "%04d-%02d-%02dT%02d", c.year!, c.month!, c.day!, c.hour!)
+            case "month": String(format: "%04d-%02d", c.year!, c.month!)
+            default: String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
+            }
+            let scale: Int = interval == "hour" ? 1 : interval == "week" ? 7 : interval == "month" ? 30 : 1
+            let v: Int = interval == "hour" ? max(0, dailyVisitors(base: base, day: i / 24) / 14 + (c.hour! > 9 && c.hour! < 23 ? 1 : 0) * (i % 4)) : dailyVisitors(base: base, day: i) * scale
+            out.append(#"{"label":"\#(label)","visitors":\#(v),"pageviews":\#(v * 3)}"#)
+            t = calendar.date(byAdding: component, value: 1, to: t)!
+            i += 1
+        }
+        return out.joined(separator: ",")
+    }
+
+    private static func traffic(site: String, days: Int, interval want: String? = nil) -> String {
         let base = site == "chenmai.studiox.tw" ? 260 : site == "studiox.tw" ? 58 : 14
         let values: [Int] = (0..<max(days, 1)).map { (i: Int) -> Int in dailyVisitors(base: base, day: i) }
+        let interval = want == "hour" && days > 7 ? "day" : want ?? (days == 1 ? "hour" : "day")
         let hours: String = (0..<7).map { (d: Int) -> String in hourRow(base: base, day: d) }.joined(separator: ",")
         return """
-        {"installed":true,"days":\(days),"live":\(base / 20 + 1),"visitors":\(values.reduce(0, +)),"pageviews":\(values.reduce(0, +) * 3),"visits":\(values.reduce(0, +) * 5 / 4),
+        {"installed":true,"days":\(days),"interval":"\(interval)","range":{"start":"\(day(max(days, 1) - 1))","end":"\(day(0))"},"live":\(base / 20 + 1),"visitors":\(values.reduce(0, +)),"pageviews":\(values.reduce(0, +) * 3),"visits":\(values.reduce(0, +) * 5 / 4),
          "bounceRate":0.38,"avgDurationMs":94000,"change":{"visitors":0.18,"pageviews":0.12},
-         "trend":[\(trend(values))],
+         "trend":[\(demoTrend(base: base, days: days, interval: interval))],
          "pages":[{"key":"/","name":"首頁","visitors":\(base * 3),"pageviews":\(base * 5)},{"key":"/shop","name":"商店","visitors":\(base * 2),"pageviews":\(base * 4)},{"key":"/shop/egg-rolls","name":"原味手工蛋捲禮盒","visitors":\(base),"pageviews":\(base * 2)},{"key":"/about","name":"關於我們","visitors":\(base / 2),"pageviews":\(base / 2 + 3)}],
          "entries":[{"key":"/","name":"首頁","visitors":\(base * 2),"pageviews":\(base * 2)},{"key":"/shop/egg-rolls","name":"原味手工蛋捲禮盒","visitors":\(base / 2),"pageviews":\(base / 2)},{"key":"/qr","name":"找不到的頁面","missing":true,"visitors":\(base / 6 + 1),"pageviews":\(base / 6 + 1)}],
          "referrers":[{"key":"l.instagram.com","name":"Instagram","visitors":\(base),"pageviews":\(base * 2)},{"key":"google.com","name":"Google 搜尋","visitors":\(base / 2),"pageviews":\(base)},{"key":"line.me","name":"LINE","visitors":\(base / 3),"pageviews":\(base / 2)},{"key":"chatgpt.com","name":"ChatGPT","visitors":\(base / 8 + 1),"pageviews":\(base / 8 + 1)}],
