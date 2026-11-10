@@ -124,6 +124,8 @@ final class AppModel {
     var sitePaths: [String: [Route]] = [:]
     /// 每個網站報表看的期間：概況、流量、營運報表、Google 搜尋共用（Sites/AnalyticsRange.swift）
     var analyticsRanges: [String: ReportRange] = [:]
+    /// 通知連到出貨單（/admin/orders/<id>/packing-slip）：打開那張訂單時直接帶出出貨單
+    var slipForOrder: String?
     /// iPad 側欄「平台管理」左邊選的那一頁（深連結、通知打開的也選在這裡）
     var consoleSection: ConsolePage = .customers
     /// iPad 側欄「平台管理」裡的下一層
@@ -615,7 +617,11 @@ final class AppModel {
         deckSheet = nil
         // 網站已經不在清單裡（被移出、停用）：回首頁
         let site = payload.site.flatMap { self.site($0) == nil ? nil : $0 }
-        switch Self.link(site: site, url: payload.url) {
+        let link = Self.link(site: site, url: payload.url)
+        if case .route(.order(_, let id)) = link, payload.url?.contains("/packing-slip") == true {
+            slipForOrder = id
+        }
+        switch link {
         case .route(let route):
             if case .order = route, orderSites.isEmpty {
                 open(.site(route.site))

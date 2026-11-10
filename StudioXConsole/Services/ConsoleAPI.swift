@@ -160,7 +160,7 @@ final class ConsoleAPI {
     }
 
     /// 只是查資料的工具：連線斷了可以放心重送（寫入一律要確認，不重送）
-    private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites"]
+    private static let readTools: Set<String> = ["list", "get", "search", "ops_report", "traffic_report", "search_report", "site_guide", "list_sites", "packing_slip"]
 
     private func json(_ data: Data) throws -> JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: data)
