@@ -114,7 +114,10 @@ struct SiteHomeView: View {
             .brandPage()
             .pageTitle(site.name)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
-            .toolbar { AskXenaToolbar(model: model) }
+            .toolbar {
+                if site.hasTraffic || site.hasOrders { AnalyticsRangeToolbar(siteID: site.id) }
+                AskXenaToolbar(model: model)
+            }
         } else {
             EmptyState(title: "找不到這個網站", message: "你可能已經不是這個網站的成員。")
                 .pageWidth()
@@ -173,7 +176,10 @@ struct SiteWorkspace: View {
             .brandPage()
             .pageTitle(site.name)
             .xenaFocus("site-\(site.id)", prompt: "幫我看一下「\(site.name)」（\(site.id)）最近怎麼樣")
-            .toolbar { AskXenaToolbar(model: model) }
+            .toolbar {
+                if site.hasTraffic || site.hasOrders { AnalyticsRangeToolbar(siteID: site.id) }
+                AskXenaToolbar(model: model)
+            }
         case .traffic:
             TrafficView(siteID: site.id)
         case .search:

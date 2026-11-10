@@ -181,6 +181,10 @@ struct TrafficView: View {
         if let picked, TrendInterval.options(days: days).contains(picked) { return picked }
         return TrendInterval.standard(days: days)
     }
+    /// 走勢的標題和導覽列的選單都用這個換級距
+    private var intervalBinding: Binding<TrendInterval> {
+        Binding(get: { interval }, set: { new in withAnimation(Motion.ease) { picked = new } })
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -219,6 +223,8 @@ struct TrafficView: View {
         .refreshable { await Task { await load() }.value }
         .brandPage()
         .pageTitle("流量")
+        // 往下捲、上面的區間列看不到了也能換：導覽列右上角的選單（區間＋走勢的級距）
+        .toolbar { AnalyticsRangeToolbar(siteID: siteID, interval: intervalBinding, intervals: TrendInterval.options(days: days)) }
         .task(id: "\(days)-\(interval.rawValue)") { await load() }
     }
 
@@ -247,31 +253,19 @@ struct TrafficView: View {
 
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                // 網站回的級距（舊版網站不認得 interval，照它實際給的寫）
-                Text(TrendInterval(rawValue: r.interval)?.heading ?? "每天")
-                    .textRole(.h4)
-                    .foregroundStyle(Theme.ink)
+                IntervalHeading(current: TrendInterval(rawValue: r.interval) ?? .day, options: TrendInterval.options(days: days), selection: intervalBinding)
                 Spacer()
                 HStack(spacing: 6) {
                     FilterChip(title: "訪客", selected: metric == .visitors) { metric = .visitors }
                     FilterChip(title: "瀏覽", selected: metric == .pageviews) { metric = .pageviews }
                 }
             }
-            let options = TrendInterval.options(days: days)
-            if options.count > 1 {
-                HStack(spacing: 6) {
-                    ForEach(options, id: \.self) { o in
-                        FilterChip(title: o.title, selected: interval == o) { picked = o }
-                    }
-                    Spacer()
-                    Text("兩指縮放")
-                        .textRole(.xs)
-                        .foregroundStyle(Theme.muted)
-                }
-            }
             TrafficChart(points: r.trend, metric: metric, zoomable: true)
                 .frame(height: sizeClass == .regular ? 300 : 220)
                 .animation(Motion.ease, value: metric)
+            Text("按住看數字・兩指縮放、放大後左右滑")
+                .textRole(.xs)
+                .foregroundStyle(Theme.muted)
         }
 
         if !r.funnel.isEmpty {
@@ -306,6 +300,43 @@ struct TrafficView: View {
 
         if !r.contentPages.isEmpty {
             ContentImpactView(pages: r.contentPages)
+        }
+    }
+}
+
+/// 走勢的標題「每天 ⌄」：按下去換每小時／每天／每週／每月（這段期間只有一種時就只是標題）。
+/// current 是網站實際回的級距（舊版網站不認得 interval 時照它給的寫）
+struct IntervalHeading: View {
+    let current: TrendInterval
+    let options: [TrendInterval]
+    @Binding var selection: TrendInterval
+
+    var body: some View {
+        if options.count > 1 {
+            Menu {
+                Picker("走勢", selection: $selection) {
+                    ForEach(options, id: \.self) { o in
+                        Text(o.heading).tag(o)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 5) {
+                    Text(current.heading)
+                        .textRole(.h4)
+                        .contentTransition(.numericText())
+                    HeroIcon("chevron-down", size: 13)
+                }
+                .foregroundStyle(Theme.ink)
+            }
+            .menuOrder(.fixed)
+            .accessibilityLabel("走勢：\(current.heading)，按兩下換")
+            .haptic(.selection, trigger: selection)
+        } else {
+            Text(current.heading)
+                .textRole(.h4)
+                .foregroundStyle(Theme.ink)
         }
     }
 }
@@ -649,6 +680,7 @@ struct SearchConsoleView: View {
         .refreshable { await Task { await load() }.value }
         .brandPage()
         .pageTitle("Google 搜尋")
+        .toolbar { AnalyticsRangeToolbar(siteID: siteID) }
         .task(id: days) { await load() }
     }
 

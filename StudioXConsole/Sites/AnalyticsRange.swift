@@ -82,3 +82,70 @@ struct AnalyticsRangeBar: View {
         }
     }
 }
+
+/// 導覽列上的區間（與級距）選單：頁面往下捲、上面的區間列看不到時也能直接換（導覽列一直在）。
+/// 按下去：今天／7 天…；有走勢的頁面再加上每小時／每天／每週／每月
+struct AnalyticsRangeMenu: View {
+    let siteID: String
+    /// 走勢的級距（流量頁才有）；nil＝這頁沒有走勢可以換
+    var interval: Binding<TrendInterval>?
+    var intervals: [TrendInterval] = []
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let days = model.analyticsRange(siteID)
+        Menu {
+            Section("時間區間") {
+                Picker("時間區間", selection: model.analyticsRangeBinding(siteID)) {
+                    ForEach(AnalyticsRange.presets, id: \.self) { d in
+                        Text(AnalyticsRange.title(d)).tag(d)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
+            if let interval, intervals.count > 1 {
+                Section("走勢") {
+                    Picker("走勢", selection: interval) {
+                        ForEach(intervals, id: \.self) { o in
+                            Text(o.heading).tag(o)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(label(days))
+                    .font(.brand(15, .semibold))
+                    .contentTransition(.numericText())
+                HeroIcon("chevron-down", size: 12)
+            }
+            .foregroundStyle(Theme.ink)
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("時間區間：\(label(days))")
+        .haptic(.selection, trigger: days)
+    }
+
+    private func label(_ days: Int) -> String {
+        if let interval, intervals.count > 1 {
+            return "\(AnalyticsRange.title(days))・\(interval.wrappedValue.heading)"
+        }
+        return AnalyticsRange.title(days)
+    }
+}
+
+/// 報表頁的導覽列：右上角的區間選單（AnalyticsRangeMenu）
+struct AnalyticsRangeToolbar: ToolbarContent {
+    let siteID: String
+    var interval: Binding<TrendInterval>?
+    var intervals: [TrendInterval] = []
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            AnalyticsRangeMenu(siteID: siteID, interval: interval, intervals: intervals)
+        }
+    }
+}

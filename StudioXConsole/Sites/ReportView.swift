@@ -69,6 +69,8 @@ struct OpsReportView: View {
         }
         .brandPage()
         .pageTitle("營運報表")
+        // 往下捲之後也能換區間
+        .toolbar { AnalyticsRangeToolbar(siteID: siteID) }
         .task(id: days) {
             await load()
             await loadQueue()
