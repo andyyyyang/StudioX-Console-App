@@ -14,6 +14,8 @@ struct OrderDetailView: View {
     @State private var error: String?
     @State private var proposal: Proposal?
     @State private var shipping = false
+    /// 出貨單（在 App 裡看、列印；不再跳去網站後台）
+    @State private var showingSlip = false
     /// 出貨之後改物流單號（打錯、換一箱寄）
     @State private var editingTracking = false
     @State private var refunding = false
@@ -72,6 +74,15 @@ struct OrderDetailView: View {
         .xenaFocus("order-\(site)-\(orderID)", prompt: "幫我看一下\(model.site(site)?.name ?? site)的訂單 \(detail?.summary.number ?? orderID)")
         .toolbar { AskXenaToolbar(model: model) }
         .task { await load() }
+        .sheet(isPresented: $showingSlip) {
+            PackingSlipView(site: site, orderIDs: [orderID])
+        }
+        // 點了「新訂單・已付款」的通知（按鈕是「看出貨單」）：打開訂單、直接帶出出貨單
+        .task(id: model.slipForOrder) {
+            guard model.slipForOrder == orderID else { return }
+            model.slipForOrder = nil
+            showingSlip = true
+        }
         // 出貨、改物流單號：一張卡片做完（單號 → 網站的確認內容 → 確認執行）
         .sheet(isPresented: $shipping) {
             ShipSheet(propose: { tracking in
@@ -439,8 +450,9 @@ struct OrderDetailView: View {
                 }
                 .buttonStyle(.brand(.ghost, fullWidth: true))
             }
-            if let slip = d.packingSlipURL {
-                Button { openURL(slip) } label: { Text("出貨單 ↗") }
+            // 網站有出貨單（packing_slip 工具，或舊版網站給的列印頁網址）：在 App 裡打開
+            if d.packingSlipURL != nil || model.site(site)?.tools.contains("packing_slip") == true {
+                Button { showingSlip = true } label: { Text("出貨單") }
                     .buttonStyle(.brand(.ghost, fullWidth: true))
             }
         }
